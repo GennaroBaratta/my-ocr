@@ -1,0 +1,1 @@
+When the project development MCP server is enabled and healthy, use it first for test execution, log inspection, local app navigation, and screenshots. If a repeated debugging workflow is missing, extend the development MCP server with a reusable tool, then add tests and documentation. Keep the server dev-only and easy to disable.

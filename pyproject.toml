@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "free-doc-extract"
+version = "0.1.0"
+description = "Local OCR and structured document extraction with GLM-OCR and Ollama"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+authors = [
+  { name = "OpenAI Assistant" }
+]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+pdf = [
+  "PyMuPDF>=1.24",
+]
+glmocr = [
+  "glmocr[selfhosted]",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

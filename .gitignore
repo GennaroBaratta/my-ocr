@@ -1,0 +1,22 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# Runtime artifacts
+data/raw/*
+data/runs/*
+data/reports/*
+
+# Keep tracked placeholders
+!data/raw/.gitkeep
+!data/runs/.gitkeep
+!data/reports/.gitkeep
+!data/gold/.gitkeep
