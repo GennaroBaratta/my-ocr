@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Upload Screen - FREE Doc Extract</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          "primary": "#4251f0",
+          "background-light": "#f6f6f8",
+          "background-dark": "#101222",
+        },
+        fontFamily: {
+          "display": ["Inter"]
+        },
+        borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+      },
+    },
+  }
+</script>
+<style>
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #0F1115;
+    color: #E2E8F0;
+  }
+</style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
+<!-- Shared TopNavBar Excluded based on Focus/Process Rule -->
+<!-- Minimal Header / Settings -->
+<header class="absolute top-0 right-0 p-6 w-full flex justify-end">
+<button class="text-[#94A3B8] hover:text-[#E2E8F0] transition-colors bg-[#181B21] p-2 rounded-md border border-[#2E333D]" title="Settings">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+</header>
+<!-- Main Container -->
+<main class="w-full max-w-[600px] px-6 sm:px-0 flex flex-col gap-8 z-10 mt-16 sm:mt-0">
+<!-- Header Text -->
+<div class="flex flex-col items-center gap-2 text-center">
+<h1 class="text-2xl font-semibold tracking-tight text-[#E2E8F0]">Extract Document Layouts</h1>
+<p class="text-sm text-[#94A3B8]">Upload a PDF or image scan for local OCR processing.</p>
+</div>
+<!-- Dropzone -->
+<div class="flex flex-col items-center justify-center gap-6 rounded-md border-2 border-dashed border-[#2E333D] bg-[#181B21] h-[400px] w-full hover:border-primary hover:bg-[#1A1D2B] transition-colors cursor-pointer group">
+<div class="flex flex-col items-center gap-4">
+<span class="material-symbols-outlined text-4xl text-[#94A3B8] group-hover:text-primary transition-colors" data-icon="upload_file">upload_file</span>
+<p class="text-[#E2E8F0] text-lg font-medium leading-tight tracking-[-0.015em] max-w-[480px] text-center">Drag &amp; drop PDF or image</p>
+</div>
+<button class="flex min-w-[84px] cursor-pointer items-center justify-center overflow-hidden rounded-md h-9 px-4 bg-[#22262E] text-[#E2E8F0] text-sm font-medium hover:bg-[#2E333D] transition-colors border border-[#2E333D]">
+<span class="truncate">Browse Files</span>
+</button>
+</div>
+<!-- Recent Runs -->
+<div class="flex flex-col w-full gap-3">
+<h3 class="text-[#94A3B8] text-xs font-semibold uppercase tracking-wider px-1">Recent Runs</h3>
+<div class="flex flex-col rounded-md border border-[#2E333D] bg-[#181B21] overflow-hidden">
+<!-- Row 1 -->
+<div class="flex items-center justify-between p-3 border-b border-[#2E333D] hover:bg-[#22262E] transition-colors cursor-pointer group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#94A3B8] text-sm group-hover:text-primary transition-colors" data-icon="description">description</span>
+<span class="text-sm font-medium text-[#E2E8F0]">invoice_scan_october.pdf</span>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-xs text-[#94A3B8]">Oct 24, 2023</span>
+<span class="px-2 py-0.5 rounded-full bg-[#1A261E] border border-[#21402B] text-[#48BB78] text-[10px] font-medium tracking-wide uppercase">Extracted</span>
+</div>
+</div>
+<!-- Row 2 -->
+<div class="flex items-center justify-between p-3 border-b border-[#2E333D] hover:bg-[#22262E] transition-colors cursor-pointer group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#94A3B8] text-sm group-hover:text-primary transition-colors" data-icon="description">description</span>
+<span class="text-sm font-medium text-[#E2E8F0]">w9_form_signed.png</span>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-xs text-[#94A3B8]">Oct 22, 2023</span>
+<span class="px-2 py-0.5 rounded-full bg-[#2A1E1C] border border-[#4A2624] text-[#F56565] text-[10px] font-medium tracking-wide uppercase">Failed</span>
+</div>
+</div>
+<!-- Row 3 -->
+<div class="flex items-center justify-between p-3 hover:bg-[#22262E] transition-colors cursor-pointer group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#94A3B8] text-sm group-hover:text-primary transition-colors" data-icon="description">description</span>
+<span class="text-sm font-medium text-[#E2E8F0]">research_paper_v2.pdf</span>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-xs text-[#94A3B8]">Oct 15, 2023</span>
+<span class="px-2 py-0.5 rounded-full bg-[#1A261E] border border-[#21402B] text-[#48BB78] text-[10px] font-medium tracking-wide uppercase">Extracted</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Floating Status Badge -->
+<div class="absolute bottom-6 left-6 flex items-center gap-2 bg-[#181B21] border border-[#2E333D] rounded-md px-3 py-1.5 shadow-sm">
+<div class="w-2 h-2 rounded-full bg-[#48BB78]"></div>
+<span class="text-xs font-medium text-[#E2E8F0] tracking-wide">Ollama: Ready</span>
+</div>
+</body></html>

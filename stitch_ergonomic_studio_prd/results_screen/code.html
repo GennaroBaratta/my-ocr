@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Results Screen - Doc Extract</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Fira+Code:wght@400;500&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          "primary": "#4251f0",
+          "background-light": "#f6f6f8",
+          "background-dark": "#0F1115",
+          "surface": "#181B21",
+          "surface-elevated": "#22262E",
+          "text-primary": "#E2E8F0",
+          "text-muted": "#94A3B8",
+          "border-color": "#2E333D",
+          "accent-box": "#F6E05E",
+          "success": "#48BB78",
+          "error": "#F56565"
+        },
+        fontFamily: {
+          "display": ["Inter", "sans-serif"],
+          "mono": ["Fira Code", "monospace"]
+        },
+        borderRadius: {"DEFAULT": "0.25rem", "md": "0.375rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+      },
+    },
+  }
+</script>
+<style>
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: theme('colors.background-dark');
+    color: theme('colors.text-primary');
+  }
+  .code-font {
+    font-family: 'Fira Code', monospace;
+  }
+  /* Custom scrollbar for dense panels */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: theme('colors.border-color');
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.text-muted');
+  }
+</style>
+</head>
+<body class="h-screen w-full overflow-hidden flex flex-col antialiased">
+<!-- Top Toolbar (Replacing Shared TopNavBar for focused workflow) -->
+<header class="flex items-center justify-between whitespace-nowrap border-b border-border-color bg-surface px-6 py-2 h-12 shrink-0">
+<div class="flex items-center gap-4">
+<button class="flex items-center justify-center text-text-muted hover:text-text-primary transition-colors cursor-pointer" title="Back to Workspace">
+<span class="material-symbols-outlined text-xl">arrow_back</span>
+</button>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-success text-sm" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<h2 class="text-text-primary text-sm font-semibold leading-tight">invoice_scan.pdf - Extraction Complete</h2>
+</div>
+</div>
+<div class="flex gap-3">
+<button class="flex h-8 cursor-pointer items-center justify-center rounded-md px-3 bg-surface-elevated text-text-primary hover:bg-border-color transition-colors text-sm font-medium border border-border-color gap-2">
+<span class="material-symbols-outlined text-[18px]">content_copy</span>
+<span>Copy to Clipboard</span>
+</button>
+<button class="flex h-8 cursor-pointer items-center justify-center rounded-md px-3 bg-primary text-white hover:bg-opacity-90 transition-colors text-sm font-medium gap-2 shadow-sm">
+<span class="material-symbols-outlined text-[18px]">download</span>
+<span>Download .json</span>
+</button>
+</div>
+</header>
+<!-- Main Split Workspace -->
+<main class="flex flex-1 overflow-hidden flex-col md:flex-row">
+<!-- Left Pane: Source View -->
+<div class="flex-1 flex flex-col bg-background-dark relative overflow-hidden h-full md:w-1/2">
+<!-- Sub-header -->
+<div class="h-10 border-b border-border-color bg-surface flex items-center px-4 shrink-0">
+<span class="text-xs font-medium text-text-muted uppercase tracking-wider">Source Document</span>
+<div class="ml-auto flex items-center gap-2">
+<button class="text-text-muted hover:text-text-primary"><span class="material-symbols-outlined text-[18px]">zoom_out</span></button>
+<span class="text-xs text-text-muted w-10 text-center font-mono">100%</span>
+<button class="text-text-muted hover:text-text-primary"><span class="material-symbols-outlined text-[18px]">zoom_in</span></button>
+</div>
+</div>
+<!-- Canvas Area -->
+<div class="flex-1 overflow-auto p-8 flex justify-center bg-background-dark">
+<div class="relative inline-block shadow-2xl bg-white">
+<!-- The Document Image -->
+<img alt="Scanned invoice document" class="max-w-[600px] h-auto block select-none pointer-events-none" data-alt="crisp scan of a standard business invoice with table rows and total amounts" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD2OWQPMFkFCYfRW6hLeX_XNba7kCy-5LtG1M8163epFeO_z1n_GF2sZqTCeDq6x1VKgkqKhNY4qxd__pRKCRT-H5YcMkd_fexY599SVO8npVaTCSAnR50ibaTDPxCV22Ryhuj6lbGMz9427uCn2OQvwBJFRBfAKJy1LCJqLy-mjCILzjQTnpojhOI_wVhl3mapfQroKXO1kF9dWlyo8R4aBwY-LvR-K7M151wuXd55Nf7sUY--roTHM8SkjLZ4iILCjUDgPsEgfxf_"/>
+<!-- Bounding Boxes Overlay (Simulated) -->
+<div class="absolute inset-0 pointer-events-none">
+<!-- Header Box -->
+<div class="absolute top-[5%] left-[5%] w-[40%] h-[15%] border border-accent-box bg-[rgba(246,224,94,0.1)] rounded-sm transition-all duration-200" id="box-vendor"></div>
+<!-- Invoice Details Box -->
+<div class="absolute top-[5%] right-[5%] w-[30%] h-[15%] border border-accent-box bg-[rgba(246,224,94,0.1)] rounded-sm transition-all duration-200" id="box-meta"></div>
+<!-- Line Items Table Box (Active State Example - Pulsing) -->
+<div class="absolute top-[25%] left-[5%] w-[90%] h-[50%] border-2 border-primary bg-[rgba(66,81,240,0.15)] rounded-sm transition-all duration-200" id="box-line-items"></div>
+<!-- Total Box -->
+<div class="absolute bottom-[10%] right-[5%] w-[30%] h-[10%] border border-accent-box bg-[rgba(246,224,94,0.1)] rounded-sm transition-all duration-200" id="box-total"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Draggable Splitter (Visual Only) -->
+<div class="h-2 md:h-full md:w-1 bg-border-color cursor-row-resize md:cursor-col-resize hover:bg-primary transition-colors z-10 flex items-center justify-center">
+<div class="w-8 h-1 md:w-1 md:h-8 bg-text-muted rounded-full"></div>
+</div>
+<!-- Right Pane: Data Editor View -->
+<div class="flex-1 flex flex-col bg-background-dark overflow-hidden h-full md:w-1/2">
+<!-- Editor Tabs -->
+<div class="h-10 border-b border-border-color bg-surface flex items-center px-2 shrink-0 overflow-x-auto">
+<div class="flex gap-1">
+<button class="px-4 h-10 border-b-2 border-transparent text-text-muted text-sm font-medium hover:text-text-primary transition-colors flex items-center justify-center">
+          Markdown
+        </button>
+<button class="px-4 h-10 border-b-2 border-primary text-text-primary text-sm font-medium flex items-center justify-center">
+          JSON
+        </button>
+<button class="px-4 h-10 border-b-2 border-transparent text-text-muted text-sm font-medium hover:text-text-primary transition-colors flex items-center justify-center">
+          Raw
+        </button>
+</div>
+</div>
+<!-- Code Editor Area -->
+<div class="flex-1 overflow-auto bg-background-dark p-4 code-font text-xs leading-relaxed text-text-primary">
+<pre class="m-0"><code class="language-json"><span class="text-text-muted">{</span>
+  <span class="text-[#f1fa8c]">"document_type"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"invoice"</span><span class="text-text-primary">,</span>
+  <span class="text-[#f1fa8c] hover:bg-surface-elevated cursor-pointer px-1 rounded -ml-1 transition-colors group" title="Highlights corresponding box">"vendor"</span><span class="text-text-primary">:</span> <span class="text-text-muted">{</span>
+    <span class="text-[#f1fa8c]">"name"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"Acme Corp"</span><span class="text-text-primary">,</span>
+    <span class="text-[#f1fa8c]">"address"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"123 Road, City, ST 12345"</span>
+  <span class="text-text-muted">}</span><span class="text-text-primary">,</span>
+  <span class="text-[#f1fa8c]">"metadata"</span><span class="text-text-primary">:</span> <span class="text-text-muted">{</span>
+    <span class="text-[#f1fa8c]">"invoice_number"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"INV-2023-001"</span><span class="text-text-primary">,</span>
+    <span class="text-[#f1fa8c]">"date"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"2023-10-27"</span>
+  <span class="text-text-muted">}</span><span class="text-text-primary">,</span>
+  <span class="bg-primary bg-opacity-20 px-1 py-0.5 rounded -ml-1">"line_items"</span><span class="text-text-primary">:</span> <span class="text-text-muted">[</span>
+    <span class="text-text-muted">{</span>
+      <span class="text-[#f1fa8c]">"description"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"Widget A"</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"quantity"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">10</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"unit_price"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">15.00</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"amount"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">150.00</span>
+    <span class="text-text-muted">}</span><span class="text-text-primary">,</span>
+    <span class="text-text-muted">{</span>
+      <span class="text-[#f1fa8c]">"description"</span><span class="text-text-primary">:</span> <span class="text-[#50fa7b]">"Service Fee"</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"quantity"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">1</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"unit_price"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">50.00</span><span class="text-text-primary">,</span>
+      <span class="text-[#f1fa8c]">"amount"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">50.00</span>
+    <span class="text-text-muted">}</span>
+  <span class="text-text-muted">]</span><span class="text-text-primary">,</span>
+  <span class="text-[#f1fa8c]">"totals"</span><span class="text-text-primary">:</span> <span class="text-text-muted">{</span>
+    <span class="text-[#f1fa8c]">"subtotal"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">200.00</span><span class="text-text-primary">,</span>
+    <span class="text-[#f1fa8c]">"tax"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">16.00</span><span class="text-text-primary">,</span>
+    <span class="text-[#f1fa8c]">"total_due"</span><span class="text-text-primary">:</span> <span class="text-[#bd93f9]">216.00</span>
+  <span class="text-text-muted">}</span>
+<span class="text-text-muted">}</span></code></pre>
+<!-- Example of streaming indicator -->
+<!-- <div class="mt-4 flex items-center gap-2 text-text-muted">
+        <span class="w-2 h-4 bg-primary animate-pulse inline-block"></span>
+        <span class="text-[10px] uppercase tracking-widest opacity-50">Streaming...</span>
+      </div> -->
+</div>
+</div>
+</main>
+</body></html>
