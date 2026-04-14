@@ -14,7 +14,7 @@ def normalize_document(input_path: str | Path, run_dir: str | Path) -> list[str]
     if not source.exists():
         raise FileNotFoundError(f"Input not found: {source}")
 
-    pages_dir = ensure_dir(Path(run_dir) / "pages")
+    pages_dir = _reset_pages_dir(Path(run_dir) / "pages")
 
     if source.is_dir():
         page_paths = sorted(
@@ -49,9 +49,10 @@ def render_pdf_to_images(pdf_path: str | Path, output_dir: str | Path) -> list[s
 
     rendered: list[str] = []
     with fitz.open(pdf_path) as document:
-        for index, page in enumerate(document, start=1):
+        for index in range(document.page_count):
+            page = document.load_page(index)
             pixmap = page.get_pixmap(dpi=200)
-            destination = output_dir / f"page-{index:04d}.png"
+            destination = output_dir / f"page-{index + 1:04d}.png"
             pixmap.save(destination)
             rendered.append(str(destination))
     return rendered
@@ -61,6 +62,12 @@ def _copy_page(source: Path, pages_dir: Path, index: int) -> str:
     destination = pages_dir / f"page-{index:04d}{source.suffix.lower()}"
     shutil.copy2(source, destination)
     return str(destination)
+
+
+def _reset_pages_dir(path: Path) -> Path:
+    if path.exists():
+        shutil.rmtree(path)
+    return ensure_dir(path)
 
 
 def _natural_sort_key(path: Path) -> list[int | str]:

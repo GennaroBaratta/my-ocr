@@ -6,6 +6,17 @@ from typing import Any
 from .utils import collapse_whitespace
 
 
+FIELD_NAMES = (
+    "document_type",
+    "title",
+    "authors",
+    "institution",
+    "date",
+    "language",
+    "summary_line",
+)
+
+
 JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -17,15 +28,7 @@ JSON_SCHEMA: dict[str, Any] = {
         "language": {"type": "string"},
         "summary_line": {"type": "string"},
     },
-    "required": [
-        "document_type",
-        "title",
-        "authors",
-        "institution",
-        "date",
-        "language",
-        "summary_line",
-    ],
+    "required": list(FIELD_NAMES),
 }
 
 

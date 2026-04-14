@@ -28,6 +28,14 @@ INSTITUTION_KEYWORDS = (
     "agency",
 )
 
+DOCUMENT_TYPE_MARKERS = (
+    ("invoice", ("invoice",)),
+    ("letter", ("dear ", "sincerely")),
+    ("form", ("form", "application")),
+    ("article", ("abstract", "references")),
+    ("report", ("report",)),
+)
+
 
 def extract_from_markdown(markdown: str) -> dict[str, Any]:
     lines = _clean_lines(markdown)
@@ -68,13 +76,7 @@ def _guess_title(lines: list[str]) -> str:
     if not title_candidates:
         return ""
     first = title_candidates[0]
-    if (
-        len(title_candidates) > 1
-        and len(first.split()) < 5
-        and len(title_candidates[1].split()) < 12
-        and not _looks_like_author_line(title_candidates[1])
-        and not any(keyword in title_candidates[1].lower() for keyword in INSTITUTION_KEYWORDS)
-    ):
+    if len(title_candidates) > 1 and _should_merge_title_lines(first, title_candidates[1]):
         combined = collapse_whitespace(f"{first} {title_candidates[1]}")
         return combined if len(combined) <= 160 else first
     return first
@@ -145,16 +147,9 @@ def _guess_language(markdown: str) -> str:
 
 def _guess_document_type(markdown: str) -> str:
     lowered = markdown.lower()
-    if "invoice" in lowered:
-        return "invoice"
-    if "dear " in lowered or "sincerely" in lowered:
-        return "letter"
-    if "form" in lowered or "application" in lowered:
-        return "form"
-    if "abstract" in lowered or "references" in lowered:
-        return "article"
-    if "report" in lowered:
-        return "report"
+    for document_type, markers in DOCUMENT_TYPE_MARKERS:
+        if any(marker in lowered for marker in markers):
+            return document_type
     return "document"
 
 
@@ -172,3 +167,11 @@ def _markdown_from_json(payload: dict[str, Any]) -> str:
     if "markdown" in payload and isinstance(payload["markdown"], str):
         return payload["markdown"]
     return collapse_whitespace(str(payload))
+
+
+def _should_merge_title_lines(first: str, second: str) -> bool:
+    if len(first.split()) >= 5 or len(second.split()) >= 12:
+        return False
+    if _looks_like_author_line(second):
+        return False
+    return not any(keyword in second.lower() for keyword in INSTITUTION_KEYWORDS)

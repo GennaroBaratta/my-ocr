@@ -4,18 +4,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .schema import DocumentFields
+from .schema import DocumentFields, FIELD_NAMES
 from .utils import ensure_dir, load_json, write_text
-
-FIELDS = [
-    "document_type",
-    "title",
-    "authors",
-    "institution",
-    "date",
-    "language",
-    "summary_line",
-]
 
 
 def evaluate_directories(gold_dir: str | Path, pred_dir: str | Path) -> dict[str, Any]:
@@ -43,7 +33,7 @@ def evaluate_directories(gold_dir: str | Path, pred_dir: str | Path) -> dict[str
 
 def compare_records(doc_id: str, gold: dict[str, Any], pred: dict[str, Any]) -> dict[str, Any]:
     field_results: dict[str, dict[str, Any]] = {}
-    for field in FIELDS:
+    for field in FIELD_NAMES:
         gold_value = gold.get(field, "")
         pred_value = pred.get(field, "")
         result = {
@@ -66,7 +56,7 @@ def summarize_comparisons(
 ) -> dict[str, Any]:
     total_docs = len(comparisons)
     field_summary: dict[str, dict[str, float]] = {}
-    for field in FIELDS:
+    for field in FIELD_NAMES:
         exact = sum(1 for comp in comparisons if comp["fields"][field]["exact_match"])
         missing = sum(1 for comp in comparisons if comp["fields"][field]["pred_missing"])
         summary = {

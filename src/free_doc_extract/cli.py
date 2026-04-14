@@ -15,7 +15,17 @@ from .extract_glmocr import (
 from .extract_rules import extract_from_markdown
 from .ingest import normalize_document
 from .ocr import run_ocr
-from .utils import ensure_dir, slugify, timestamp_id, write_json
+from .paths import RunPaths
+from .settings import DEFAULT_CONFIG_PATH, DEFAULT_LAYOUT_DEVICE, DEFAULT_RUN_ROOT
+from .utils import write_json
+from .workflows import (
+    evaluate_workflow,
+    run_ocr_workflow,
+    run_pipeline_workflow,
+    run_rules_workflow,
+    run_structured_workflow,
+    write_run_metadata as workflow_write_run_metadata,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,8 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     ocr_parser = subparsers.add_parser("ocr", help="Normalize input and run OCR")
     _add_input_args(ocr_parser)
-    ocr_parser.add_argument("--config", default="config/local.yaml")
-    ocr_parser.add_argument("--layout-device", default="cpu")
+    ocr_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
+    ocr_parser.add_argument("--layout-device", default=DEFAULT_LAYOUT_DEVICE)
     ocr_parser.set_defaults(func=cmd_ocr)
 
     rules_parser = subparsers.add_parser("extract-rules", help="Run rules baseline on OCR output")
@@ -48,8 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="Run OCR and rule extraction end to end")
     _add_input_args(run_parser)
-    run_parser.add_argument("--config", default="config/local.yaml")
-    run_parser.add_argument("--layout-device", default="cpu")
+    run_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
+    run_parser.add_argument("--layout-device", default=DEFAULT_LAYOUT_DEVICE)
     run_parser.set_defaults(func=cmd_run)
 
     return parser
@@ -63,68 +73,70 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_ocr(args: argparse.Namespace) -> Path:
-    run_dir = resolve_run_dir(args.run, args.run_root, args.input_path)
-    pages = normalize_document(args.input_path, run_dir)
-    result = run_ocr(
-        pages,
-        run_dir,
+    return run_ocr_workflow(
+        args.input_path,
+        run=args.run,
+        run_root=args.run_root,
         config_path=args.config,
         layout_device=args.layout_device,
+        normalize_document_fn=normalize_document,
+        run_ocr_fn=run_ocr,
+        write_json_fn=write_json,
     )
-    write_run_metadata(run_dir, args.input_path, pages, result)
-    return Path(run_dir)
 
 
 def cmd_extract_rules(args: argparse.Namespace) -> None:
-    run_dir = resolve_named_run_dir(args.run, args.run_root)
-    markdown_path = run_dir / "ocr.md"
-    if not markdown_path.exists():
-        raise FileNotFoundError(f"Missing OCR markdown: {markdown_path}")
-
-    prediction = extract_from_markdown(markdown_path.read_text(encoding="utf-8"))
-    pred_dir = ensure_dir(run_dir / "predictions")
-    write_json(pred_dir / "rules.json", prediction)
-    write_json(pred_dir / f"{run_dir.name}.json", prediction)
+    run_rules_workflow(
+        args.run,
+        run_root=args.run_root,
+        extract_from_markdown_fn=extract_from_markdown,
+        write_json_fn=write_json,
+    )
 
 
 def cmd_extract_glmocr(args: argparse.Namespace) -> None:
-    run_dir = resolve_named_run_dir(args.run, args.run_root)
-    page_paths = sorted(str(path) for path in (run_dir / "pages").iterdir() if path.is_file())
-    if not page_paths:
-        raise FileNotFoundError(f"No page images found in {run_dir / 'pages'}")
-
-    prediction, metadata = extract_structured(
-        page_paths,
+    run_structured_workflow(
+        args.run,
+        run_root=args.run_root,
         model=args.model,
         endpoint=args.endpoint,
+        extract_structured_fn=extract_structured,
+        save_structured_result_fn=save_structured_result,
+        write_json_fn=write_json,
     )
-    save_structured_result(run_dir, prediction, metadata)
-    write_json(run_dir / "predictions" / f"{run_dir.name}.json", prediction)
 
 
 def cmd_eval(args: argparse.Namespace) -> None:
-    report = evaluate_directories(args.gold_dir, args.pred_dir)
-    write_markdown_report(report, args.output)
+    report = evaluate_workflow(
+        args.gold_dir,
+        args.pred_dir,
+        args.output,
+        evaluate_directories_fn=evaluate_directories,
+        write_markdown_report_fn=write_markdown_report,
+    )
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    run_dir = cmd_ocr(args)
-    args.run = run_dir.name
-    cmd_extract_rules(args)
+    run_pipeline_workflow(
+        args.input_path,
+        run=args.run,
+        run_root=args.run_root,
+        config_path=args.config,
+        layout_device=args.layout_device,
+        normalize_document_fn=normalize_document,
+        run_ocr_fn=run_ocr,
+        extract_from_markdown_fn=extract_from_markdown,
+        write_json_fn=write_json,
+    )
 
 
 def resolve_run_dir(run: str | None, run_root: str, input_path: str) -> Path:
-    run_id = run or f"{slugify(Path(input_path).stem)}-{timestamp_id()}"
-    run_dir = ensure_dir(Path(run_root) / run_id)
-    return run_dir
+    return RunPaths.from_input(input_path, run=run, run_root=run_root).ensure_run_dir()
 
 
 def resolve_named_run_dir(run: str, run_root: str) -> Path:
-    run_dir = Path(run_root) / run
-    if not run_dir.exists():
-        raise FileNotFoundError(f"Run directory not found: {run_dir}")
-    return run_dir
+    return RunPaths.from_named_run(run, run_root=run_root).run_dir
 
 
 def write_run_metadata(
@@ -133,23 +145,24 @@ def write_run_metadata(
     page_paths: list[str],
     ocr_result: dict[str, Any],
 ) -> None:
-    payload = {
-        "input_path": str(input_path),
-        "page_paths": page_paths,
-        "ocr_raw_dir": ocr_result.get("raw_dir"),
-    }
-    write_json(Path(run_dir) / "meta.json", payload)
+    workflow_write_run_metadata(
+        run_dir,
+        input_path,
+        page_paths,
+        ocr_result,
+        write_json_fn=write_json,
+    )
 
 
 def _add_input_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("input_path")
     parser.add_argument("--run")
-    parser.add_argument("--run-root", default="data/runs")
+    parser.add_argument("--run-root", default=DEFAULT_RUN_ROOT)
 
 
 def _add_run_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run", required=True)
-    parser.add_argument("--run-root", default="data/runs")
+    parser.add_argument("--run-root", default=DEFAULT_RUN_ROOT)
 
 
 if __name__ == "__main__":

@@ -11,8 +11,8 @@ build/
 .DS_Store
 
 # Agent/skill artifacts
-.agents/skills/
-.claude/skills/
+.agents/
+.claude/
 skills-lock.json
 
 # Runtime artifacts
@@ -25,3 +25,5 @@ data/reports/*
 !data/runs/.gitkeep
 !data/reports/.gitkeep
 !data/gold/.gitkeep
+
+.qlty/

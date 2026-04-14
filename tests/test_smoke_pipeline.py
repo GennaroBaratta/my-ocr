@@ -100,3 +100,33 @@ def test_run_generates_run_id_when_omitted(tmp_path, monkeypatch) -> None:
     created_runs = [path for path in run_root.iterdir() if path.is_dir()]
     assert len(created_runs) == 1
     assert (created_runs[0] / "predictions" / f"{created_runs[0].name}.json").exists()
+
+
+def test_extract_glmocr_cli_writes_structured_prediction(tmp_path, monkeypatch) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo002"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    (pages_dir / "page-0001.png").write_bytes(b"fake image")
+
+    monkeypatch.setattr(
+        cli,
+        "extract_structured",
+        lambda page_paths, model, endpoint: (
+            {"title": "Sample"},
+            {"model": model, "endpoint": endpoint},
+        ),
+    )
+    monkeypatch.setattr(cli, "save_structured_result", lambda run_dir, prediction, metadata: None)
+    monkeypatch.setattr(
+        cli,
+        "write_json",
+        lambda path, payload: (
+            Path(path).parent.mkdir(parents=True, exist_ok=True),
+            Path(path).write_text(json.dumps(payload), encoding="utf-8"),
+        ),
+    )
+
+    cli.main(["extract-glmocr", "--run", "demo002", "--run-root", str(run_root)])
+
+    assert (run_dir / "predictions" / "demo002.json").exists()

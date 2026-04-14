@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
+from .ollama_client import encode_image_file, post_json
+from .paths import RunPaths
 from .schema import JSON_SCHEMA, DocumentFields
-from .utils import ensure_dir, write_json
+from .settings import (
+    DEFAULT_OLLAMA_ENDPOINT,
+    DEFAULT_OLLAMA_KEEP_ALIVE,
+    DEFAULT_OLLAMA_MODEL,
+)
+from .utils import write_json
 
-DEFAULT_MODEL = "glm-ocr:latest"
-DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
+DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 
 
 def extract_structured(
@@ -19,42 +23,16 @@ def extract_structured(
     *,
     model: str = DEFAULT_MODEL,
     endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    keep_alive: str = "15m",
-    timeout: int = 300,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not image_paths:
         raise ValueError("image_paths cannot be empty")
 
-    images = [
-        base64.b64encode(Path(image_path).read_bytes()).decode("utf-8")
-        for image_path in image_paths
-    ]
-    prompt = build_structured_prompt()
-
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "images": images,
-        "format": JSON_SCHEMA,
-        "stream": False,
-        "keep_alive": keep_alive,
-    }
-
-    request = Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    body = post_json(
+        endpoint=endpoint,
+        payload=_build_structured_payload(image_paths, model=model),
+        error_prefix="Ollama request",
+        opener=urlopen,
     )
-
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Ollama request failed: {exc.code} {detail}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Could not reach Ollama at {endpoint}") from exc
 
     if "response" not in body:
         raise RuntimeError(f"Ollama response missing 'response' field: {body}")
@@ -75,9 +53,9 @@ def extract_structured(
 def save_structured_result(
     run_dir: str | Path, prediction: dict[str, Any], metadata: dict[str, Any]
 ) -> None:
-    predictions_dir = ensure_dir(Path(run_dir) / "predictions")
-    write_json(predictions_dir / "glmocr_structured.json", prediction)
-    write_json(predictions_dir / "glmocr_structured_meta.json", metadata)
+    paths = RunPaths.from_run_dir(run_dir)
+    write_json(paths.structured_prediction_path, prediction)
+    write_json(paths.structured_metadata_path, metadata)
 
 
 def build_structured_prompt() -> str:
@@ -87,6 +65,17 @@ def build_structured_prompt() -> str:
         "If a field is unknown, return an empty string or empty list. "
         f"Use this schema exactly: {json.dumps(JSON_SCHEMA, ensure_ascii=False)}"
     )
+
+
+def _build_structured_payload(image_paths: list[str], *, model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "prompt": build_structured_prompt(),
+        "images": [encode_image_file(Path(image_path)) for image_path in image_paths],
+        "format": JSON_SCHEMA,
+        "stream": False,
+        "keep_alive": DEFAULT_OLLAMA_KEEP_ALIVE,
+    }
 
 
 def _parse_response_json(response_text: str) -> dict[str, Any]:
