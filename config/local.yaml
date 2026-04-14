@@ -5,6 +5,37 @@ pipeline:
   enable_layout: true
   layout:
     model_dir: PaddlePaddle/PP-DocLayoutV3_safetensors
+    label_task_mapping:
+      text:
+        - abstract
+        - algorithm
+        - content
+        - doc_title
+        - figure_title
+        - paragraph_title
+        - reference_content
+        - text
+        - vertical_text
+        - vision_footnote
+        - seal
+        - formula_number
+      table:
+        - table
+      formula:
+        - display_formula
+        - inline_formula
+      skip:
+        - chart
+        - image
+      abandon:
+        - header
+        - footer
+        - number
+        - footnote
+        - aside_text
+        - reference
+        - footer_image
+        - header_image
 
   ocr_api:
     api_host: localhost
