@@ -10,6 +10,11 @@ build/
 *.egg-info/
 .DS_Store
 
+# Agent/skill artifacts
+.agents/skills/
+.claude/skills/
+skills-lock.json
+
 # Runtime artifacts
 data/raw/*
 data/runs/*
