@@ -32,6 +32,12 @@ pdf = [
 glmocr = [
   "glmocr[selfhosted]",
 ]
+ui = [
+  "flet>=0.25",
+]
+
+[project.scripts]
+free-doc-extract-ui = "free_doc_extract.ui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
