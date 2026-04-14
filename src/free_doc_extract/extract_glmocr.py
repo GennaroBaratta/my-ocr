@@ -16,6 +16,7 @@ from .settings import (
 from .utils import write_json
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
+RAW_BODY_METADATA_KEY = "_raw_body"
 
 
 def extract_structured(
@@ -46,6 +47,7 @@ def extract_structured(
         "prompt_eval_count": body.get("prompt_eval_count"),
         "eval_count": body.get("eval_count"),
         "done": body.get("done"),
+        RAW_BODY_METADATA_KEY: body,
     }
     return parsed, metadata
 
@@ -54,8 +56,12 @@ def save_structured_result(
     run_dir: str | Path, prediction: dict[str, Any], metadata: dict[str, Any]
 ) -> None:
     paths = RunPaths.from_run_dir(run_dir)
+    metadata_payload = dict(metadata)
+    raw_body = metadata_payload.pop(RAW_BODY_METADATA_KEY, None)
     write_json(paths.structured_prediction_path, prediction)
-    write_json(paths.structured_metadata_path, metadata)
+    write_json(paths.structured_metadata_path, metadata_payload)
+    if raw_body is not None:
+        write_json(paths.structured_raw_path, raw_body)
 
 
 def build_structured_prompt() -> str:

@@ -84,6 +84,10 @@ class RunPaths:
         return self.predictions_dir / "glmocr_structured_meta.json"
 
     @property
+    def structured_raw_path(self) -> Path:
+        return self.predictions_dir / "glmocr_structured_raw.json"
+
+    @property
     def canonical_prediction_path(self) -> Path:
         return self.predictions_dir / f"{self.run_name}.json"
 

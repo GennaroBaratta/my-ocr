@@ -18,7 +18,7 @@ from .settings import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_RUN_ROOT,
 )
-from .utils import write_json
+from .utils import collapse_whitespace, load_json, write_json
 
 
 def run_ocr_workflow(
@@ -97,8 +97,20 @@ def run_structured_workflow(
         raise FileNotFoundError(f"No page images found in {paths.pages_dir}")
 
     prediction, metadata = extract_structured_fn(page_paths, model=model, endpoint=endpoint)
+    validation = _validate_structured_prediction(prediction)
+    canonical_prediction = prediction
+    canonical_source = "glmocr_structured"
+    if not validation["ok"] and paths.rules_prediction_path.exists():
+        canonical_prediction = load_json(paths.rules_prediction_path)
+        canonical_source = "rules"
+
+    metadata = {
+        **metadata,
+        "canonical_source": canonical_source,
+        "validation": validation,
+    }
     save_structured_result_fn(paths.run_dir, prediction, metadata)
-    write_json_fn(paths.canonical_prediction_path, prediction)
+    write_json_fn(paths.canonical_prediction_path, canonical_prediction)
 
 
 def run_pipeline_workflow(
@@ -198,3 +210,32 @@ def _replace_file(source: Path, target: Path) -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     source.replace(target)
+
+
+def _validate_structured_prediction(prediction: dict[str, Any]) -> dict[str, Any]:
+    reasons: list[str] = []
+    scalar_field_names = (
+        "document_type",
+        "title",
+        "institution",
+        "date",
+        "language",
+        "summary_line",
+    )
+    normalized_scalars = [
+        collapse_whitespace(str(prediction.get(name, ""))).lower() for name in scalar_field_names
+    ]
+    repeated_placeholder = {value for value in normalized_scalars if value}
+    if len(repeated_placeholder) == 1:
+        placeholder = next(iter(repeated_placeholder))
+        if placeholder in {"document", "unknown", "n/a", "none", "null"}:
+            reasons.append(f"all scalar fields collapsed to placeholder value {placeholder!r}")
+
+    authors = prediction.get("authors") or []
+    if not isinstance(authors, list):
+        authors = [str(authors)]
+    suspicious_author_tokens = {"[", "]", "{", "}", "[{", "}]", "```", "json"}
+    if any(collapse_whitespace(str(author)) in suspicious_author_tokens for author in authors):
+        reasons.append("authors field contains JSON fence or bracket fragments")
+
+    return {"ok": not reasons, "reasons": reasons}

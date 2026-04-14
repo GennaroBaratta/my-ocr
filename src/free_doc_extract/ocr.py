@@ -26,7 +26,7 @@ def run_ocr(
     run_dir: str | Path,
     *,
     config_path: str = "config/local.yaml",
-    layout_device: str = "cpu",
+    layout_device: str = "cuda",
 ) -> dict[str, Any]:
     if not page_paths:
         raise ValueError("page_paths cannot be empty")

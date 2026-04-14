@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from free_doc_extract.workflows import run_ocr_workflow, run_pipeline_workflow
+from free_doc_extract.workflows import (
+    run_ocr_workflow,
+    run_pipeline_workflow,
+    run_structured_workflow,
+)
 
 
 @pytest.mark.parametrize("failure_phase", ["normalize", "ocr"])
@@ -127,6 +131,66 @@ def test_run_pipeline_workflow_rerun_keeps_structured_outputs(tmp_path) -> None:
     }
     assert json.loads((run_dir / "predictions" / "demo001.json").read_text()) == {
         "rules": "replacement markdown"
+    }
+
+
+def test_run_structured_workflow_uses_rules_as_canonical_when_structured_output_is_suspicious(
+    tmp_path,
+) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo003"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    (pages_dir / "page-0001.png").write_bytes(b"fake image")
+
+    predictions_dir = run_dir / "predictions"
+    predictions_dir.mkdir(parents=True, exist_ok=True)
+    rules_prediction = {"title": "Home Assignment 8", "document_type": "report"}
+    (predictions_dir / "rules.json").write_text(json.dumps(rules_prediction), encoding="utf-8")
+
+    run_structured_workflow(
+        "demo003",
+        run_root=str(run_root),
+        extract_structured_fn=lambda page_paths, model, endpoint: (
+            {
+                "document_type": "document",
+                "title": "document",
+                "authors": ["[{"],
+                "institution": "document",
+                "date": "document",
+                "language": "document",
+                "summary_line": "document",
+            },
+            {
+                "model": model,
+                "_raw_body": {"response": '{"document_type":"document"}'},
+            },
+        ),
+    )
+
+    assert json.loads((predictions_dir / "glmocr_structured.json").read_text()) == {
+        "document_type": "document",
+        "title": "document",
+        "authors": ["[{"],
+        "institution": "document",
+        "date": "document",
+        "language": "document",
+        "summary_line": "document",
+    }
+    assert json.loads((predictions_dir / "demo003.json").read_text()) == rules_prediction
+    assert json.loads((predictions_dir / "glmocr_structured_meta.json").read_text()) == {
+        "model": "glm-ocr:latest",
+        "canonical_source": "rules",
+        "validation": {
+            "ok": False,
+            "reasons": [
+                "all scalar fields collapsed to placeholder value 'document'",
+                "authors field contains JSON fence or bracket fragments",
+            ],
+        },
+    }
+    assert json.loads((predictions_dir / "glmocr_structured_raw.json").read_text()) == {
+        "response": '{"document_type":"document"}'
     }
 
 

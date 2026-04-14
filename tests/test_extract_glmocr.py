@@ -57,6 +57,7 @@ def test_extract_structured_parses_response_and_returns_metadata(tmp_path, monke
     assert captured["body"]["images"] and captured["body"]["stream"] is False
     assert parsed["title"] == "Sample"
     assert metadata["done"] is True
+    assert metadata["_raw_body"]["response"].startswith("```json")
 
 
 def test_extract_structured_surfaces_request_errors(tmp_path, monkeypatch) -> None:
@@ -98,7 +99,7 @@ def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
     save_structured_result(
         tmp_path,
         {"title": "Sample"},
-        {"model": "glm-ocr:latest"},
+        {"model": "glm-ocr:latest", "_raw_body": {"response": '{"title":"Sample"}'}},
     )
 
     pred_dir = tmp_path / "predictions"
@@ -107,4 +108,7 @@ def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
     }
     assert json.loads((pred_dir / "glmocr_structured_meta.json").read_text(encoding="utf-8")) == {
         "model": "glm-ocr:latest"
+    }
+    assert json.loads((pred_dir / "glmocr_structured_raw.json").read_text(encoding="utf-8")) == {
+        "response": '{"title":"Sample"}'
     }
