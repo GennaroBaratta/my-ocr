@@ -1,69 +1,211 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from . import ocr_fallback as _ocr_fallback
+from .ingest import IMAGE_SUFFIXES
+from .ocr_fallback import (
+    assess_crop_fallback,
+    detect_bbox_coord_space,
+    extract_layout_blocks,
+    has_meaningful_text,
+    reconstruct_markdown_from_layout,
+    recognize_full_page,
+    run_crop_fallback_for_page,
+)
 from .paths import RunPaths
-from .utils import write_json, write_text
-
-_build_text_chunks = _ocr_fallback.build_text_chunks
-_clean_recognized_text = _ocr_fallback.clean_recognized_text
-_needs_crop_fallback = _ocr_fallback.needs_crop_fallback
-_run_crop_fallback_for_page = _ocr_fallback.run_crop_fallback_for_page
-
-
-@dataclass(slots=True)
-class ProcessedOcrPage:
-    markdown: str
-    json_result: Any
-    fallback_page: dict[str, Any] | None = None
+from .settings import resolve_ocr_api_client
+from .utils import load_json, write_json, write_text
 
 
 def run_ocr(
-    page_paths: list[str],
+    page_paths: Sequence[str | Path],
     run_dir: str | Path,
     *,
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
 ) -> dict[str, Any]:
-    if not page_paths:
-        raise ValueError("page_paths cannot be empty")
+    normalized_page_paths = _normalize_page_paths(page_paths)
 
     parser_cls = _load_glmocr_parser()
     paths = RunPaths.from_run_dir(run_dir)
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
+    model, endpoint, num_ctx = resolve_ocr_api_client(config_path)
+
+    pages: list[dict[str, Any]] = []
+    fallback_pages: list[dict[str, Any]] = []
+    source_counts: dict[str, int] = {}
 
     with parser_cls(config_path=config_path, layout_device=layout_device) as parser:
-        processed_pages = [
-            _process_page_result(
-                page_number=index,
-                page_path=page_paths[index - 1],
-                result=result,
-                paths=paths,
+        for page_number, page_path in enumerate(normalized_page_paths, start=1):
+            page_result, fallback_result = _run_page_ocr(
+                parser,
+                page_path,
+                page_number,
+                paths,
+                model=model,
+                endpoint=endpoint,
+                num_ctx=num_ctx,
             )
-            for index, result in enumerate(_parse_pages(parser, page_paths), start=1)
-        ]
+            pages.append(page_result)
+            source = str(page_result["markdown_source"])
+            source_counts[source] = source_counts.get(source, 0) + 1
+            if fallback_result is not None:
+                fallback_pages.append(fallback_result)
 
-    markdown = _join_markdown_pages(page.markdown for page in processed_pages)
-    json_result = _combine_json_pages([page.json_result for page in processed_pages])
-    fallback_pages = [
-        page.fallback_page for page in processed_pages if page.fallback_page is not None
-    ]
+    markdown = "\n\n".join(page["markdown"] for page in pages if page["markdown"].strip())
+    json_result = {
+        "pages": pages,
+        "summary": {
+            "page_count": len(pages),
+            "sources": source_counts,
+        },
+    }
 
     write_text(paths.ocr_markdown_path, markdown)
     write_json(paths.ocr_json_path, json_result)
     if fallback_pages:
-        write_json(paths.ocr_fallback_path, fallback_pages)
+        write_json(
+            paths.ocr_fallback_path,
+            {
+                "pages": fallback_pages,
+                "summary": {"page_count": len(fallback_pages)},
+            },
+        )
 
     return {
         "markdown": markdown,
         "json": json_result,
         "raw_dir": str(paths.raw_dir),
-        "fallback_used": bool(fallback_pages),
+        "config_path": config_path,
+        "layout_device": layout_device,
     }
+
+
+def _normalize_page_paths(page_paths: Sequence[str | Path]) -> list[str]:
+    if isinstance(page_paths, (str, Path)):
+        candidates = [page_paths]
+    else:
+        candidates = list(page_paths)
+
+    if not candidates:
+        raise ValueError("At least one normalized page image is required.")
+
+    normalized: list[str] = []
+    for raw_path in candidates:
+        page_path = Path(raw_path)
+        if page_path.is_dir():
+            raise ValueError("run_ocr expects page image files, not directories.")
+        if not page_path.exists():
+            raise FileNotFoundError(f"Page image not found: {page_path}")
+        if page_path.suffix.lower() not in IMAGE_SUFFIXES:
+            raise ValueError(
+                f"run_ocr expects normalized page images. Unsupported page input: {page_path.name}"
+            )
+        normalized.append(str(page_path))
+    return normalized
+
+
+def _run_page_ocr(
+    parser: Any,
+    page_path: str,
+    page_number: int,
+    paths: RunPaths,
+    *,
+    model: str,
+    endpoint: str,
+    num_ctx: int,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    result = parser.parse(page_path)
+    result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
+    if isinstance(result_dict, dict) and result_dict.get("error"):
+        raise RuntimeError(f"OCR failed for {page_path}: {result_dict['error']}")
+
+    if not hasattr(result, "save"):
+        raise RuntimeError("GLM-OCR result.save() is required to load saved *_model.json.")
+
+    result.save(output_dir=str(paths.raw_dir))
+
+    sdk_markdown = (getattr(result, "markdown_result", "") or "").strip()
+    sdk_json = _load_saved_model_json(paths.raw_dir, page_path)
+    blocks = extract_layout_blocks(sdk_json)
+    coord_space = _detect_coord_space(blocks, page_path)
+    assessment = assess_crop_fallback(sdk_markdown, sdk_json, coord_space=coord_space)
+    layout_markdown = reconstruct_markdown_from_layout(sdk_json)
+
+    fallback_result: dict[str, Any] | None = None
+
+    if has_meaningful_text(sdk_markdown):
+        markdown_source = "sdk_markdown"
+        final_markdown = sdk_markdown
+    elif has_meaningful_text(layout_markdown):
+        markdown_source = "layout_json"
+        final_markdown = layout_markdown
+    elif assessment["ocr_block_count"] > 0:
+        crop_markdown, recognized_chunks = run_crop_fallback_for_page(
+            page_path=page_path,
+            page_json=sdk_json,
+            coord_space=coord_space,
+            page_fallback_dir=paths.fallback_page_dir(page_number),
+            model=model,
+            endpoint=endpoint,
+            num_ctx=num_ctx,
+        )
+        crop_markdown = crop_markdown.strip()
+        fallback_result = {
+            "page_number": page_number,
+            "page_path": page_path,
+            "assessment": assessment,
+            "chunks": recognized_chunks,
+        }
+        if has_meaningful_text(crop_markdown):
+            markdown_source = "crop_fallback"
+            final_markdown = crop_markdown
+            fallback_result["markdown"] = crop_markdown
+            fallback_result["markdown_source"] = markdown_source
+        else:
+            full_page_markdown = recognize_full_page(
+                page_path,
+                model=model,
+                endpoint=endpoint,
+                num_ctx=num_ctx,
+            ).strip()
+            markdown_source = "full_page_fallback"
+            final_markdown = full_page_markdown
+            fallback_result["markdown"] = full_page_markdown
+            fallback_result["markdown_source"] = markdown_source
+    else:
+        full_page_markdown = recognize_full_page(
+            page_path,
+            model=model,
+            endpoint=endpoint,
+            num_ctx=num_ctx,
+        ).strip()
+        markdown_source = "full_page_fallback"
+        final_markdown = full_page_markdown
+        fallback_result = {
+            "page_number": page_number,
+            "page_path": page_path,
+            "assessment": assessment,
+            "chunks": [],
+            "markdown": full_page_markdown,
+            "markdown_source": markdown_source,
+        }
+
+    return (
+        {
+            "page_number": page_number,
+            "page_path": page_path,
+            "markdown": final_markdown,
+            "markdown_source": markdown_source,
+            "sdk_markdown": sdk_markdown,
+            "sdk_json": sdk_json,
+            "fallback_assessment": assessment,
+        },
+        fallback_result,
+    )
 
 
 def _load_glmocr_parser() -> type:
@@ -76,73 +218,23 @@ def _load_glmocr_parser() -> type:
     return GlmOcr
 
 
-def _parse_pages(parser: Any, page_paths: list[str]) -> list[Any]:
-    if len(page_paths) == 1:
-        return [parser.parse(page_paths[0])]
-
-    parse_inputs: list[str | bytes | Path] = list(page_paths)
-    return list(parser.parse(parse_inputs))
-
-
-def _process_page_result(
-    *,
-    page_number: int,
-    page_path: str,
-    result: Any,
-    paths: RunPaths,
-) -> ProcessedOcrPage:
-    result.save(output_dir=str(paths.raw_page_dir(page_number)))
-
-    page_markdown = getattr(result, "markdown_result", "") or ""
-    page_json = getattr(result, "json_result", {}) or {}
-    page_layout_json = getattr(result, "raw_json_result", None) or page_json
-    effective_markdown, fallback_page = _maybe_apply_crop_fallback(
-        page_number=page_number,
-        page_path=page_path,
-        page_markdown=page_markdown,
-        page_layout_json=page_layout_json,
-        paths=paths,
-    )
-    return ProcessedOcrPage(
-        markdown=effective_markdown,
-        json_result=page_json,
-        fallback_page=fallback_page,
-    )
-
-
-def _maybe_apply_crop_fallback(
-    *,
-    page_number: int,
-    page_path: str,
-    page_markdown: str,
-    page_layout_json: Any,
-    paths: RunPaths,
-) -> tuple[str, dict[str, Any] | None]:
-    if not _needs_crop_fallback(page_markdown, page_layout_json):
-        return page_markdown, None
+def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
+    if not blocks:
+        return "unknown"
 
     try:
-        fallback_markdown, fallback_meta = _run_crop_fallback_for_page(
-            page_path=page_path,
-            page_json=page_layout_json,
-            page_fallback_dir=paths.fallback_page_dir(page_number),
-        )
-    except (RuntimeError, ValueError, TypeError) as exc:
-        fallback_markdown = ""
-        fallback_meta = [{"chunk": 0, "text": "", "error": str(exc)}]
+        from PIL import Image
+    except ImportError:
+        return detect_bbox_coord_space(blocks)
 
-    fallback_page = {
-        "page": page_number,
-        "page_path": page_path,
-        "recovered_text": bool(fallback_markdown),
-        "chunks": fallback_meta,
-    }
-    return fallback_markdown or page_markdown, fallback_page
+    with Image.open(page_path) as image:
+        width, height = image.size
+    return detect_bbox_coord_space(blocks, width=width, height=height)
 
 
-def _join_markdown_pages(markdown_parts: Iterable[str]) -> str:
-    return "\n\n---\n\n".join(part for part in markdown_parts if part)
-
-
-def _combine_json_pages(json_parts: list[Any]) -> Any:
-    return json_parts[0] if len(json_parts) == 1 else json_parts
+def _load_saved_model_json(raw_dir: str | Path, page_path: str) -> Any:
+    page_stem = Path(page_path).stem
+    model_path = Path(raw_dir) / page_stem / f"{page_stem}_model.json"
+    if not model_path.exists():
+        raise FileNotFoundError(f"Missing saved GLM-OCR model JSON: {model_path}")
+    return load_json(model_path)

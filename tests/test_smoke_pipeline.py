@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from free_doc_extract import cli
+from free_doc_extract.experimental import extract_glmocr
 
 
 def test_smoke_pipeline_with_stubbed_ocr(tmp_path, monkeypatch) -> None:
@@ -110,14 +111,21 @@ def test_extract_glmocr_cli_writes_structured_prediction(tmp_path, monkeypatch) 
     (pages_dir / "page-0001.png").write_bytes(b"fake image")
 
     monkeypatch.setattr(
-        cli,
+        extract_glmocr,
         "extract_structured",
-        lambda page_paths, model, endpoint: (
+        lambda page_paths, *, markdown_text, config_path, model, endpoint: (
             {"title": "Sample"},
-            {"model": model, "endpoint": endpoint},
+            {
+                "model": model,
+                "endpoint": endpoint,
+                "config_path": config_path,
+                "markdown_text": markdown_text,
+            },
         ),
     )
-    monkeypatch.setattr(cli, "save_structured_result", lambda run_dir, prediction, metadata: None)
+    monkeypatch.setattr(
+        extract_glmocr, "save_structured_result", lambda run_dir, prediction, metadata: None
+    )
     monkeypatch.setattr(
         cli,
         "write_json",

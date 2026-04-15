@@ -4,7 +4,7 @@ Local OCR and document-field extraction pipeline built around GLM-OCR + Ollama.
 
 ## What it does
 
-1. Ingest a PDF, image, or directory of page images.
+1. Ingest a PDF or image.
 2. Normalize input into ordered page images.
 3. Run local OCR through GLM-OCR via Ollama.
 4. Save OCR markdown, JSON, and raw SDK artifacts.
@@ -33,7 +33,8 @@ free-doc-extract/
     ingest.py
     ocr.py
     extract_rules.py
-    extract_glmocr.py
+    experimental/
+      extract_glmocr.py
     schema.py
     evaluate.py
     utils.py
@@ -82,9 +83,8 @@ uv run pip install -e .[dev,pdf,glmocr]
 ### 2. Pull and serve the model
 
 ```bash
-ollama pull glm-ocr:latest
-# fallback for lower-memory machines
-# ollama pull glm-ocr:q8_0
+ollama pull glm-ocr-8k
+# or update config/local.yaml to point at a different local model tag
 
 ollama serve
 ```
@@ -120,6 +120,8 @@ Writes:
 - `data/runs/demo001/predictions/rules.json`
 
 ### Run direct structured extraction through Ollama
+
+This path is experimental and lives under `src/free_doc_extract/experimental/`.
 
 ```bash
 uv run python -m free_doc_extract.cli extract-glmocr --run demo001
@@ -177,7 +179,7 @@ make report RUN_ID=demo001
 ## Known limitations
 
 - PDF rasterization requires the `pdf` extra (`PyMuPDF`).
-- The direct structured extractor currently sends all page images in one request; very large documents may need page chunking.
+- The experimental direct structured extractor prefers OCR markdown and otherwise falls back to the first page image; very large pages can still stress Ollama.
 - Language detection in the rules baseline is heuristic.
 - The rule extractor is intentionally simple and should be treated as a baseline, not a production parser.
 

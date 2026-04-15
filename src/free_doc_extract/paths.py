@@ -102,7 +102,7 @@ class RunPaths:
 
     def reset_ocr_artifacts(self) -> None:
         _reset_dir(self.raw_dir)
-        _reset_dir(self.fallback_dir)
+        _remove_dir(self.fallback_dir)
         _remove_file(self.ocr_markdown_path)
         _remove_file(self.ocr_json_path)
         _remove_file(self.ocr_fallback_path)
@@ -136,3 +136,9 @@ def _remove_file(path: str | Path) -> None:
     target = Path(path)
     if target.exists():
         target.unlink()
+
+
+def _remove_dir(path: str | Path) -> None:
+    target = Path(path)
+    if target.exists():
+        shutil.rmtree(target)
