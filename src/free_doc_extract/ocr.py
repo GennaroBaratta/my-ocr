@@ -6,11 +6,10 @@ from typing import Any
 
 from .ingest import IMAGE_SUFFIXES
 from .ocr_fallback import (
-    assess_crop_fallback,
     detect_bbox_coord_space,
     extract_layout_blocks,
     has_meaningful_text,
-    reconstruct_markdown_from_layout,
+    plan_page_ocr,
     recognize_full_page,
     run_crop_fallback_for_page,
 )
@@ -129,25 +128,25 @@ def _run_page_ocr(
     result.save(output_dir=str(paths.raw_dir))
 
     sdk_markdown = (getattr(result, "markdown_result", "") or "").strip()
-    sdk_json = _load_saved_model_json(paths.raw_dir, page_path)
+    sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path)
+    sdk_json = load_json(sdk_json_path)
     blocks = extract_layout_blocks(sdk_json)
     coord_space = _detect_coord_space(blocks, page_path)
-    assessment = assess_crop_fallback(sdk_markdown, sdk_json, coord_space=coord_space)
-    layout_markdown = reconstruct_markdown_from_layout(sdk_json)
+    plan = plan_page_ocr(sdk_markdown, sdk_json, coord_space=coord_space)
 
     fallback_result: dict[str, Any] | None = None
 
-    if has_meaningful_text(sdk_markdown):
-        markdown_source = "sdk_markdown"
+    if plan.primary_source == "sdk_markdown":
+        markdown_source = plan.primary_source
         final_markdown = sdk_markdown
-    elif has_meaningful_text(layout_markdown):
-        markdown_source = "layout_json"
-        final_markdown = layout_markdown
-    elif assessment["ocr_block_count"] > 0:
+    elif plan.primary_source == "layout_json":
+        markdown_source = plan.primary_source
+        final_markdown = plan.layout_markdown
+    elif plan.primary_source == "crop_fallback":
         crop_markdown, recognized_chunks = run_crop_fallback_for_page(
             page_path=page_path,
             page_json=sdk_json,
-            coord_space=coord_space,
+            coord_space=plan.coord_space,
             page_fallback_dir=paths.fallback_page_dir(page_number),
             model=model,
             endpoint=endpoint,
@@ -157,38 +156,39 @@ def _run_page_ocr(
         fallback_result = {
             "page_number": page_number,
             "page_path": page_path,
-            "assessment": assessment,
+            "assessment": plan.assessment,
             "chunks": recognized_chunks,
         }
         if has_meaningful_text(crop_markdown):
-            markdown_source = "crop_fallback"
+            markdown_source = plan.primary_source
             final_markdown = crop_markdown
             fallback_result["markdown"] = crop_markdown
             fallback_result["markdown_source"] = markdown_source
         else:
-            full_page_markdown = recognize_full_page(
+            fallback_source = plan.fallback_source or "full_page_fallback"
+            full_page_markdown = _recognize_full_page_markdown(
                 page_path,
                 model=model,
                 endpoint=endpoint,
                 num_ctx=num_ctx,
-            ).strip()
-            markdown_source = "full_page_fallback"
+            )
+            markdown_source = fallback_source
             final_markdown = full_page_markdown
             fallback_result["markdown"] = full_page_markdown
             fallback_result["markdown_source"] = markdown_source
     else:
-        full_page_markdown = recognize_full_page(
+        full_page_markdown = _recognize_full_page_markdown(
             page_path,
             model=model,
             endpoint=endpoint,
             num_ctx=num_ctx,
-        ).strip()
-        markdown_source = "full_page_fallback"
+        )
+        markdown_source = plan.primary_source
         final_markdown = full_page_markdown
         fallback_result = {
             "page_number": page_number,
             "page_path": page_path,
-            "assessment": assessment,
+            "assessment": plan.assessment,
             "chunks": [],
             "markdown": full_page_markdown,
             "markdown_source": markdown_source,
@@ -201,8 +201,8 @@ def _run_page_ocr(
             "markdown": final_markdown,
             "markdown_source": markdown_source,
             "sdk_markdown": sdk_markdown,
-            "sdk_json": sdk_json,
-            "fallback_assessment": assessment,
+            "sdk_json_path": str(sdk_json_path),
+            "fallback_assessment": plan.assessment,
         },
         fallback_result,
     )
@@ -232,9 +232,24 @@ def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
     return detect_bbox_coord_space(blocks, width=width, height=height)
 
 
-def _load_saved_model_json(raw_dir: str | Path, page_path: str) -> Any:
+def _resolve_saved_model_json_path(raw_dir: str | Path, page_path: str) -> Path:
     page_stem = Path(page_path).stem
     model_path = Path(raw_dir) / page_stem / f"{page_stem}_model.json"
     if not model_path.exists():
         raise FileNotFoundError(f"Missing saved GLM-OCR model JSON: {model_path}")
-    return load_json(model_path)
+    return model_path
+
+
+def _recognize_full_page_markdown(
+    page_path: str,
+    *,
+    model: str,
+    endpoint: str,
+    num_ctx: int,
+) -> str:
+    return recognize_full_page(
+        page_path,
+        model=model,
+        endpoint=endpoint,
+        num_ctx=num_ctx,
+    ).strip()

@@ -64,7 +64,7 @@ class FakeGlmOcr:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, _exc_type, _exc, _tb):
         return None
 
     def parse(self, input_path: str):
@@ -93,7 +93,12 @@ def test_run_ocr_uses_page_images_and_public_outputs(tmp_path, monkeypatch) -> N
     assert FakeGlmOcr.calls == [str(source)]
     assert result["markdown"] == "# doc"
     assert result["json"]["summary"] == {"page_count": 1, "sources": {"sdk_markdown": 1}}
-    assert result["json"]["pages"][0]["sdk_json"] == {"doc": "page-0001.png"}
+    assert result["json"]["pages"][0]["sdk_json_path"] == str(
+        tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    )
+    assert json.loads(
+        Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8")
+    ) == {"doc": "page-0001.png"}
     assert result["config_path"] == "config/local.yaml"
     assert result["layout_device"] == "cuda"
     assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "# doc"
@@ -218,8 +223,8 @@ def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
             )
 
     monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=EmptyGlmOcr))
-    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", lambda **kwargs: ("", []))
-    monkeypatch.setattr(ocr, "recognize_full_page", lambda *args, **kwargs: "Full page text")
+    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", lambda **_kwargs: ("", []))
+    monkeypatch.setattr(ocr, "recognize_full_page", lambda *_args, **_kwargs: "Full page text")
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
@@ -309,7 +314,10 @@ def test_run_ocr_always_loads_saved_model_json(tmp_path, monkeypatch) -> None:
     assert captured["page_json"] == {
         "blocks": [{"label": "table", "content": "", "bbox_2d": [100, 100, 500, 500], "index": 2}]
     }
-    assert result["json"]["pages"][0]["sdk_json"] == captured["page_json"]
+    assert (
+        json.loads(Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8"))
+        == captured["page_json"]
+    )
     assert result["json"]["pages"][0]["markdown_source"] == "crop_fallback"
 
 
@@ -342,7 +350,7 @@ def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path, monke
     monkeypatch.setattr(
         ocr_fallback,
         "recognize_text_image",
-        lambda *args, **kwargs: (
+        lambda *_args, **_kwargs: (
             "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
         ),
     )

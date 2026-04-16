@@ -220,6 +220,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pillow" },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -246,6 +247,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=10" },
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]
 provides-extras = ["dev", "pdf", "glmocr"]

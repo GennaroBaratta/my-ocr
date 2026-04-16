@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
-from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .ollama_client import encode_image_file, post_json
 from .settings import (
@@ -12,6 +12,7 @@ from .settings import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
 )
+from .text_normalization import normalize_table_html
 from .utils import ensure_dir, write_text
 
 TEXT_RECOGNITION_PROMPT = "Text Recognition:"
@@ -39,54 +40,100 @@ BOX_PADDING_X = 8
 BOX_PADDING_Y = 6
 
 
-def assess_crop_fallback(
-    markdown: str,
+@dataclass(frozen=True, slots=True)
+class PageOcrPlan:
+    assessment: dict[str, Any]
+    coord_space: str
+    layout_markdown: str
+    primary_source: Literal[
+        "sdk_markdown",
+        "layout_json",
+        "crop_fallback",
+        "full_page_fallback",
+    ]
+    fallback_source: Literal["full_page_fallback"] | None = None
+
+
+def plan_page_ocr(
+    sdk_markdown: str,
     page_json: Any,
     *,
     coord_space: str | None = None,
-) -> dict[str, Any]:
+) -> PageOcrPlan:
     blocks = extract_layout_blocks(page_json)
     ocr_blocks = [block for block in blocks if block.get("label") in OCR_LABELS]
     text_blocks = [block for block in ocr_blocks if block.get("label") in TEXT_LABELS]
     meaningful_block_text = [
         clean_recognized_text(str(block.get("content", ""))) for block in ocr_blocks
     ]
-    meaningful_markdown = has_meaningful_text(markdown)
     structured_layout_payload = isinstance(page_json, (dict, list))
+    layout_markdown = reconstruct_markdown_from_layout(page_json)
+    resolved_coord_space = coord_space or "unknown"
 
-    if meaningful_markdown:
+    if has_meaningful_text(sdk_markdown):
+        primary_source = "sdk_markdown"
         reason = "markdown_present"
-        use_fallback = False
+        fallback_source = None
     elif not structured_layout_payload:
+        primary_source = "full_page_fallback"
         reason = "empty_markdown_and_unusable_json"
-        use_fallback = True
-    elif any(meaningful_block_text):
+        fallback_source = None
+    elif has_meaningful_text(layout_markdown):
+        primary_source = "layout_json"
         reason = "empty_markdown_but_layout_has_text"
-        use_fallback = False
+        fallback_source = None
     elif ocr_blocks:
+        primary_source = "crop_fallback"
         reason = "empty_markdown_and_empty_layout_text"
-        use_fallback = True
+        fallback_source = "full_page_fallback"
     elif blocks:
+        primary_source = "full_page_fallback"
         reason = "empty_markdown_and_no_text_regions"
-        use_fallback = True
+        fallback_source = None
     else:
+        primary_source = "full_page_fallback"
         reason = "empty_markdown_and_no_layout_blocks"
-        use_fallback = True
+        fallback_source = None
 
-    return {
-        "use_fallback": use_fallback,
+    assessment = {
+        "use_fallback": primary_source in {"crop_fallback", "full_page_fallback"},
         "reason": reason,
         "structured_layout_payload": structured_layout_payload,
         "layout_block_count": len(blocks),
         "ocr_block_count": len(ocr_blocks),
         "text_block_count": len(text_blocks),
         "meaningful_text_block_count": sum(1 for text in meaningful_block_text if text),
-        "bbox_coord_space": coord_space or "unknown",
+        "bbox_coord_space": resolved_coord_space,
     }
 
-
-def needs_crop_fallback(markdown: str, page_json: Any) -> bool:
-    return bool(assess_crop_fallback(markdown, page_json)["use_fallback"])
+    if primary_source == "sdk_markdown":
+        return PageOcrPlan(
+            assessment=assessment,
+            coord_space=resolved_coord_space,
+            layout_markdown=layout_markdown,
+            primary_source=primary_source,
+        )
+    if primary_source == "layout_json":
+        return PageOcrPlan(
+            assessment=assessment,
+            coord_space=resolved_coord_space,
+            layout_markdown=layout_markdown,
+            primary_source=primary_source,
+        )
+    if primary_source == "crop_fallback":
+        return PageOcrPlan(
+            assessment=assessment,
+            coord_space=resolved_coord_space,
+            layout_markdown=layout_markdown,
+            primary_source=primary_source,
+            fallback_source=fallback_source,
+        )
+    return PageOcrPlan(
+        assessment=assessment,
+        coord_space=resolved_coord_space,
+        layout_markdown=layout_markdown,
+        primary_source=primary_source,
+    )
 
 
 def run_crop_fallback_for_page(
@@ -247,16 +294,6 @@ def build_ocr_chunks(
     return chunks
 
 
-def build_text_chunks(
-    page_json: Any,
-    *,
-    width: int,
-    height: int,
-    coord_space: str | None = None,
-) -> list[dict[str, Any]]:
-    return build_ocr_chunks(page_json, width=width, height=height, coord_space=coord_space)
-
-
 def resolve_ocr_task(label: str) -> str:
     if label in TABLE_LABELS:
         return "table"
@@ -370,42 +407,6 @@ def clean_recognized_text(value: str) -> str:
         return ""
     lines = [line.rstrip() for line in text.splitlines()]
     return "\n".join(line for line in lines if line.strip()).strip()
-
-
-class _TableHtmlToTextParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.rows: list[list[str]] = []
-        self._current_row: list[str] | None = None
-        self._current_cell: list[str] | None = None
-
-    def handle_starttag(self, tag: str, attrs):
-        if tag == "tr":
-            self._current_row = []
-        elif tag in {"td", "th"}:
-            self._current_cell = []
-
-    def handle_endtag(self, tag: str):
-        if tag in {"td", "th"} and self._current_row is not None and self._current_cell is not None:
-            cell_text = " ".join("".join(self._current_cell).split())
-            self._current_row.append(cell_text)
-            self._current_cell = None
-        elif tag == "tr" and self._current_row is not None:
-            if any(cell for cell in self._current_row):
-                self.rows.append(self._current_row)
-            self._current_row = None
-
-    def handle_data(self, data: str):
-        if self._current_cell is not None:
-            self._current_cell.append(data)
-
-
-def normalize_table_html(text: str) -> str:
-    parser = _TableHtmlToTextParser()
-    parser.feed(text)
-    parser.close()
-    rows = [row for row in parser.rows if any(cell.strip() for cell in row)]
-    return "\n".join(" | ".join(cell.strip() for cell in row) for row in rows).strip()
 
 
 def has_meaningful_text(value: str) -> bool:

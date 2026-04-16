@@ -109,6 +109,9 @@ Artifacts are written to `data/runs/demo001/`:
 - `ocr.json`
 - `meta.json`
 
+`ocr.json` stores project-owned OCR results per page and references the saved GLM-OCR payload via
+`sdk_json_path`. Raw vendor JSON remains under `ocr_raw/` and is not embedded into `ocr.json`.
+
 ### Run rule-based extraction over OCR
 
 ```bash

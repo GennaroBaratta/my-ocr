@@ -14,8 +14,6 @@ from .paths import RunPaths
 from .settings import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,
-    DEFAULT_OLLAMA_ENDPOINT,
-    DEFAULT_OLLAMA_MODEL,
     DEFAULT_RUN_ROOT,
 )
 from .utils import collapse_whitespace, load_json, write_json
@@ -134,9 +132,7 @@ def run_structured_workflow(
         )
         _clear_structured_outputs(paths, keep_metadata=True)
         return
-    validation = _validate_structured_prediction(prediction)
-    if markdown_text:
-        validation = _validate_structured_prediction(prediction, source_text=markdown_text)
+    validation = _validate_structured_prediction(prediction, source_text=markdown_text)
     canonical_prediction = prediction
     canonical_source = "glmocr_structured"
     if not validation["ok"] and paths.rules_prediction_path.exists():
@@ -225,87 +221,175 @@ def _create_staged_ocr_paths(paths: RunPaths) -> RunPaths:
 
 
 def _publish_staged_ocr_run(source_paths: RunPaths, target_paths: RunPaths) -> None:
-    _replace_dir(source_paths.pages_dir, target_paths.pages_dir)
-    _replace_dir(source_paths.raw_dir, target_paths.raw_dir)
-    _replace_file(source_paths.ocr_markdown_path, target_paths.ocr_markdown_path)
-    _replace_file(source_paths.ocr_json_path, target_paths.ocr_json_path)
-    _replace_optional_dir(source_paths.fallback_dir, target_paths.fallback_dir)
-    _replace_file(source_paths.ocr_fallback_path, target_paths.ocr_fallback_path)
-    _rewrite_published_run_paths(
-        target_paths.ocr_json_path, source_paths.run_dir, target_paths.run_dir
+    backup_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{target_paths.run_name}-ocr-backup-", dir=str(target_paths.run_dir.parent)
+        )
     )
-    _rewrite_published_run_paths(
-        target_paths.ocr_fallback_path, source_paths.run_dir, target_paths.run_dir
+    backup_paths = RunPaths.from_run_dir(backup_dir)
+    backed_up_pairs: list[tuple[Path, Path]] = []
+    published_pairs: list[tuple[Path, Path]] = []
+    try:
+        _move_ocr_artifacts(target_paths, backup_paths, moved_pairs=backed_up_pairs)
+        _move_ocr_artifacts(source_paths, target_paths, moved_pairs=published_pairs)
+        _normalize_published_ocr_artifacts(
+            target_paths,
+            source_run_dir=source_paths.run_dir,
+            target_run_dir=target_paths.run_dir,
+        )
+    except Exception:
+        try:
+            _remove_paths([target for _, target in published_pairs])
+            _restore_moved_artifacts(backed_up_pairs)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "Failed to restore OCR artifacts after publish failure."
+            ) from restore_exc
+        raise
+    finally:
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
+
+def _move_ocr_artifacts(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    moved_pairs: list[tuple[Path, Path]] | None = None,
+) -> None:
+    for source, target in _ocr_artifact_pairs(source_paths, target_paths):
+        if not source.exists():
+            continue
+        _move_path(source, target)
+        if moved_pairs is not None:
+            moved_pairs.append((source, target))
+
+
+def _restore_moved_artifacts(moved_pairs: list[tuple[Path, Path]]) -> None:
+    for source, target in reversed(moved_pairs):
+        _move_path(target, source)
+
+
+def _remove_ocr_artifacts(paths: RunPaths) -> None:
+    for target in paths.published_ocr_artifact_paths():
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink()
+
+
+def _remove_paths(paths: list[Path]) -> None:
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists():
+            path.unlink()
+
+
+def _ocr_artifact_pairs(source_paths: RunPaths, target_paths: RunPaths) -> list[tuple[Path, Path]]:
+    return list(
+        zip(
+            source_paths.published_ocr_artifact_paths(),
+            target_paths.published_ocr_artifact_paths(),
+            strict=True,
+        )
     )
 
 
-def _replace_dir(source: Path, target: Path) -> None:
+def _move_path(source: Path, target: Path) -> None:
     if target.exists():
-        shutil.rmtree(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not source.exists():
-        target.mkdir(parents=True, exist_ok=True)
-        return
-    source.replace(target)
-
-
-def _replace_file(source: Path, target: Path) -> None:
-    if target.exists():
-        target.unlink()
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
     if not source.exists():
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     source.replace(target)
 
 
-def _replace_optional_dir(source: Path, target: Path) -> None:
-    if target.exists():
-        shutil.rmtree(target)
-    if not source.exists():
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    source.replace(target)
+def _normalize_published_ocr_artifacts(
+    paths: RunPaths, *, source_run_dir: str | Path, target_run_dir: str | Path
+) -> None:
+    _normalize_published_ocr_json(
+        paths.ocr_json_path,
+        source_run_dir=source_run_dir,
+        target_run_dir=target_run_dir,
+    )
+    _normalize_published_fallback_json(
+        paths.ocr_fallback_path,
+        source_run_dir=source_run_dir,
+        target_run_dir=target_run_dir,
+    )
 
 
-def _rewrite_published_run_paths(
-    payload_path: Path, source_run_dir: str | Path, target_run_dir: str | Path
+def _normalize_published_ocr_json(
+    payload_path: Path, *, source_run_dir: str | Path, target_run_dir: str | Path
+) -> None:
+    _normalize_published_json_paths(
+        payload_path,
+        source_run_dir=source_run_dir,
+        target_run_dir=target_run_dir,
+        page_keys=("page_path", "sdk_json_path"),
+    )
+
+
+def _normalize_published_fallback_json(
+    payload_path: Path, *, source_run_dir: str | Path, target_run_dir: str | Path
+) -> None:
+    _normalize_published_json_paths(
+        payload_path,
+        source_run_dir=source_run_dir,
+        target_run_dir=target_run_dir,
+        page_keys=("page_path",),
+        chunk_keys=("crop_path", "text_path"),
+    )
+
+
+def _normalize_published_json_paths(
+    payload_path: Path,
+    *,
+    source_run_dir: str | Path,
+    target_run_dir: str | Path,
+    page_keys: tuple[str, ...],
+    chunk_keys: tuple[str, ...] = (),
 ) -> None:
     if not payload_path.exists():
         return
 
+    payload = load_json(payload_path)
+    if not isinstance(payload, dict):
+        return
+
     source_prefix = str(source_run_dir)
     target_prefix = str(target_run_dir)
-    payload = load_json(payload_path)
-    rewritten = _rewrite_path_strings(payload, source_prefix, target_prefix)
-    write_json(payload_path, rewritten)
+    pages = payload.get("pages")
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            _rewrite_path_keys(page, page_keys, source_prefix, target_prefix)
+            chunks = page.get("chunks")
+            if not chunk_keys or not isinstance(chunks, list):
+                continue
+            for chunk in chunks:
+                if not isinstance(chunk, dict):
+                    continue
+                _rewrite_path_keys(chunk, chunk_keys, source_prefix, target_prefix)
+    write_json(payload_path, payload)
 
 
-def _rewrite_path_strings(
-    payload: Any,
-    source_prefix: str,
-    target_prefix: str,
-    *,
-    parent_key: str | None = None,
-) -> Any:
-    if isinstance(payload, dict):
-        return {
-            key: _rewrite_path_strings(value, source_prefix, target_prefix, parent_key=key)
-            for key, value in payload.items()
-        }
-    if isinstance(payload, list):
-        return [
-            _rewrite_path_strings(value, source_prefix, target_prefix, parent_key=parent_key)
-            for value in payload
-        ]
-    if isinstance(payload, str) and source_prefix in payload and _is_path_like_key(parent_key):
-        return payload.replace(source_prefix, target_prefix)
-    return payload
+def _rewrite_path_keys(
+    payload: dict[str, Any], keys: tuple[str, ...], source_prefix: str, target_prefix: str
+) -> None:
+    for key in keys:
+        if key in payload:
+            payload[key] = _rewrite_path_value(payload.get(key), source_prefix, target_prefix)
 
 
-def _is_path_like_key(key: str | None) -> bool:
-    if key is None:
-        return False
-    return key.endswith(("_path", "_paths", "_dir"))
+def _rewrite_path_value(value: Any, source_prefix: str, target_prefix: str) -> Any:
+    if isinstance(value, str) and source_prefix in value:
+        return value.replace(source_prefix, target_prefix)
+    return value
 
 
 def _clear_structured_outputs(paths: RunPaths, *, keep_metadata: bool = False) -> None:

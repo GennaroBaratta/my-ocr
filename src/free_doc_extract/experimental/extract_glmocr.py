@@ -16,6 +16,7 @@ from ..settings import (
     DEFAULT_OLLAMA_NUM_CTX,
     resolve_ocr_api_client,
 )
+from ..text_normalization import replace_html_tables
 from ..utils import write_json
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
@@ -132,30 +133,11 @@ def build_structured_prompt() -> str:
 
 
 def _clean_structured_input_text(markdown_text: str) -> str:
-    text = _html_table_to_markdownish(markdown_text)
+    text = replace_html_tables(markdown_text)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
-def _html_table_to_markdownish(text: str) -> str:
-    if "<table" not in text.lower():
-        return text
-
-    def replace_table(match: re.Match[str]) -> str:
-        table_html = match.group(0)
-        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, flags=re.I | re.S)
-        rendered_rows: list[str] = []
-        for row in rows:
-            cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, flags=re.I | re.S)
-            cleaned_cells = [re.sub(r"<[^>]+>", " ", cell) for cell in cells]
-            cleaned_cells = [re.sub(r"\s+", " ", cell).strip() for cell in cleaned_cells]
-            if cleaned_cells:
-                rendered_rows.append(" | ".join(cleaned_cells))
-        return "\n".join(rendered_rows)
-
-    return re.sub(r"<table[^>]*>.*?</table>", replace_table, text, flags=re.I | re.S)
 
 
 def _build_structured_image_payload(
