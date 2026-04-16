@@ -56,6 +56,108 @@ def test_run_ocr_workflow_preserves_existing_run_on_failure(tmp_path, failure_ph
     }
 
 
+def test_run_ocr_workflow_restores_existing_run_when_metadata_write_fails(tmp_path) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo013"
+    seed_existing_run(run_dir)
+    (run_dir / "meta.json").write_text('{"status": "existing"}', encoding="utf-8")
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"%PDF-1.4 stub")
+
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+        run_dir_path = Path(run_dir_arg)
+        raw_dir = run_dir_path / "ocr_raw" / "page-0001"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        sdk_json_path = raw_dir / "page-0001_model.json"
+        sdk_json_path.write_text("{}", encoding="utf-8")
+        (run_dir_path / "ocr.md").write_text("replacement markdown", encoding="utf-8")
+        (run_dir_path / "ocr.json").write_text(
+            json.dumps(
+                {
+                    "pages": [
+                        build_ocr_page(
+                            page_path=str(run_dir_path / "pages" / "page-0001.png"),
+                            sdk_json_path=str(sdk_json_path),
+                        )
+                    ],
+                    "summary": {"page_count": 1, "sources": {"sdk_markdown": 1}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "markdown": "replacement markdown",
+            "json": {"replacement": True},
+            "raw_dir": str(raw_dir.parent),
+            "config_path": config_path,
+            "layout_device": layout_device,
+        }
+
+    def failing_write_json(path: str | Path, payload) -> None:
+        if Path(path).name == "meta.json":
+            raise RuntimeError("metadata write failed")
+        Path(path).write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="metadata write failed"):
+        run_ocr_workflow(
+            str(source),
+            run="demo013",
+            run_root=str(run_root),
+            normalize_document_fn=normalize_to_single_page,
+            run_ocr_fn=fake_run_ocr,
+            write_json_fn=failing_write_json,
+        )
+
+    assert (run_dir / "pages" / "page-0001.png").read_bytes() == b"existing page"
+    assert (run_dir / "ocr.md").read_text(encoding="utf-8") == "existing markdown"
+    assert json.loads((run_dir / "ocr.json").read_text(encoding="utf-8")) == {"existing": True}
+    assert json.loads(
+        (run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json").read_text(encoding="utf-8")
+    ) == {"legacy": True}
+    assert json.loads((run_dir / "meta.json").read_text(encoding="utf-8")) == {"status": "existing"}
+
+
+def test_run_ocr_workflow_removes_new_run_dir_when_failure_happens_before_publish(tmp_path) -> None:
+    run_root = tmp_path / "runs"
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"%PDF-1.4 stub")
+
+    def failing_normalize(_input_path: str, _run_dir_arg: str | Path) -> list[str]:
+        raise ValueError("unsupported input")
+
+    with pytest.raises(ValueError, match="unsupported input"):
+        run_ocr_workflow(
+            str(source),
+            run="demo014",
+            run_root=str(run_root),
+            normalize_document_fn=failing_normalize,
+        )
+
+    assert not (run_root / "demo014").exists()
+
+
+def test_run_ocr_workflow_removes_new_run_dir_when_staging_setup_fails(
+    tmp_path, monkeypatch
+) -> None:
+    run_root = tmp_path / "runs"
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"%PDF-1.4 stub")
+
+    def failing_create_staging(_paths):
+        raise RuntimeError("staging setup failed")
+
+    monkeypatch.setattr(workflows, "_create_staged_ocr_paths", failing_create_staging)
+
+    with pytest.raises(RuntimeError, match="staging setup failed"):
+        run_ocr_workflow(
+            str(source),
+            run="demo015",
+            run_root=str(run_root),
+        )
+
+    assert not (run_root / "demo015").exists()
+
+
 def test_run_ocr_workflow_rerun_keeps_existing_predictions(tmp_path) -> None:
     run_root = tmp_path / "runs"
     run_dir = run_root / "demo001"
@@ -683,3 +785,77 @@ def test_run_ocr_workflow_restores_existing_run_when_backup_move_fails(
     assert json.loads((run_dir / "predictions" / "demo011.json").read_text(encoding="utf-8")) == {
         "canonical": "keep-me"
     }
+
+
+def test_run_ocr_workflow_preserves_backup_when_restore_fails_midway(tmp_path, monkeypatch) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo012"
+    seed_existing_run(run_dir)
+    source = tmp_path / "sample.pdf"
+    source.write_bytes(b"%PDF-1.4 stub")
+
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+        run_dir_path = Path(run_dir_arg)
+        raw_dir = run_dir_path / "ocr_raw" / "page-0001"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        sdk_json_path = raw_dir / "page-0001_model.json"
+        sdk_json_path.write_text("{}", encoding="utf-8")
+        (run_dir_path / "ocr.md").write_text("replacement markdown", encoding="utf-8")
+        (run_dir_path / "ocr.json").write_text(
+            json.dumps(
+                {
+                    "pages": [
+                        build_ocr_page(
+                            page_path=str(run_dir_path / "pages" / "page-0001.png"),
+                            sdk_json_path=str(sdk_json_path),
+                        )
+                    ],
+                    "summary": {"page_count": 1, "sources": {"sdk_markdown": 1}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "markdown": "replacement markdown",
+            "json": {"replacement": True},
+            "raw_dir": str(raw_dir.parent),
+            "config_path": config_path,
+            "layout_device": layout_device,
+        }
+
+    def failing_normalize_publish(*_args, **_kwargs) -> None:
+        raise RuntimeError("publish normalize failed")
+
+    real_copy_path = workflows._copy_path
+    restore_copy_calls = 0
+
+    def flaky_copy_path(source_path: Path, target_path: Path) -> None:
+        nonlocal restore_copy_calls
+        restore_copy_calls += 1
+        if restore_copy_calls == 2:
+            raise RuntimeError("restore failed")
+        real_copy_path(source_path, target_path)
+
+    monkeypatch.setattr(workflows, "_normalize_published_ocr_artifacts", failing_normalize_publish)
+    monkeypatch.setattr(workflows, "_copy_path", flaky_copy_path)
+
+    with pytest.raises(RuntimeError, match="Backup preserved at"):
+        run_ocr_workflow(
+            str(source),
+            run="demo012",
+            run_root=str(run_root),
+            normalize_document_fn=normalize_to_single_page,
+            run_ocr_fn=fake_run_ocr,
+        )
+
+    backup_dirs = [
+        path for path in run_root.iterdir() if path.name.startswith(".demo012-ocr-backup-")
+    ]
+    assert len(backup_dirs) == 1
+    backup_dir = backup_dirs[0]
+    assert (backup_dir / "pages" / "page-0001.png").read_bytes() == b"existing page"
+    assert (backup_dir / "ocr.md").read_text(encoding="utf-8") == "existing markdown"
+    assert json.loads((backup_dir / "ocr.json").read_text(encoding="utf-8")) == {"existing": True}
+    assert json.loads(
+        (backup_dir / "ocr_raw" / "page-0001" / "page-0001_model.json").read_text(encoding="utf-8")
+    ) == {"legacy": True}

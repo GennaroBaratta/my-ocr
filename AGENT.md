@@ -40,6 +40,10 @@ If delegating, launch the specialist in the same turn you mention it.
 - OCR runs are staged into a temp dir first, then published.
 - Publish/replace only OCR-owned artifacts, not predictions.
 - Publish must be transactional: back up current OCR artifacts, move staged artifacts into place, normalize published JSON paths, and restore the backup if publish fails.
+- Treat `meta.json` as part of the same publish transaction. A metadata-write failure must roll back published OCR artifacts and restore the previous metadata state.
+- Keep the backup alive until all post-publish steps succeed, including metadata writing. Do **not** delete the backup if restore fails.
+- Restore from backup non-destructively. If rollback fails mid-restore, the preserved backup must still contain the full pre-publish state.
+- For brand-new runs, failures before or during staging/publish must not leave behind an empty run directory that looks valid to downstream commands.
 - After publish, rewrite only schema-owned path fields:
   - `ocr.json`: `page_path`, `sdk_json_path`
   - `ocr_fallback.json`: `page_path`, `crop_path`, `text_path`

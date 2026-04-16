@@ -31,9 +31,10 @@ def run_ocr_workflow(
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
 ) -> Path:
     paths = RunPaths.from_input(input_path, run=run, run_root=run_root)
+    run_dir_preexisted = paths.run_dir.exists()
     paths.ensure_run_dir()
-    staged_paths = _create_staged_ocr_paths(paths)
     try:
+        staged_paths = _create_staged_ocr_paths(paths)
         page_paths = normalize_document_fn(input_path, staged_paths.run_dir)
         result = run_ocr_fn(
             page_paths,
@@ -41,21 +42,28 @@ def run_ocr_workflow(
             config_path=config_path,
             layout_device=layout_device,
         )
-        _publish_staged_ocr_run(staged_paths, paths)
+        _publish_staged_ocr_run(
+            staged_paths,
+            paths,
+            post_publish=lambda: write_run_metadata(
+                paths.run_dir,
+                input_path,
+                paths.list_page_paths(),
+                {
+                    **result,
+                    "raw_dir": str(paths.raw_dir),
+                },
+                write_json_fn=write_json_fn,
+            ),
+        )
+    except Exception:
+        if not run_dir_preexisted:
+            _remove_dir_if_empty(paths.run_dir)
+        raise
     finally:
-        shutil.rmtree(staged_paths.run_dir, ignore_errors=True)
-
-    final_pages = paths.list_page_paths()
-    write_run_metadata(
-        paths.run_dir,
-        input_path,
-        final_pages,
-        {
-            **result,
-            "raw_dir": str(paths.raw_dir),
-        },
-        write_json_fn=write_json_fn,
-    )
+        staged_paths_local = locals().get("staged_paths")
+        if staged_paths_local is not None:
+            shutil.rmtree(staged_paths_local.run_dir, ignore_errors=True)
     return paths.run_dir
 
 
@@ -220,7 +228,12 @@ def _create_staged_ocr_paths(paths: RunPaths) -> RunPaths:
     return RunPaths.from_run_dir(staging_dir)
 
 
-def _publish_staged_ocr_run(source_paths: RunPaths, target_paths: RunPaths) -> None:
+def _publish_staged_ocr_run(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    post_publish: Callable[[], None] | None = None,
+) -> None:
     backup_dir = Path(
         tempfile.mkdtemp(
             prefix=f".{target_paths.run_name}-ocr-backup-", dir=str(target_paths.run_dir.parent)
@@ -230,6 +243,9 @@ def _publish_staged_ocr_run(source_paths: RunPaths, target_paths: RunPaths) -> N
     backed_up_pairs: list[tuple[Path, Path]] = []
     published_pairs: list[tuple[Path, Path]] = []
     try:
+        if target_paths.meta_path.exists():
+            _move_path(target_paths.meta_path, backup_paths.meta_path)
+            backed_up_pairs.append((target_paths.meta_path, backup_paths.meta_path))
         _move_ocr_artifacts(target_paths, backup_paths, moved_pairs=backed_up_pairs)
         _move_ocr_artifacts(source_paths, target_paths, moved_pairs=published_pairs)
         _normalize_published_ocr_artifacts(
@@ -237,17 +253,20 @@ def _publish_staged_ocr_run(source_paths: RunPaths, target_paths: RunPaths) -> N
             source_run_dir=source_paths.run_dir,
             target_run_dir=target_paths.run_dir,
         )
+        if post_publish is not None:
+            post_publish()
     except Exception:
         try:
-            _remove_paths([target for _, target in published_pairs])
+            _remove_paths([target_paths.meta_path, *[target for _, target in published_pairs]])
             _restore_moved_artifacts(backed_up_pairs)
         except Exception as restore_exc:
             raise RuntimeError(
-                "Failed to restore OCR artifacts after publish failure."
+                "Failed to restore OCR artifacts after publish failure. "
+                f"Backup preserved at {backup_dir}."
             ) from restore_exc
-        raise
-    finally:
         shutil.rmtree(backup_dir, ignore_errors=True)
+        raise
+    shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def _move_ocr_artifacts(
@@ -266,7 +285,7 @@ def _move_ocr_artifacts(
 
 def _restore_moved_artifacts(moved_pairs: list[tuple[Path, Path]]) -> None:
     for source, target in reversed(moved_pairs):
-        _move_path(target, source)
+        _copy_path(target, source)
 
 
 def _remove_ocr_artifacts(paths: RunPaths) -> None:
@@ -305,6 +324,21 @@ def _move_path(source: Path, target: Path) -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     source.replace(target)
+
+
+def _copy_path(source: Path, target: Path) -> None:
+    if target.exists():
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    if not source.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
 
 
 def _normalize_published_ocr_artifacts(
@@ -401,6 +435,12 @@ def _clear_structured_outputs(paths: RunPaths, *, keep_metadata: bool = False) -
             path.unlink()
     if not keep_metadata and paths.structured_metadata_path.exists():
         paths.structured_metadata_path.unlink()
+
+
+def _remove_dir_if_empty(path: str | Path) -> None:
+    target = Path(path)
+    if target.exists() and not any(target.iterdir()):
+        target.rmdir()
 
 
 def _validate_structured_prediction(
