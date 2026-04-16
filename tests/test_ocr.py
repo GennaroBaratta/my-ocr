@@ -4,195 +4,398 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+
+import pytest
 
 from free_doc_extract import ocr
+from free_doc_extract import ocr_fallback
 from free_doc_extract.ocr import run_ocr
+from free_doc_extract.ocr_fallback import (
+    FORMULA_RECOGNITION_PROMPT,
+    TABLE_RECOGNITION_PROMPT,
+    TEXT_RECOGNITION_PROMPT,
+    build_ocr_chunks,
+    normalize_table_html,
+    run_crop_fallback_for_page,
+)
 
 
 class FakeResult:
-    def __init__(self, page_name: str, markdown_result: str, json_result: Any) -> None:
-        self.page_name = page_name
+    def __init__(
+        self,
+        *,
+        markdown_result: str,
+        json_result,
+        saved_model_json=None,
+        artifact_stem: str = "page-0001",
+        error=None,
+    ) -> None:
         self.markdown_result = markdown_result
         self.json_result = json_result
+        self.saved_model_json = json_result if saved_model_json is None else saved_model_json
+        self.artifact_stem = artifact_stem
+        self._error = error
+        self.saved_to: str | None = None
+
+    def to_dict(self):
+        payload = {"markdown": self.markdown_result, "json": self.json_result}
+        if self._error is not None:
+            payload["error"] = self._error
+        return payload
 
     def save(self, output_dir: str) -> None:
-        page_dir = Path(output_dir) / self.page_name
+        self.saved_to = output_dir
+        page_dir = Path(output_dir) / self.artifact_stem
         page_dir.mkdir(parents=True, exist_ok=True)
-        (page_dir / f"{self.page_name}.md").write_text(self.markdown_result, encoding="utf-8")
+        (page_dir / "artifact.txt").write_text("saved", encoding="utf-8")
+        (page_dir / f"{self.artifact_stem}_model.json").write_text(
+            json.dumps(self.saved_model_json),
+            encoding="utf-8",
+        )
 
 
 class FakeGlmOcr:
+    calls: list[str] = []
+
     def __init__(self, *, config_path: str, layout_device: str) -> None:
         self.config_path = config_path
         self.layout_device = layout_device
 
-    def __enter__(self) -> FakeGlmOcr:
+    def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, _exc_type, _exc, _tb):
         return None
 
-    def parse(self, images: str | list[str]) -> FakeResult | list[FakeResult]:
-        if isinstance(images, str):
-            page_name = Path(images).stem
+    def parse(self, input_path: str):
+        self.calls.append(input_path)
+        return FakeResult(
+            markdown_result="# doc",
+            json_result={"doc": Path(input_path).name},
+            artifact_stem=Path(input_path).stem,
+        )
+
+
+def _write_test_image(path: Path) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (10, 10), color="white").save(path)
+
+
+def test_run_ocr_uses_page_images_and_public_outputs(tmp_path, monkeypatch) -> None:
+    FakeGlmOcr.calls = []
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=FakeGlmOcr))
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr([str(source)], tmp_path / "run")
+
+    assert FakeGlmOcr.calls == [str(source)]
+    assert result["markdown"] == "# doc"
+    assert result["json"]["summary"] == {"page_count": 1, "sources": {"sdk_markdown": 1}}
+    assert result["json"]["pages"][0]["sdk_json_path"] == str(
+        tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    )
+    assert json.loads(
+        Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8")
+    ) == {"doc": "page-0001.png"}
+    assert result["config_path"] == "config/local.yaml"
+    assert result["layout_device"] == "cuda"
+    assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "# doc"
+    assert json.loads((tmp_path / "run" / "ocr.json").read_text(encoding="utf-8")) == result["json"]
+    assert (tmp_path / "run" / "ocr_raw" / "page-0001" / "artifact.txt").exists()
+    assert not (tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001").exists()
+
+
+def test_run_ocr_aggregates_pages_in_order_and_tracks_sources(tmp_path, monkeypatch) -> None:
+    class MixedSourceGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            page_name = Path(input_path).name
+            if page_name == "page-0001.png":
+                return FakeResult(
+                    markdown_result="# first",
+                    json_result={"doc": page_name},
+                    artifact_stem=Path(input_path).stem,
+                )
             return FakeResult(
-                page_name=page_name,
-                markdown_result=f"# {page_name}",
-                json_result={"page": page_name},
+                markdown_result="",
+                json_result={
+                    "blocks": [
+                        {"label": "text", "content": "second page", "bbox_2d": [0, 0, 10, 10]}
+                    ]
+                },
+                artifact_stem=Path(input_path).stem,
             )
 
-        return [
-            FakeResult(
-                page_name=Path(image).stem,
-                markdown_result=f"# {Path(image).stem}",
-                json_result={"page": Path(image).stem},
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=MixedSourceGlmOcr))
+    page_one = tmp_path / "page-0001.png"
+    page_two = tmp_path / "page-0002.png"
+    _write_test_image(page_one)
+    _write_test_image(page_two)
+
+    result = run_ocr([str(page_one), str(page_two)], tmp_path / "run")
+
+    assert result["markdown"] == "# first\n\nsecond page"
+    assert result["json"]["summary"] == {
+        "page_count": 2,
+        "sources": {"sdk_markdown": 1, "layout_json": 1},
+    }
+    assert [page["page_path"] for page in result["json"]["pages"]] == [str(page_one), str(page_two)]
+
+
+def test_run_ocr_raises_on_sdk_error_field(tmp_path, monkeypatch) -> None:
+    class ErrorGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={},
+                artifact_stem=Path(input_path).stem,
+                error="boom",
             )
-            for image in images
-        ]
+
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=ErrorGlmOcr))
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_ocr([str(source)], tmp_path / "run")
 
 
-def test_run_ocr_aggregates_multi_page_results(tmp_path, monkeypatch) -> None:
+def test_run_ocr_rejects_empty_page_list(tmp_path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=FakeGlmOcr))
 
-    page_paths = []
-    for index in range(1, 3):
-        page = tmp_path / f"page-{index:04d}.png"
-        page.write_bytes(b"fake image")
-        page_paths.append(str(page))
-
-    result = run_ocr(page_paths, tmp_path / "run")
-
-    assert result["markdown"] == "# page-0001\n\n---\n\n# page-0002"
-    assert result["json"] == [
-        {"page": "page-0001"},
-        {"page": "page-0002"},
-    ]
-    assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == result["markdown"]
-    assert json.loads((tmp_path / "run" / "ocr.json").read_text(encoding="utf-8")) == result["json"]
-    assert (tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001" / "page-0001.md").exists()
-    assert (tmp_path / "run" / "ocr_raw" / "page-0002" / "page-0002" / "page-0002.md").exists()
+    with pytest.raises(ValueError, match="At least one normalized page image is required"):
+        run_ocr([], tmp_path / "run")
 
 
-def test_needs_crop_fallback_for_empty_block_content() -> None:
-    page_json = [
-        [
-            {"index": 0, "label": "doc_title", "bbox_2d": [10, 10, 100, 40], "content": "# "},
-            {"index": 1, "label": "text", "bbox_2d": [10, 60, 140, 90], "content": ""},
-        ]
-    ]
+def test_run_ocr_rejects_directory_input(tmp_path, monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=FakeGlmOcr))
+    source = tmp_path / "images"
+    source.mkdir()
 
-    assert ocr._needs_crop_fallback("# \n\n## ", page_json) is True
+    with pytest.raises(ValueError, match="page image files"):
+        run_ocr([str(source)], tmp_path / "run")
 
 
-def test_run_ocr_uses_crop_fallback_when_page_text_is_empty(tmp_path, monkeypatch) -> None:
-    class EmptyResult(FakeResult):
-        def __init__(self, page_name: str) -> None:
-            super().__init__(
-                page_name=page_name,
-                markdown_result="# \n\n## ",
-                json_result=[
-                    [
-                        {
-                            "index": 0,
-                            "label": "doc_title",
-                            "bbox_2d": [10, 10, 100, 40],
-                            "content": "",
-                        }
+def test_run_ocr_reconstructs_markdown_from_layout_json(tmp_path, monkeypatch) -> None:
+    class LayoutGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={},
+                saved_model_json={
+                    "blocks": [
+                        {"label": "text", "content": "Recovered text", "bbox_2d": [0, 0, 10, 10]}
                     ]
-                ],
+                },
+                artifact_stem=Path(input_path).stem,
             )
 
-    class EmptyGlmOcr(FakeGlmOcr):
-        def parse(self, images: str | list[str]) -> EmptyResult:
-            assert isinstance(images, str)
-            return EmptyResult(Path(images).stem)
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=LayoutGlmOcr))
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
 
-    page_path = tmp_path / "page-0001.png"
-    page_path.write_bytes(b"fake image")
+    result = run_ocr([str(source)], tmp_path / "run")
+
+    assert result["markdown"] == "Recovered text"
+    assert result["json"]["pages"][0]["markdown_source"] == "layout_json"
+    assert not (tmp_path / "run" / "ocr_fallback.json").exists()
+
+
+def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
+    tmp_path, monkeypatch
+) -> None:
+    class EmptyGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={},
+                saved_model_json={
+                    "blocks": [
+                        {"label": "text", "content": "", "bbox_2d": [0, 0, 10, 10], "index": 1}
+                    ]
+                },
+                artifact_stem=Path(input_path).stem,
+            )
 
     monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=EmptyGlmOcr))
+    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", lambda **_kwargs: ("", []))
+    monkeypatch.setattr(ocr, "recognize_full_page", lambda *_args, **_kwargs: "Full page text")
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr([str(source)], tmp_path / "run")
+
+    assert result["markdown"] == "Full page text"
+    assert result["json"]["pages"][0]["markdown_source"] == "full_page_fallback"
+    assert json.loads((tmp_path / "run" / "ocr_fallback.json").read_text(encoding="utf-8")) == {
+        "pages": [
+            {
+                "page_number": 1,
+                "page_path": str(source),
+                "assessment": {
+                    "use_fallback": True,
+                    "reason": "empty_markdown_and_empty_layout_text",
+                    "structured_layout_payload": True,
+                    "layout_block_count": 1,
+                    "ocr_block_count": 1,
+                    "text_block_count": 1,
+                    "meaningful_text_block_count": 0,
+                    "bbox_coord_space": "normalized",
+                },
+                "chunks": [],
+                "markdown": "Full page text",
+                "markdown_source": "full_page_fallback",
+            }
+        ],
+        "summary": {"page_count": 1},
+    }
+
+
+def test_build_ocr_chunks_assigns_text_table_and_formula_prompts() -> None:
+    chunks = build_ocr_chunks(
+        {
+            "blocks": [
+                {"label": "text", "bbox_2d": [0, 0, 50, 50], "index": 1},
+                {"label": "table", "bbox_2d": [60, 0, 120, 50], "index": 2},
+                {"label": "display_formula", "bbox_2d": [0, 60, 50, 120], "index": 3},
+            ]
+        },
+        width=200,
+        height=200,
+        coord_space="pixel",
+    )
+
+    assert [chunk["task"] for chunk in chunks] == ["text", "table", "formula"]
+    assert [chunk["prompt"] for chunk in chunks] == [
+        TEXT_RECOGNITION_PROMPT,
+        TABLE_RECOGNITION_PROMPT,
+        FORMULA_RECOGNITION_PROMPT,
+    ]
+
+
+def test_run_ocr_always_loads_saved_model_json(tmp_path, monkeypatch) -> None:
+    captured = {}
+
+    class TableModelGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={"blocks": []},
+                saved_model_json={
+                    "blocks": [
+                        {
+                            "label": "table",
+                            "content": "",
+                            "bbox_2d": [100, 100, 500, 500],
+                            "index": 2,
+                        }
+                    ]
+                },
+                artifact_stem=Path(input_path).stem,
+            )
+
+    def fake_crop_fallback(**kwargs):
+        captured["page_json"] = kwargs["page_json"]
+        return "table text", []
+
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=TableModelGlmOcr))
+    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr([str(source)], tmp_path / "run")
+
+    assert captured["page_json"] == {
+        "blocks": [{"label": "table", "content": "", "bbox_2d": [100, 100, 500, 500], "index": 2}]
+    }
+    assert (
+        json.loads(Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8"))
+        == captured["page_json"]
+    )
+    assert result["json"]["pages"][0]["markdown_source"] == "crop_fallback"
+
+
+def test_build_ocr_chunks_scales_glmocr_normalized_offsets() -> None:
+    chunks = build_ocr_chunks(
+        {
+            "blocks": [
+                {"label": "text", "bbox_2d": [100, 100, 500, 500]},
+                {"label": "text", "bbox_2d": [600, 200, 900, 400], "index": 7},
+            ]
+        },
+        width=200,
+        height=100,
+    )
+
+    assert [chunk["unpadded_bbox"] for chunk in chunks] == [[20, 10, 100, 50], [120, 20, 180, 40]]
+    assert [chunk["source_indices"] for chunk in chunks] == [[0], [7]]
+
+
+def test_normalize_table_html_uses_plain_rows() -> None:
+    html = "<table><tr><th>head1</th><th>head2</th></tr><tr><td>a</td><td>b</td></tr></table>"
+
+    assert normalize_table_html(html) == "head1 | head2\na | b"
+
+
+def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path, monkeypatch) -> None:
+    page = tmp_path / "page-0001.png"
+    _write_test_image(page)
+
     monkeypatch.setattr(
-        ocr,
-        "_run_crop_fallback_for_page",
-        lambda **kwargs: (
-            "Recovered text from crop",
-            [{"chunk": 1, "text": "Recovered text from crop"}],
+        ocr_fallback,
+        "recognize_text_image",
+        lambda *_args, **_kwargs: (
+            "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
         ),
     )
 
-    result = run_ocr([str(page_path)], tmp_path / "run")
+    page_markdown, chunks = run_crop_fallback_for_page(
+        page_path=str(page),
+        page_json={"blocks": [{"label": "table", "bbox_2d": [0, 0, 10, 10], "index": 1}]},
+        coord_space="pixel",
+        page_fallback_dir=tmp_path / "fallback",
+        model="m",
+        endpoint="e",
+        num_ctx=1,
+    )
 
-    assert result["markdown"] == "Recovered text from crop"
-    assert result["fallback_used"] is True
-    assert (tmp_path / "run" / "ocr_fallback.json").exists()
+    assert page_markdown == "A | B\n1 | 2"
+    assert chunks[0]["text"] == "A | B\n1 | 2"
+    assert (tmp_path / "fallback" / "chunk-0001.txt").read_text(encoding="utf-8") == "A | B\n1 | 2"
 
 
-def test_run_ocr_records_failed_fallback_attempt(tmp_path, monkeypatch) -> None:
-    class EmptyResult(FakeResult):
-        def __init__(self, page_name: str) -> None:
-            super().__init__(
-                page_name=page_name,
-                markdown_result="# \n\n## ",
-                json_result=[
-                    [
+def test_run_ocr_persists_normalized_table_markdown(tmp_path, monkeypatch) -> None:
+    class TableLayoutGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={},
+                saved_model_json={
+                    "blocks": [
+                        {"label": "text", "content": "Intro", "bbox_2d": [0, 0, 10, 10]},
                         {
-                            "index": 0,
-                            "label": "doc_title",
-                            "bbox_2d": [10, 10, 100, 40],
-                            "content": "",
-                        }
+                            "label": "table",
+                            "content": "<table><tr><th>X</th><th>Y</th></tr><tr><td>1</td><td>2</td></tr></table>",
+                            "bbox_2d": [0, 20, 10, 30],
+                        },
                     ]
-                ],
+                },
+                artifact_stem=Path(input_path).stem,
             )
 
-    class EmptyGlmOcr(FakeGlmOcr):
-        def parse(self, images: str | list[str]) -> EmptyResult:
-            assert isinstance(images, str)
-            return EmptyResult(Path(images).stem)
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=TableLayoutGlmOcr))
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
 
-    page_path = tmp_path / "page-0001.png"
-    page_path.write_bytes(b"fake image")
+    result = run_ocr([str(source)], tmp_path / "run")
 
-    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=EmptyGlmOcr))
-    monkeypatch.setattr(
-        ocr,
-        "_run_crop_fallback_for_page",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-
-    result = run_ocr([str(page_path)], tmp_path / "run")
-    fallback_payload = json.loads(
-        (tmp_path / "run" / "ocr_fallback.json").read_text(encoding="utf-8")
-    )
-
-    assert result["fallback_used"] is True
-    assert result["markdown"] == "# \n\n## "
-    assert fallback_payload[0]["recovered_text"] is False
-    assert fallback_payload[0]["chunks"][0]["error"] == "boom"
-
-
-def test_build_text_chunks_preserves_each_layout_box() -> None:
-    page_json = [
-        [
-            {"index": 0, "label": "doc_title", "bbox_2d": [100, 100, 300, 140], "content": ""},
-            {"index": 1, "label": "text", "bbox_2d": [110, 150, 320, 180], "content": ""},
-            {
-                "index": 2,
-                "label": "paragraph_title",
-                "bbox_2d": [700, 900, 850, 940],
-                "content": "",
-            },
-        ]
-    ]
-
-    chunks = ocr._build_text_chunks(page_json, width=1000, height=1200)
-
-    assert len(chunks) == 3
-    assert chunks[0]["source_indices"] == [0]
-    assert chunks[1]["source_indices"] == [1]
-    assert chunks[2]["source_indices"] == [2]
-
-
-def test_clean_recognized_text_keeps_non_latin_text() -> None:
-    assert ocr._clean_recognized_text("Привет мир") == "Привет мир"
+    assert result["markdown"] == "Intro\n\nX | Y\n1 | 2"
+    assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "Intro\n\nX | Y\n1 | 2"
+    assert result["json"]["pages"][0]["markdown"] == "Intro\n\nX | Y\n1 | 2"

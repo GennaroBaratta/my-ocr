@@ -6,12 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from .evaluate import evaluate_directories, write_markdown_report
-from .extract_glmocr import (
-    DEFAULT_MODEL,
-    DEFAULT_OLLAMA_ENDPOINT,
-    extract_structured,
-    save_structured_result,
-)
 from .extract_rules import extract_from_markdown
 from .ingest import normalize_document
 from .ocr import run_ocr
@@ -46,8 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
         "extract-glmocr", help="Run direct structured extraction via Ollama"
     )
     _add_run_args(structured_parser)
-    structured_parser.add_argument("--model", default=DEFAULT_MODEL)
-    structured_parser.add_argument("--endpoint", default=DEFAULT_OLLAMA_ENDPOINT)
+    structured_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
+    structured_parser.add_argument("--model", default=None)
+    structured_parser.add_argument("--endpoint", default=None)
     structured_parser.set_defaults(func=cmd_extract_glmocr)
 
     eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against gold labels")
@@ -95,9 +90,12 @@ def cmd_extract_rules(args: argparse.Namespace) -> None:
 
 
 def cmd_extract_glmocr(args: argparse.Namespace) -> None:
+    from .experimental.extract_glmocr import extract_structured, save_structured_result
+
     run_structured_workflow(
         args.run,
         run_root=args.run_root,
+        config_path=args.config,
         model=args.model,
         endpoint=args.endpoint,
         extract_structured_fn=extract_structured,

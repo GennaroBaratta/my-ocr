@@ -94,23 +94,29 @@ class RunPaths:
     def ensure_run_dir(self) -> Path:
         return ensure_dir(self.run_dir)
 
-    def reset_pages_dir(self) -> Path:
-        return _reset_dir(self.pages_dir)
+    def _ocr_output_paths(self) -> tuple[Path, ...]:
+        return (
+            self.raw_dir,
+            self.fallback_dir,
+            self.ocr_markdown_path,
+            self.ocr_json_path,
+            self.ocr_fallback_path,
+        )
 
-    def reset_predictions_dir(self) -> Path:
-        return _reset_dir(self.predictions_dir)
+    def published_ocr_artifact_paths(self) -> tuple[Path, ...]:
+        return (self.pages_dir, *self._ocr_output_paths())
+
+    def resettable_ocr_artifact_paths(self) -> tuple[Path, ...]:
+        return (*self._ocr_output_paths(), self.meta_path)
 
     def reset_ocr_artifacts(self) -> None:
-        _reset_dir(self.raw_dir)
-        _reset_dir(self.fallback_dir)
-        _remove_file(self.ocr_markdown_path)
-        _remove_file(self.ocr_json_path)
-        _remove_file(self.ocr_fallback_path)
-        _remove_file(self.meta_path)
-
-    def reset_for_ocr_run(self) -> None:
-        self.reset_pages_dir()
-        self.reset_ocr_artifacts()
+        for path in self.resettable_ocr_artifact_paths():
+            if path == self.raw_dir:
+                _reset_dir(path)
+            elif path == self.fallback_dir:
+                _remove_dir(path)
+            else:
+                _remove_file(path)
 
     def raw_page_dir(self, page_number: int) -> Path:
         return ensure_dir(self.raw_dir / f"page-{page_number:04d}")
@@ -136,3 +142,9 @@ def _remove_file(path: str | Path) -> None:
     target = Path(path)
     if target.exists():
         target.unlink()
+
+
+def _remove_dir(path: str | Path) -> None:
+    target = Path(path)
+    if target.exists():
+        shutil.rmtree(target)

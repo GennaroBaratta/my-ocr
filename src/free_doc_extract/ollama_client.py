@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from http.client import IncompleteRead, RemoteDisconnected
 import json
 from pathlib import Path
 from typing import Any, Callable
@@ -38,7 +39,25 @@ def post_json(
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"{error_prefix} failed: {exc.code} {detail}") from exc
+    except (
+        RemoteDisconnected,
+        IncompleteRead,
+        ConnectionAbortedError,
+        ConnectionResetError,
+    ) as exc:
+        raise RuntimeError(f"{error_prefix} failed: remote disconnected") from exc
     except URLError as exc:
+        if isinstance(
+            exc.reason,
+            (
+                ConnectionAbortedError,
+                ConnectionResetError,
+                BrokenPipeError,
+                IncompleteRead,
+                RemoteDisconnected,
+            ),
+        ):
+            raise RuntimeError(f"{error_prefix} failed: remote disconnected") from exc
         raise RuntimeError(f"Could not reach Ollama at {endpoint}") from exc
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"{error_prefix} returned invalid JSON") from exc
