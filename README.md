@@ -54,6 +54,12 @@ uv venv --python 3.11
 uv sync --group dev --extra pdf --extra glmocr
 ```
 
+To use the dev-only MCP sidecar for UX review, install its optional extra too:
+
+```bash
+uv sync --group dev --extra pdf --extra glmocr --extra dev-mcp
+```
+
 Run commands with `uv run`:
 
 ```bash
@@ -178,6 +184,10 @@ make test
 make lint
 make report RUN_ID=demo001
 ```
+
+## Dev MCP sidecar for UX review
+
+The repo includes a localhost-only MCP sidecar under `tools/dev_mcp/` for iterating on the Flet UX and saving structured feedback bundles, including autonomous screenshot capture through Playwright. See `tools/dev_mcp/README.md` for setup, browser install, start, disable, and test instructions.
 
 ## Known limitations
 

@@ -64,3 +64,55 @@ If delegating, launch the specialist in the same turn you mention it.
 - If a config file exists but contains invalid YAML, raise `RuntimeError` instead of silently falling back to defaults.
 - Prefer test builders/helpers in `tests/support.py` for OCR payloads and seeded runs.
 - Prefer contract-level assertions in tests; keep only a few full artifact-shape checks.
+
+### Dev MCP and continuous UX feedback
+
+- Prefer the project-local `my-ocr-dev` MCP for OCR runs, UI inspection, and UX feedback whenever it is available and healthy.
+- Treat the MCP as the default path for end-to-end UX iteration. Do not fall back to ad hoc CLI plus manual screenshots unless the MCP is broken.
+- The app flow is intentionally staged: upload/prepare review -> review layout boxes -> run OCR -> results.
+- Treat that staged flow as a product invariant, not just a UI suggestion.
+- Intended user workflow:
+  1. user uploads a document
+  2. app performs the first pass for layout / review artifact preparation
+  3. user reviews and can modify layout boxes
+  4. user explicitly decides to start OCR
+  5. app publishes OCR outputs and shows results
+- Do **not** auto-start OCR immediately after upload or review preparation.
+- Do **not** bypass the review screen when a run is only layout-prepared; review-ready runs should reopen at `/review/<run_id>`.
+- After reviewed OCR completes, the results experience should be OCR-first: `ocr.md`, `ocr.json`, and per-page OCR payloads are the primary outputs.
+- Do **not** present reviewed-OCR results as if structured extraction ran automatically.
+- Results actions labeled copy/download JSON should operate on OCR JSON unless a future workflow explicitly adds a separate extraction step.
+- The default UX loop for future sessions is:
+  1. `project_info`
+  2. `run_ocr(input_path="data/raw/<file>.pdf")` when a fresh run is needed
+  3. `read_run_state(run_id=...)`
+  4. `start_ui`
+  5. `save_feedback_bundle(capture_route="/review/<run_id>")` or `save_feedback_bundle(capture_route="/results/<run_id>")`
+  6. inspect the saved screenshot + manifest under `.dev-mcp/feedback/<bundle_id>/`
+  7. repeat the same capture flow after changes for comparison
+  8. `stop_ui` when done
+- Use `list_feedback_bundles` before another UX pass to inspect prior feedback artifacts.
+- The dev MCP currently supports `run_ocr`, `read_run_state`, `start_ui`, `stop_ui`, `ui_status`, `save_feedback_bundle`, and `list_feedback_bundles`.
+- `run_ocr` is intentionally sandboxed to PDFs inside `data/raw/`.
+- OCR runs inside the MCP are serialized; do not start overlapping OCR requests.
+- Autonomous screenshot capture depends on Playwright + Chromium being installed.
+- OpenCode local MCP transport for this project is stdio, not HTTP.
+- The UI can be launched in web mode with `python -m free_doc_extract.ui --web --host 127.0.0.1 --port 8550`.
+
+### Current UX findings
+
+- The biggest current UX issues are in the results screen.
+- Watch for duplicated page navigation cues.
+- Watch for weak hierarchy between source preview, extracted content, and export actions.
+- Watch for dense markdown/text presentation.
+- Watch for export actions visually dominating review actions.
+- The next UX iterations should focus on improving results-screen hierarchy first, then repeat the MCP feedback loop and compare bundles.
+
+### Relevant paths
+
+- `tools/dev_mcp/README.md` - dev MCP usage and workflow
+- `tools/dev_mcp/AGENTS.snippet.md` - compact MCP usage guidance
+- `src/free_doc_extract/ui/` - Flet screens/components/state
+- `data/raw/` - allowed OCR input PDFs
+- `data/runs/` - OCR/review artifacts
+- `.dev-mcp/feedback/` - saved UX feedback bundles
