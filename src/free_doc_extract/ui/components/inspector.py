@@ -7,7 +7,7 @@ from typing import Callable
 import flet as ft
 
 from .. import theme
-from ..state import AppState, BoundingBox
+from ..state import AppState
 
 
 BLOCK_TYPES = ["Text Block", "Table", "Figure/Image", "Header"]
@@ -33,40 +33,47 @@ def build_inspector(
 
     block_type_value = LABEL_TO_BLOCK_TYPE.get(box.label, "Text Block")
 
-    def on_type_change(e: ft.ControlEvent) -> None:
+    def on_type_change(e: ft.Event[ft.Dropdown]) -> None:
         reverse = {v: k for k, v in LABEL_TO_BLOCK_TYPE.items()}
-        box.label = reverse.get(e.data, box.label)
+        selected = e.control.value
+        if selected is not None:
+            box.label = reverse.get(selected, box.label)
         on_change()
 
-    def make_coord_handler(attr: str):
-        def handler(e: ft.ControlEvent) -> None:
+    def make_coord_handler(attr: str) -> Callable[[ft.Event[ft.TextField]], None]:
+        def handler(e: ft.Event[ft.TextField]) -> None:
+            value = e.control.value
+            if value is None:
+                return
             try:
-                setattr(box, attr, float(e.data))
+                setattr(box, attr, float(value))
             except (ValueError, TypeError):
                 pass
             on_change()
+
         return handler
 
     confidence_pct = int(box.confidence * 100)
 
+    header_controls: list[ft.Control] = [
+        ft.Text(
+            "PROPERTIES",
+            size=11,
+            weight=ft.FontWeight.W_600,
+            color=theme.TEXT_MUTED,
+            style=ft.TextStyle(letter_spacing=1.2),
+            expand=True,
+        ),
+        ft.IconButton(
+            icon=ft.Icons.CLOSE,
+            icon_size=16,
+            icon_color=theme.TEXT_MUTED,
+            tooltip="Close",
+            on_click=on_deselect,
+        ),
+    ]
     header = ft.Row(
-        [
-            ft.Text(
-                "PROPERTIES",
-                size=11,
-                weight=ft.FontWeight.W_600,
-                color=theme.TEXT_MUTED,
-                letter_spacing=1.2,
-                expand=True,
-            ),
-            ft.IconButton(
-                icon=ft.Icons.CLOSE,
-                icon_size=16,
-                icon_color=theme.TEXT_MUTED,
-                tooltip="Close",
-                on_click=lambda e: on_deselect(),
-            ),
-        ],
+        header_controls,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
@@ -104,15 +111,14 @@ def build_inspector(
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
-    type_dropdown = ft.Dropdown(
-        label="Block Type",
-        value=block_type_value,
-        options=[ft.dropdown.Option(t) for t in BLOCK_TYPES],
-        border_color=theme.BORDER,
-        focused_border_color=theme.PRIMARY,
-        text_size=13,
-        on_change=on_type_change,
-    )
+    type_dropdown = ft.Dropdown()
+    type_dropdown.label = "Block Type"
+    type_dropdown.value = block_type_value
+    type_dropdown.options = [ft.dropdown.Option(t) for t in BLOCK_TYPES]
+    type_dropdown.border_color = theme.BORDER
+    type_dropdown.focused_border_color = theme.PRIMARY
+    type_dropdown.text_size = 13
+    type_dropdown.on_select = on_type_change
 
     confidence_row = ft.Column(
         [
@@ -139,44 +145,50 @@ def build_inspector(
         spacing=4,
     )
 
+    coord_field_controls: list[ft.Control] = [
+        ft.Text(
+            "COORDINATES (PX)",
+            size=10,
+            weight=ft.FontWeight.W_600,
+            color=theme.TEXT_MUTED,
+            style=ft.TextStyle(letter_spacing=1),
+        ),
+        ft.Row(
+            [
+                _coord_field("X (Left)", box.x, make_coord_handler("x")),
+                _coord_field("Y (Top)", box.y, make_coord_handler("y")),
+            ],
+            spacing=8,
+        ),
+        ft.Row(
+            [
+                _coord_field("Width", box.width, make_coord_handler("width")),
+                _coord_field("Height", box.height, make_coord_handler("height")),
+            ],
+            spacing=8,
+        ),
+    ]
     coord_fields = ft.Column(
-        [
-            ft.Text(
-                "COORDINATES (PX)",
-                size=10,
-                weight=ft.FontWeight.W_600,
-                color=theme.TEXT_MUTED,
-                letter_spacing=1,
-            ),
-            ft.Row(
-                [
-                    _coord_field("X (Left)", box.x, make_coord_handler("x")),
-                    _coord_field("Y (Top)", box.y, make_coord_handler("y")),
-                ],
-                spacing=8,
-            ),
-            ft.Row(
-                [
-                    _coord_field("Width", box.width, make_coord_handler("width")),
-                    _coord_field("Height", box.height, make_coord_handler("height")),
-                ],
-                spacing=8,
-            ),
-        ],
+        coord_field_controls,
         spacing=8,
     )
 
-    remove_btn = ft.OutlinedButton(
-        "Remove",
-        icon=ft.Icons.DELETE_OUTLINE,
-        icon_color=theme.ERROR,
-        on_click=lambda e: on_remove(box.id),
-        style=ft.ButtonStyle(
-            color=theme.TEXT_PRIMARY,
-            side=ft.BorderSide(1, theme.BORDER),
-            shape=ft.RoundedRectangleBorder(radius=6),
-        ),
-        width=float("inf"),
+    remove_btn = ft.Row(
+        [
+            ft.OutlinedButton(
+                "Remove",
+                icon=ft.Icons.DELETE_OUTLINE,
+                icon_color=theme.ERROR,
+                on_click=lambda: on_remove(box.id),
+                expand=True,
+                style=ft.ButtonStyle(
+                    color=theme.ERROR,
+                    side=ft.BorderSide(1, theme.BORDER),
+                    shape=ft.RoundedRectangleBorder(radius=6),
+                ),
+            )
+        ],
+        spacing=0,
     )
 
     return ft.Container(
@@ -207,23 +219,23 @@ def build_inspector(
 def _coord_field(
     label: str,
     value: float,
-    on_change: Callable[[ft.ControlEvent], None],
+    on_change: Callable[[ft.Event[ft.TextField]], None],
 ) -> ft.TextField:
-    return ft.TextField(
-        label=label,
-        value=str(int(value)),
-        keyboard_type=ft.KeyboardType.NUMBER,
-        text_size=12,
-        label_style=ft.TextStyle(size=10, color=theme.TEXT_MUTED),
-        border_color=theme.BORDER,
-        focused_border_color=theme.PRIMARY,
-        on_change=on_change,
-        expand=True,
-        content_padding=ft.padding.symmetric(horizontal=8, vertical=8),
-    )
+    field = ft.TextField()
+    field.label = label
+    field.value = str(int(value))
+    field.keyboard_type = ft.KeyboardType.NUMBER
+    field.text_size = 12
+    field.label_style = ft.TextStyle(size=10, color=theme.TEXT_MUTED)
+    field.border_color = theme.BORDER
+    field.focused_border_color = theme.PRIMARY
+    field.on_change = on_change
+    field.expand = True
+    field.content_padding = ft.padding.symmetric(horizontal=8, vertical=8)
+    return field
 
 
-def _icon_for_type(block_type: str) -> str:
+def _icon_for_type(block_type: str) -> ft.IconData:
     return {
         "Header": ft.Icons.TITLE,
         "Table": ft.Icons.TABLE_CHART,

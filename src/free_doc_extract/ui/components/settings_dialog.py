@@ -9,38 +9,26 @@ from ..state import AppState
 
 
 def open_settings_dialog(page: ft.Page, state: AppState) -> None:
-    endpoint_field = ft.TextField(
-        label="Ollama Endpoint",
-        value=state.ollama_endpoint,
-        border_color=theme.BORDER,
-        focused_border_color=theme.PRIMARY,
-        text_size=13,
-    )
-    model_field = ft.TextField(
-        label="Ollama Model",
-        value=state.ollama_model,
-        border_color=theme.BORDER,
-        focused_border_color=theme.PRIMARY,
-        text_size=13,
-    )
-    run_root_field = ft.TextField(
-        label="Run Root Directory",
-        value=state.run_root,
-        border_color=theme.BORDER,
-        focused_border_color=theme.PRIMARY,
-        text_size=13,
-    )
+    endpoint_field = _styled_text_field("Ollama Endpoint", state.ollama_endpoint)
+    model_field = _styled_text_field("Ollama Model", state.ollama_model)
+    run_root_field = _styled_text_field("Run Root Directory", state.run_root)
 
-    def save(e: ft.ControlEvent) -> None:
+    def save() -> None:
         state.ollama_endpoint = endpoint_field.value or state.ollama_endpoint
         state.ollama_model = model_field.value or state.ollama_model
         state.run_root = run_root_field.value or state.run_root
-        dialog.open = False
+        state.load_recent_runs()
+        page.pop_dialog()
         page.update()
 
-    def cancel(e: ft.ControlEvent) -> None:
-        dialog.open = False
+    def cancel() -> None:
+        page.pop_dialog()
         page.update()
+
+    actions: list[ft.Control] = [
+        ft.TextButton("Cancel", on_click=cancel),
+        ft.ElevatedButton("Save", on_click=save, bgcolor=theme.PRIMARY, color="white"),
+    ]
 
     dialog = ft.AlertDialog(
         title=ft.Text("Settings", size=18, weight=ft.FontWeight.W_600),
@@ -50,12 +38,19 @@ def open_settings_dialog(page: ft.Page, state: AppState) -> None:
             spacing=16,
             width=400,
         ),
-        actions=[
-            ft.TextButton("Cancel", on_click=cancel),
-            ft.ElevatedButton("Save", on_click=save, bgcolor=theme.PRIMARY, color="white"),
-        ],
+        actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,
         bgcolor=theme.BG_SURFACE,
     )
 
-    page.open(dialog)
+    page.show_dialog(dialog)
+
+
+def _styled_text_field(label: str, value: str) -> ft.TextField:
+    field = ft.TextField()
+    field.label = label
+    field.value = value
+    field.border_color = theme.BORDER
+    field.focused_border_color = theme.PRIMARY
+    field.text_size = 13
+    return field

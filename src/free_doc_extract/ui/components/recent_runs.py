@@ -68,7 +68,7 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
                 size=11,
                 weight=ft.FontWeight.W_600,
                 color=theme.TEXT_MUTED,
-                letter_spacing=1.2,
+                style=ft.TextStyle(letter_spacing=1.2),
             ),
             ft.Container(
                 content=ft.Column(rows, spacing=0),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import flet as ft
 
@@ -33,65 +34,68 @@ def build_results_view(
 
     json_str = json.dumps(state.extraction_json, indent=2, ensure_ascii=False)
 
-    def copy_clipboard(e: ft.ControlEvent) -> None:
-        page.set_clipboard(json_str)
-        page.open(
-            ft.SnackBar(content=ft.Text("Copied to clipboard"), duration=1500)
-        )
+    async def copy_clipboard() -> None:
+        await ft.Clipboard().set(json_str)
+        page.show_dialog(ft.SnackBar(ft.Text("Copied JSON to clipboard"), duration=1500))
 
-    def download_json(e: ft.ControlEvent) -> None:
-        file_picker.on_result = lambda ev: _save_json(ev, json_str)
-        file_picker.save_file(
+    async def download_json() -> None:
+        save_path = await file_picker.save_file(
             file_name=f"{state.run_id or 'result'}.json",
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["json"],
         )
+        if save_path:
+            _save_json(save_path, json_str)
+
+    toolbar_controls: list[ft.Control] = [
+        ft.IconButton(
+            icon=ft.Icons.ARROW_BACK,
+            icon_color=theme.TEXT_PRIMARY,
+            icon_size=20,
+            tooltip="Back",
+            on_click=lambda: page.go(f"/review/{state.run_id}"),
+        ),
+        ft.Icon(
+            ft.Icons.CHECK_CIRCLE,
+            color=theme.SUCCESS,
+            size=18,
+        ),
+        ft.Text(
+            f"{filename} — Extraction Complete",
+            size=14,
+            weight=ft.FontWeight.W_600,
+            color=theme.TEXT_PRIMARY,
+            expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+        ft.OutlinedButton(
+            "Copy to Clipboard",
+            icon=ft.Icons.CONTENT_COPY,
+            tooltip="Copy JSON to clipboard",
+            on_click=copy_clipboard,
+            style=ft.ButtonStyle(
+                color=theme.TEXT_PRIMARY,
+                side=ft.BorderSide(1, theme.BORDER),
+                shape=ft.RoundedRectangleBorder(radius=6),
+            ),
+        ),
+        ft.ElevatedButton(
+            "Download .json",
+            icon=ft.Icons.DOWNLOAD,
+            tooltip="Download extracted JSON",
+            on_click=download_json,
+            bgcolor=theme.PRIMARY,
+            color="white",
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+            ),
+        ),
+    ]
 
     toolbar = ft.Container(
         content=ft.Row(
-            [
-                ft.IconButton(
-                    icon=ft.Icons.ARROW_BACK,
-                    icon_color=theme.TEXT_PRIMARY,
-                    icon_size=20,
-                    tooltip="Back",
-                    on_click=lambda e: page.go(f"/review/{state.run_id}"),
-                ),
-                ft.Icon(
-                    ft.Icons.CHECK_CIRCLE,
-                    color=theme.SUCCESS,
-                    size=18,
-                ),
-                ft.Text(
-                    f"{filename} — Extraction Complete",
-                    size=14,
-                    weight=ft.FontWeight.W_600,
-                    color=theme.TEXT_PRIMARY,
-                    expand=True,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-                ft.OutlinedButton(
-                    "Copy to Clipboard",
-                    icon=ft.Icons.CONTENT_COPY,
-                    on_click=copy_clipboard,
-                    style=ft.ButtonStyle(
-                        color=theme.TEXT_PRIMARY,
-                        side=ft.BorderSide(1, theme.BORDER),
-                        shape=ft.RoundedRectangleBorder(radius=6),
-                    ),
-                ),
-                ft.ElevatedButton(
-                    "Download .json",
-                    icon=ft.Icons.DOWNLOAD,
-                    on_click=download_json,
-                    bgcolor=theme.PRIMARY,
-                    color="white",
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=6),
-                    ),
-                ),
-            ],
+            toolbar_controls,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=8,
         ),
@@ -120,6 +124,5 @@ def build_results_view(
     )
 
 
-def _save_json(e: ft.FilePickerResultEvent, content: str) -> None:
-    if e.path:
-        Path(e.path).write_text(content, encoding="utf-8")
+def _save_json(path: str, content: str) -> None:
+    Path(cast(str, path)).write_text(content, encoding="utf-8")

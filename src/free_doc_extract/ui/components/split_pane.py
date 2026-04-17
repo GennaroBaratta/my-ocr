@@ -48,8 +48,9 @@ class SplitPane(ft.Row):
         )
 
     def _on_drag(self, e: ft.DragUpdateEvent) -> None:
-        self._left_width = max(
-            self._min_left, min(self._max_left, self._left_width + e.delta_x)
-        )
+        delta = e.local_delta or e.global_delta
+        if delta is None:
+            return
+        self._left_width = max(self._min_left, min(self._max_left, self._left_width + delta.x))
         self._left_container.width = self._left_width
         self.update()

@@ -240,6 +240,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "flet" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -255,26 +256,29 @@ ui = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "flet" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "flet", marker = "extra == 'ui'", specifier = ">=0.25" },
+    { name = "flet", marker = "extra == 'dev'", specifier = ">=0.84.0" },
+    { name = "flet", marker = "extra == 'ui'", specifier = ">=0.84.0" },
     { name = "glmocr", extras = ["selfhosted"], marker = "extra == 'glmocr'" },
-    { name = "pillow", specifier = ">=10" },
+    { name = "pillow", specifier = ">=12.2.0" },
     { name = "pymupdf", marker = "extra == 'pdf'", specifier = ">=1.24" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.10" },
 ]
 provides-extras = ["dev", "pdf", "glmocr", "ui"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "ruff", specifier = ">=0.6" },
+    { name = "flet", specifier = ">=0.84.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "ruff", specifier = ">=0.15.10" },
 ]
 
 [[package]]

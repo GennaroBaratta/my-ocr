@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 import flet as ft
 
@@ -18,9 +19,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     filename = ""
     if state.run_paths and state.run_paths.meta_path.exists():
         try:
-            meta = json.loads(
-                state.run_paths.meta_path.read_text(encoding="utf-8")
-            )
+            meta = json.loads(state.run_paths.meta_path.read_text(encoding="utf-8"))
             filename = Path(meta.get("input_path", "")).name
         except (json.JSONDecodeError, OSError):
             pass
@@ -57,122 +56,128 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         text_align=ft.TextAlign.CENTER,
     )
 
-    def prev_page(e: ft.ControlEvent) -> None:
+    def prev_page() -> None:
         if state.current_page_index > 0:
             state.current_page_index -= 1
             state.select_box(None)
             page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
             rebuild()
 
-    def next_page(e: ft.ControlEvent) -> None:
+    def next_page() -> None:
         if state.current_page_index < len(state.pages) - 1:
             state.current_page_index += 1
             state.select_box(None)
             page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
             rebuild()
 
-    def zoom_in(e: ft.ControlEvent) -> None:
+    def zoom_in() -> None:
         state.zoom_level = min(3.0, state.zoom_level + 0.25)
         zoom_label.value = f"{int(state.zoom_level * 100)}%"
         rebuild()
 
-    def zoom_out(e: ft.ControlEvent) -> None:
+    def zoom_out() -> None:
         state.zoom_level = max(0.25, state.zoom_level - 0.25)
         zoom_label.value = f"{int(state.zoom_level * 100)}%"
         rebuild()
 
-    def run_ocr(e: ft.ControlEvent) -> None:
-        _start_structured_extraction(page, state, progress_bar, rebuild)
+    def run_ocr() -> None:
+        _start_structured_extraction(page, state, progress_bar)
+
+    pagination_controls: list[ft.Control] = [
+        ft.IconButton(
+            icon=ft.Icons.CHEVRON_LEFT,
+            icon_size=18,
+            icon_color=theme.TEXT_MUTED,
+            on_click=prev_page,
+            tooltip="Previous page",
+        ),
+        page_label,
+        ft.IconButton(
+            icon=ft.Icons.CHEVRON_RIGHT,
+            icon_size=18,
+            icon_color=theme.TEXT_MUTED,
+            on_click=next_page,
+            tooltip="Next page",
+        ),
+    ]
+
+    zoom_controls: list[ft.Control] = [
+        ft.IconButton(
+            icon=ft.Icons.REMOVE,
+            icon_size=16,
+            icon_color=theme.TEXT_MUTED,
+            on_click=zoom_out,
+            tooltip="Zoom out",
+        ),
+        zoom_label,
+        ft.IconButton(
+            icon=ft.Icons.ADD,
+            icon_size=16,
+            icon_color=theme.TEXT_MUTED,
+            on_click=zoom_in,
+            tooltip="Zoom in",
+        ),
+    ]
+
+    toolbar_controls: list[ft.Control] = [
+        ft.IconButton(
+            icon=ft.Icons.ARROW_BACK,
+            icon_color=theme.TEXT_PRIMARY,
+            icon_size=20,
+            tooltip="Back",
+            on_click=lambda: page.go("/"),
+        ),
+        ft.VerticalDivider(width=1, color=theme.BORDER),
+        ft.Icon(ft.Icons.DESCRIPTION_OUTLINED, size=18, color=theme.TEXT_MUTED),
+        ft.Text(
+            filename,
+            size=14,
+            weight=ft.FontWeight.W_500,
+            color=theme.TEXT_PRIMARY,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+            width=200,
+        ),
+        ft.Container(expand=True),
+        ft.Container(
+            content=ft.Row(
+                pagination_controls,
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            border=ft.border.all(1, theme.BORDER),
+            border_radius=6,
+            bgcolor=theme.BG_ELEVATED,
+            padding=ft.padding.symmetric(horizontal=2),
+        ),
+        ft.Container(width=8),
+        ft.Container(
+            content=ft.Row(
+                zoom_controls,
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            border=ft.border.all(1, theme.BORDER),
+            border_radius=6,
+            bgcolor=theme.BG_ELEVATED,
+            padding=ft.padding.symmetric(horizontal=2),
+        ),
+        ft.Container(width=8),
+        ft.ElevatedButton(
+            "Run OCR",
+            icon=ft.Icons.PLAY_ARROW,
+            on_click=run_ocr,
+            bgcolor=theme.PRIMARY,
+            color="white",
+            style=ft.ButtonStyle(
+                shape=ft.RoundedRectangleBorder(radius=6),
+            ),
+        ),
+    ]
 
     toolbar = ft.Container(
         content=ft.Row(
-            [
-                ft.IconButton(
-                    icon=ft.Icons.ARROW_BACK,
-                    icon_color=theme.TEXT_PRIMARY,
-                    icon_size=20,
-                    tooltip="Back",
-                    on_click=lambda e: page.go("/"),
-                ),
-                ft.VerticalDivider(width=1, color=theme.BORDER),
-                ft.Icon(ft.Icons.DESCRIPTION_OUTLINED, size=18, color=theme.TEXT_MUTED),
-                ft.Text(
-                    filename,
-                    size=14,
-                    weight=ft.FontWeight.W_500,
-                    color=theme.TEXT_PRIMARY,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                    width=200,
-                ),
-                ft.Container(expand=True),
-                # Pagination
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.IconButton(
-                                icon=ft.Icons.CHEVRON_LEFT,
-                                icon_size=18,
-                                icon_color=theme.TEXT_MUTED,
-                                on_click=prev_page,
-                                tooltip="Previous page",
-                            ),
-                            page_label,
-                            ft.IconButton(
-                                icon=ft.Icons.CHEVRON_RIGHT,
-                                icon_size=18,
-                                icon_color=theme.TEXT_MUTED,
-                                on_click=next_page,
-                                tooltip="Next page",
-                            ),
-                        ],
-                        spacing=0,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    border=ft.border.all(1, theme.BORDER),
-                    border_radius=6,
-                    padding=ft.padding.symmetric(horizontal=2),
-                ),
-                ft.Container(width=8),
-                # Zoom
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.IconButton(
-                                icon=ft.Icons.REMOVE,
-                                icon_size=16,
-                                icon_color=theme.TEXT_MUTED,
-                                on_click=zoom_out,
-                                tooltip="Zoom out",
-                            ),
-                            zoom_label,
-                            ft.IconButton(
-                                icon=ft.Icons.ADD,
-                                icon_size=16,
-                                icon_color=theme.TEXT_MUTED,
-                                on_click=zoom_in,
-                                tooltip="Zoom in",
-                            ),
-                        ],
-                        spacing=0,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    border=ft.border.all(1, theme.BORDER),
-                    border_radius=6,
-                    padding=ft.padding.symmetric(horizontal=2),
-                ),
-                ft.Container(width=8),
-                ft.ElevatedButton(
-                    "Run OCR",
-                    icon=ft.Icons.PLAY_ARROW,
-                    on_click=run_ocr,
-                    bgcolor=theme.PRIMARY,
-                    color="white",
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=6),
-                    ),
-                ),
-            ],
+            toolbar_controls,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=4,
         ),
@@ -202,7 +207,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 def _build_panes(
     page: ft.Page,
     state: AppState,
-    rebuild: object,
+    rebuild: Callable[[], None],
 ) -> list[ft.Control]:
 
     def on_page_select(idx: int) -> None:
@@ -236,7 +241,6 @@ def _start_structured_extraction(
     page: ft.Page,
     state: AppState,
     progress_bar: ft.ProgressBar,
-    rebuild: object,
 ) -> None:
     from free_doc_extract.workflows import run_structured_workflow
 
@@ -267,9 +271,9 @@ def _start_structured_extraction(
             page.go(f"/results/{run_id}")
         except Exception as exc:
             progress_bar.visible = False
-            page.open(
+            page.show_dialog(
                 ft.SnackBar(
-                    content=ft.Text(f"Extraction failed: {exc}"),
+                    ft.Text(f"Extraction failed: {exc}"),
                     bgcolor=theme.ERROR,
                 )
             )

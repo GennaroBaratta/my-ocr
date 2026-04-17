@@ -27,22 +27,24 @@ def build_upload_view(
     )
     status_text = ft.Text("", size=12, color=theme.TEXT_MUTED, visible=False)
 
-    def on_file_picked(e: ft.FilePickerResultEvent) -> None:
-        if not e.files:
+    async def browse_files() -> None:
+        files = await file_picker.pick_files(
+            allowed_extensions=["pdf", "png", "jpg", "jpeg", "tif", "tiff"],
+            dialog_title="Select a document",
+        )
+        if not files:
             return
-        file_path = e.files[0].path
+        file_path = files[0].path
         if not file_path:
             return
         _start_pipeline(page, state, file_path, progress_bar, status_text)
-
-    file_picker.on_result = on_file_picked
 
     settings_btn = ft.IconButton(
         icon=ft.Icons.SETTINGS_OUTLINED,
         icon_color=theme.TEXT_MUTED,
         icon_size=20,
         tooltip="Settings",
-        on_click=lambda e: open_settings_dialog(page, state),
+        on_click=lambda: open_settings_dialog(page, state),
     )
 
     title = ft.Text(
@@ -53,11 +55,11 @@ def build_upload_view(
     )
     subtitle = ft.Text(
         "Upload a PDF or image scan for local OCR processing.",
-        size=14,
+        size=15,
         color=theme.TEXT_MUTED,
     )
 
-    drop_zone = build_drop_zone(file_picker)
+    drop_zone = build_drop_zone(browse_files)
     recent_runs = build_recent_runs(page, state)
     ollama_badge = OllamaStatus(state.ollama_endpoint)
 
@@ -88,7 +90,7 @@ def build_upload_view(
                         content=content,
                         width=600,
                         padding=ft.padding.symmetric(horizontal=24, vertical=16),
-                        alignment=ft.alignment.top_center,
+                        alignment=ft.Alignment.TOP_CENTER,
                         expand=True,
                     ),
                     ft.Container(

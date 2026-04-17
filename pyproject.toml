@@ -12,20 +12,22 @@ authors = [
   { name = "OpenAI Assistant" }
 ]
 dependencies = [
-  "Pillow>=10",
-  "PyYAML>=6",
+  "Pillow>=12.2.0",
+  "PyYAML>=6.0.3",
 ]
 
 [dependency-groups]
 dev = [
-  "pytest>=8.0",
-  "ruff>=0.6",
+  "flet>=0.84.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.10",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
-  "ruff>=0.6",
+  "flet>=0.84.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.10",
 ]
 pdf = [
   "PyMuPDF>=1.24",
@@ -34,7 +36,7 @@ glmocr = [
   "glmocr[selfhosted]",
 ]
 ui = [
-  "flet>=0.25",
+  "flet>=0.84.0",
 ]
 
 [project.scripts]

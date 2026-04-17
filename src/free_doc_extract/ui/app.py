@@ -25,15 +25,18 @@ def create_app(page: ft.Page) -> None:
     state.load_recent_runs()
 
     file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
+    page.services.append(file_picker)
 
-    def route_change(e: ft.RouteChangeEvent) -> None:
+    def render_route() -> None:
         from .screens.results import build_results_view
         from .screens.review import build_review_view
         from .screens.upload import build_upload_view
 
+        route = page.route or "/"
+        if page.route != route:
+            page.route = route
+
         page.views.clear()
-        route = page.route
 
         page.views.append(build_upload_view(page, state, file_picker))
 
@@ -51,7 +54,10 @@ def create_app(page: ft.Page) -> None:
 
         page.update()
 
-    def view_pop(view: ft.ViewPopEvent) -> None:
+    def route_change(_e: ft.RouteChangeEvent) -> None:
+        render_route()
+
+    def view_pop(_e: ft.ViewPopEvent) -> None:
         page.views.pop()
         if page.views:
             top = page.views[-1]
@@ -59,4 +65,4 @@ def create_app(page: ft.Page) -> None:
 
     page.on_route_change = route_change
     page.on_view_pop = view_pop
-    page.go(page.route)
+    render_route()

@@ -50,19 +50,32 @@ def build_code_display(state: AppState) -> ft.Column:
     tabs = ft.Tabs(
         selected_index=state.active_result_tab,
         on_change=lambda e: _on_tab_change(e, state),
-        tabs=[
-            ft.Tab(text="Markdown", content=md_view),
-            ft.Tab(text="JSON", content=json_view),
-            ft.Tab(text="Raw", content=raw_view),
-        ],
+        length=3,
         expand=True,
-        indicator_color=theme.PRIMARY,
-        label_color=theme.TEXT_PRIMARY,
-        unselected_label_color=theme.TEXT_MUTED,
+        content=ft.Column(
+            [
+                ft.TabBar(
+                    tabs=[
+                        ft.Tab(label="Markdown"),
+                        ft.Tab(label="JSON"),
+                        ft.Tab(label="Raw"),
+                    ],
+                    indicator_color=theme.PRIMARY,
+                    label_color=theme.TEXT_PRIMARY,
+                    unselected_label_color=theme.TEXT_MUTED,
+                ),
+                ft.TabBarView(
+                    controls=[md_view, json_view, raw_view],
+                    expand=True,
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        ),
     )
 
     return ft.Column([tabs], spacing=0, expand=True)
 
 
-def _on_tab_change(e: ft.ControlEvent, state: AppState) -> None:
+def _on_tab_change(e: ft.Event[ft.Tabs], state: AppState) -> None:
     state.active_result_tab = int(e.data) if e.data else 0
