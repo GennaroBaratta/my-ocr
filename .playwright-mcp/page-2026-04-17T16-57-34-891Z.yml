@@ -1,0 +1,50 @@
+- generic [ref=e6]:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic "Back":
+            - button [active] [ref=e7]
+          - generic:
+            - generic: PublicWaterMassMailing.pdf
+          - generic "Previous page":
+            - button [ref=e8]
+          - generic:
+            - generic: Page 1 / 8
+          - generic "Next page":
+            - button [ref=e9]
+          - generic "Zoom out":
+            - button [ref=e10]
+          - generic:
+            - generic: 100%
+          - generic "Zoom in":
+            - button [ref=e11]
+          - generic "Run OCR using the reviewed layout boxes":
+            - button "Run OCR" [ref=e12]
+          - generic:
+            - generic: PAGES
+          - group:
+            - button "1" [ref=e13]
+            - button "2" [ref=e14]
+            - button "3" [ref=e15]
+            - button "4" [ref=e16]
+            - button "5" [ref=e17]
+            - button "6" [ref=e18]
+            - button "7" [ref=e19]
+            - button "8" [ref=e20]
+          - group:
+            - group:
+              - img [ref=e21]
+              - button "text" [ref=e22]
+              - button "text" [ref=e23]
+              - button "text" [ref=e24]
+              - button "text" [ref=e25]
+              - button "text" [ref=e26]
+              - button "paragraph_title" [ref=e27]
+              - button "text" [ref=e28]
+              - button "text" [ref=e29]
+              - button "paragraph_title" [ref=e30]
+              - button "text" [ref=e31]
+              - button "text" [ref=e32]
+              - button "text" [ref=e33]
+              - button "text" [ref=e34]

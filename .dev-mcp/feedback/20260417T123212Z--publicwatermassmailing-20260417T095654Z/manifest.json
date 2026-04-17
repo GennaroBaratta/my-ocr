@@ -1,0 +1,32 @@
+{
+  "bundle_id": "20260417T123212Z--publicwatermassmailing-20260417T095654Z",
+  "created_at": "2026-04-17T12:32:15+00:00",
+  "run_id": "publicwatermassmailing-20260417T095654Z",
+  "run_dir": "data/runs/publicwatermassmailing-20260417T095654Z",
+  "summary": "Retry after autonomous screenshot fix",
+  "notes": "End-to-end retry through integrated my-ocr-dev MCP.",
+  "issues": [
+    {
+      "severity": "low",
+      "location": "results",
+      "note": "Integrated MCP retry after autonomous screenshot fix."
+    }
+  ],
+  "screenshots": [
+    {
+      "kind": "captured",
+      "route": "/results/publicwatermassmailing-20260417T095654Z",
+      "ui_url": "http://127.0.0.1:8550",
+      "copied_path": ".dev-mcp/feedback/20260417T123212Z--publicwatermassmailing-20260417T095654Z/attachments/screenshot-01.png",
+      "size_bytes": 203623
+    }
+  ],
+  "capture_route": "/results/publicwatermassmailing-20260417T095654Z",
+  "related_paths": [
+    {
+      "path": "/home/gebbaro/Progetti/my-ocr/data/runs/publicwatermassmailing-20260417T095654Z/reviewed_layout.json",
+      "repo_relative_path": "data/runs/publicwatermassmailing-20260417T095654Z/reviewed_layout.json",
+      "exists": true
+    }
+  ]
+}

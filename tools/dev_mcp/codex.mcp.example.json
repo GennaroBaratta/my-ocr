@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "my-ocr-dev": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "-m",
+        "tools.dev_mcp",
+        "--transport",
+        "stdio"
+      ]
+    }
+  }
+}
