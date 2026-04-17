@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,14 @@ from .ocr_fallback import (
     run_crop_fallback_for_page,
 )
 from .paths import RunPaths
+from .review_artifacts import (
+    build_review_layout_payload,
+    build_review_page_from_layout,
+    load_review_layout_payload,
+    review_layout_pages_by_number,
+    review_page_to_layout_payload,
+    save_review_layout_payload,
+)
 from .settings import resolve_ocr_api_client
 from .utils import load_json, write_json, write_text
 
@@ -24,6 +33,7 @@ def run_ocr(
     *,
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
+    reviewed_layout_path: str | Path | None = None,
 ) -> dict[str, Any]:
     normalized_page_paths = _normalize_page_paths(page_paths)
 
@@ -32,6 +42,12 @@ def run_ocr(
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
     model, endpoint, num_ctx = resolve_ocr_api_client(config_path)
+    reviewed_layout_payload = (
+        load_review_layout_payload(reviewed_layout_path)
+        if reviewed_layout_path is not None
+        else None
+    )
+    reviewed_layout_pages = review_layout_pages_by_number(reviewed_layout_payload)
 
     pages: list[dict[str, Any]] = []
     fallback_pages: list[dict[str, Any]] = []
@@ -47,6 +63,8 @@ def run_ocr(
                 model=model,
                 endpoint=endpoint,
                 num_ctx=num_ctx,
+                reviewed_layout_page=reviewed_layout_pages.get(page_number),
+                reviewed_layout_path=reviewed_layout_path,
             )
             pages.append(page_result)
             source = str(page_result["markdown_source"])
@@ -62,6 +80,12 @@ def run_ocr(
             "sources": source_counts,
         },
     }
+    if reviewed_layout_payload is not None and reviewed_layout_path is not None:
+        json_result["summary"]["reviewed_layout"] = {
+            "path": str(reviewed_layout_path),
+            "page_count": len(reviewed_layout_pages),
+            "apply_mode": "planning_and_fallback_only",
+        }
 
     write_text(paths.ocr_markdown_path, markdown)
     write_json(paths.ocr_json_path, json_result)
@@ -80,6 +104,64 @@ def run_ocr(
         "raw_dir": str(paths.raw_dir),
         "config_path": config_path,
         "layout_device": layout_device,
+    }
+
+
+def prepare_review_artifacts(
+    page_paths: Sequence[str | Path],
+    run_dir: str | Path,
+    *,
+    config_path: str = "config/local.yaml",
+    layout_device: str = "cuda",
+) -> dict[str, Any]:
+    normalized_page_paths = _normalize_page_paths(page_paths)
+
+    parser_cls = _load_glmocr_parser()
+    paths = RunPaths.from_run_dir(run_dir)
+    paths.ensure_run_dir()
+
+    review_pages: list[dict[str, Any]] = []
+
+    with parser_cls(config_path=config_path, layout_device=layout_device) as parser:
+        for page_number, page_path in enumerate(normalized_page_paths, start=1):
+            result = parser.parse(page_path)
+            result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
+            if isinstance(result_dict, dict) and result_dict.get("error"):
+                raise RuntimeError(
+                    f"Review preparation failed for {page_path}: {result_dict['error']}"
+                )
+
+            if not hasattr(result, "save"):
+                raise RuntimeError(
+                    "GLM-OCR result.save() is required to load saved *_model.json for review prep."
+                )
+
+            result.save(output_dir=str(paths.raw_dir))
+            sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path)
+            sdk_json = load_json(sdk_json_path)
+            blocks = extract_layout_blocks(sdk_json)
+            coord_space = _detect_coord_space(blocks, page_path)
+            image_width, image_height = _get_image_size(page_path)
+            review_pages.append(
+                build_review_page_from_layout(
+                    page_number=page_number,
+                    page_path=page_path,
+                    source_sdk_json_path=str(sdk_json_path),
+                    layout=sdk_json,
+                    coord_space=coord_space,
+                    image_width=image_width,
+                    image_height=image_height,
+                )
+            )
+
+    reviewed_layout_payload = build_review_layout_payload(review_pages, status="prepared")
+    save_review_layout_payload(paths.reviewed_layout_path, reviewed_layout_payload)
+    return {
+        "reviewed_layout": reviewed_layout_payload,
+        "raw_dir": str(paths.raw_dir),
+        "config_path": config_path,
+        "layout_device": layout_device,
+        "reviewed_layout_path": str(paths.reviewed_layout_path),
     }
 
 
@@ -116,6 +198,8 @@ def _run_page_ocr(
     model: str,
     endpoint: str,
     num_ctx: int,
+    reviewed_layout_page: dict[str, Any] | None,
+    reviewed_layout_path: str | Path | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     result = parser.parse(page_path)
     result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
@@ -132,7 +216,15 @@ def _run_page_ocr(
     sdk_json = load_json(sdk_json_path)
     blocks = extract_layout_blocks(sdk_json)
     coord_space = _detect_coord_space(blocks, page_path)
-    plan = plan_page_ocr(sdk_markdown, sdk_json, coord_space=coord_space)
+    reviewed_layout = _resolve_reviewed_layout_page(reviewed_layout_page)
+    if reviewed_layout is None:
+        page_layout = sdk_json
+        page_coord_space = coord_space
+        layout_source = "sdk_json"
+    else:
+        page_layout, page_coord_space = reviewed_layout
+        layout_source = "reviewed_layout"
+    plan = plan_page_ocr(sdk_markdown, page_layout, coord_space=page_coord_space)
 
     fallback_result: dict[str, Any] | None = None
 
@@ -145,8 +237,8 @@ def _run_page_ocr(
     elif plan.primary_source == "crop_fallback":
         crop_markdown, recognized_chunks = run_crop_fallback_for_page(
             page_path=page_path,
-            page_json=sdk_json,
-            coord_space=plan.coord_space,
+            page_json=page_layout,
+            coord_space=page_coord_space,
             page_fallback_dir=paths.fallback_page_dir(page_number),
             model=model,
             endpoint=endpoint,
@@ -202,7 +294,13 @@ def _run_page_ocr(
             "markdown_source": markdown_source,
             "sdk_markdown": sdk_markdown,
             "sdk_json_path": str(sdk_json_path),
+            "layout_source": layout_source,
             "fallback_assessment": plan.assessment,
+            **(
+                {"reviewed_layout_path": str(reviewed_layout_path)}
+                if reviewed_layout is not None and reviewed_layout_path is not None
+                else {}
+            ),
         },
         fallback_result,
     )
@@ -210,12 +308,12 @@ def _run_page_ocr(
 
 def _load_glmocr_parser() -> type:
     try:
-        from glmocr import GlmOcr
+        glmocr_module = import_module("glmocr")
     except ImportError as exc:
         raise RuntimeError(
             "GLM-OCR is not installed. Install with `pip install -e .[glmocr]`."
         ) from exc
-    return GlmOcr
+    return glmocr_module.GlmOcr
 
 
 def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
@@ -223,11 +321,11 @@ def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
         return "unknown"
 
     try:
-        from PIL import Image
+        image_module = import_module("PIL.Image")
     except ImportError:
         return detect_bbox_coord_space(blocks)
 
-    with Image.open(page_path) as image:
+    with image_module.open(page_path) as image:
         width, height = image.size
     return detect_bbox_coord_space(blocks, width=width, height=height)
 
@@ -253,3 +351,21 @@ def _recognize_full_page_markdown(
         endpoint=endpoint,
         num_ctx=num_ctx,
     ).strip()
+
+
+def _get_image_size(page_path: str | Path) -> tuple[int, int]:
+    try:
+        image_module = import_module("PIL.Image")
+    except ImportError as exc:
+        raise RuntimeError("Review preparation requires Pillow.") from exc
+
+    with image_module.open(page_path) as image:
+        return image.size
+
+
+def _resolve_reviewed_layout_page(
+    reviewed_layout_page: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str] | None:
+    if reviewed_layout_page is None:
+        return None
+    return review_page_to_layout_payload(reviewed_layout_page)

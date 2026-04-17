@@ -72,6 +72,10 @@ class RunPaths:
         return self.run_dir / "meta.json"
 
     @property
+    def reviewed_layout_path(self) -> Path:
+        return self.run_dir / "reviewed_layout.json"
+
+    @property
     def rules_prediction_path(self) -> Path:
         return self.predictions_dir / "rules.json"
 
@@ -106,8 +110,14 @@ class RunPaths:
     def published_ocr_artifact_paths(self) -> tuple[Path, ...]:
         return (self.pages_dir, *self._ocr_output_paths())
 
+    def published_reviewed_ocr_artifact_paths(self) -> tuple[Path, ...]:
+        return self._ocr_output_paths()
+
     def resettable_ocr_artifact_paths(self) -> tuple[Path, ...]:
         return (*self._ocr_output_paths(), self.meta_path)
+
+    def published_review_artifact_paths(self) -> tuple[Path, ...]:
+        return (self.pages_dir, self.raw_dir, self.reviewed_layout_path)
 
     def reset_ocr_artifacts(self) -> None:
         for path in self.resettable_ocr_artifact_paths():

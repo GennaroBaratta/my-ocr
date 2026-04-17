@@ -86,6 +86,42 @@ def write_basic_ocr_outputs(
     }
 
 
+def build_reviewed_layout_page(
+    *,
+    page_number: int = 1,
+    page_path: str,
+    source_sdk_json_path: str,
+    blocks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "page_number": page_number,
+        "page_path": page_path,
+        "image_size": {"width": 100, "height": 100},
+        "coord_space": "pixel",
+        "source_sdk_json_path": source_sdk_json_path,
+        "blocks": blocks or [],
+    }
+
+
+def build_reviewed_layout_block(
+    *,
+    block_id: str = "p0-b0",
+    index: int = 0,
+    label: str = "text",
+    content: str = "",
+    bbox: list[int] | None = None,
+    confidence: float = 1.0,
+) -> dict[str, Any]:
+    return {
+        "id": block_id,
+        "index": index,
+        "label": label,
+        "content": content,
+        "confidence": confidence,
+        "bbox": bbox or [1, 2, 10, 20],
+    }
+
+
 def build_basic_ocr_result(
     run_dir_arg: str | Path,
     *,
@@ -130,3 +166,23 @@ def seed_existing_run(run_dir: Path) -> None:
         json.dumps({"canonical": "keep-me"}),
         encoding="utf-8",
     )
+
+
+def write_reviewed_layout(run_dir: Path, *, page_path: str | None = None) -> Path:
+    actual_page_path = page_path or str(run_dir / "pages" / "page-0001.png")
+    source_sdk_json_path = str(run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json")
+    payload = {
+        "version": 1,
+        "status": "reviewed",
+        "pages": [
+            build_reviewed_layout_page(
+                page_path=actual_page_path,
+                source_sdk_json_path=source_sdk_json_path,
+                blocks=[build_reviewed_layout_block(content="Reviewed block")],
+            )
+        ],
+        "summary": {"page_count": 1},
+    }
+    path = run_dir / "reviewed_layout.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path

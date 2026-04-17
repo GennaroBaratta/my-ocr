@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,10 @@ import pytest
 from free_doc_extract import ocr
 from free_doc_extract import ocr_fallback
 from free_doc_extract.ocr import run_ocr
+from tests.support import (
+    build_reviewed_layout_block,
+    build_reviewed_layout_page,
+)
 from free_doc_extract.ocr_fallback import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
@@ -77,9 +82,8 @@ class FakeGlmOcr:
 
 
 def _write_test_image(path: Path) -> None:
-    from PIL import Image
-
-    Image.new("RGB", (10, 10), color="white").save(path)
+    image_module = import_module("PIL.Image")
+    image_module.new("RGB", (10, 10), color="white").save(path)
 
 
 def test_run_ocr_uses_page_images_and_public_outputs(tmp_path, monkeypatch) -> None:
@@ -398,4 +402,71 @@ def test_run_ocr_persists_normalized_table_markdown(tmp_path, monkeypatch) -> No
 
     assert result["markdown"] == "Intro\n\nX | Y\n1 | 2"
     assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "Intro\n\nX | Y\n1 | 2"
-    assert result["json"]["pages"][0]["markdown"] == "Intro\n\nX | Y\n1 | 2"
+
+
+def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class EmptyGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            self.calls.append(input_path)
+            return FakeResult(
+                markdown_result="",
+                json_result={},
+                saved_model_json={"blocks": []},
+                artifact_stem=Path(input_path).stem,
+            )
+
+    def fake_crop_fallback(**kwargs):
+        captured["page_json"] = kwargs["page_json"]
+        captured["coord_space"] = kwargs["coord_space"]
+        return "review-driven text", []
+
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=EmptyGlmOcr))
+    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    reviewed_layout_path = tmp_path / "reviewed_layout.json"
+    reviewed_layout_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_path=str(source),
+                        source_sdk_json_path=str(tmp_path / "raw.json"),
+                        blocks=[
+                            build_reviewed_layout_block(
+                                label="table",
+                                bbox=[2, 3, 9, 10],
+                            )
+                        ],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        reviewed_layout_path=reviewed_layout_path,
+    )
+
+    assert captured["page_json"] == {
+        "blocks": [{"index": 0, "label": "table", "content": "", "bbox_2d": [2, 3, 9, 10]}]
+    }
+    assert captured["coord_space"] == "pixel"
+    assert result["markdown"] == "review-driven text"
+    assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
+    assert result["json"]["pages"][0]["reviewed_layout_path"] == str(reviewed_layout_path)
+    assert result["json"]["summary"]["reviewed_layout"] == {
+        "path": str(reviewed_layout_path),
+        "page_count": 1,
+        "apply_mode": "planning_and_fallback_only",
+    }
+    assert result["json"]["pages"][0]["markdown"] == "review-driven text"

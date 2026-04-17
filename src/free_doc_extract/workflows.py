@@ -9,7 +9,7 @@ from typing import Any, Callable
 from .evaluate import evaluate_directories, write_markdown_report
 from .extract_rules import extract_from_markdown
 from .ingest import normalize_document
-from .ocr import run_ocr
+from .ocr import prepare_review_artifacts, run_ocr
 from .paths import RunPaths
 from .settings import (
     DEFAULT_CONFIG_PATH,
@@ -29,6 +29,7 @@ def run_ocr_workflow(
     normalize_document_fn: Callable[[str, str | Path], list[str]] = normalize_document,
     run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
+    recorded_input_path: str | None = None,
 ) -> Path:
     paths = RunPaths.from_input(input_path, run=run, run_root=run_root)
     run_dir_preexisted = paths.run_dir.exists()
@@ -43,6 +44,54 @@ def run_ocr_workflow(
             layout_device=layout_device,
         )
         _publish_staged_ocr_run(
+            staged_paths,
+            paths,
+            post_publish=lambda: write_run_metadata(
+                paths.run_dir,
+                recorded_input_path or input_path,
+                paths.list_page_paths(),
+                {
+                    **result,
+                    "raw_dir": str(paths.raw_dir),
+                },
+                write_json_fn=write_json_fn,
+            ),
+        )
+    except Exception:
+        if not run_dir_preexisted:
+            _remove_dir_if_empty(paths.run_dir)
+        raise
+    finally:
+        staged_paths_local = locals().get("staged_paths")
+        if staged_paths_local is not None:
+            shutil.rmtree(staged_paths_local.run_dir, ignore_errors=True)
+    return paths.run_dir
+
+
+def prepare_review_workflow(
+    input_path: str,
+    *,
+    run: str | None = None,
+    run_root: str = DEFAULT_RUN_ROOT,
+    config_path: str = DEFAULT_CONFIG_PATH,
+    layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    normalize_document_fn: Callable[[str, str | Path], list[str]] = normalize_document,
+    prepare_review_artifacts_fn: Callable[..., dict[str, Any]] = prepare_review_artifacts,
+    write_json_fn: Callable[[str | Path, Any], None] = write_json,
+) -> Path:
+    paths = RunPaths.from_input(input_path, run=run, run_root=run_root)
+    run_dir_preexisted = paths.run_dir.exists()
+    paths.ensure_run_dir()
+    try:
+        staged_paths = _create_staged_review_paths(paths)
+        page_paths = normalize_document_fn(input_path, staged_paths.run_dir)
+        result = prepare_review_artifacts_fn(
+            page_paths,
+            staged_paths.run_dir,
+            config_path=config_path,
+            layout_device=layout_device,
+        )
+        _publish_staged_review_run(
             staged_paths,
             paths,
             post_publish=lambda: write_run_metadata(
@@ -64,6 +113,54 @@ def run_ocr_workflow(
         staged_paths_local = locals().get("staged_paths")
         if staged_paths_local is not None:
             shutil.rmtree(staged_paths_local.run_dir, ignore_errors=True)
+    _clear_prediction_outputs(paths)
+    return paths.run_dir
+
+
+def run_reviewed_ocr_workflow(
+    run: str,
+    *,
+    run_root: str = DEFAULT_RUN_ROOT,
+    config_path: str = DEFAULT_CONFIG_PATH,
+    layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
+    write_json_fn: Callable[[str | Path, Any], None] = write_json,
+) -> Path:
+    paths = RunPaths.from_named_run(run, run_root=run_root)
+    page_paths = paths.list_page_paths()
+    if not page_paths:
+        raise FileNotFoundError(f"No page images found in {paths.pages_dir}")
+    recorded_input_path = _load_existing_input_path(paths)
+
+    staged_paths = _create_staged_ocr_paths(paths)
+    try:
+        result = run_ocr_fn(
+            page_paths,
+            staged_paths.run_dir,
+            config_path=config_path,
+            layout_device=layout_device,
+            reviewed_layout_path=(
+                paths.reviewed_layout_path if paths.reviewed_layout_path.exists() else None
+            ),
+        )
+        _publish_staged_ocr_run(
+            staged_paths,
+            paths,
+            include_pages=False,
+            post_publish=lambda: write_run_metadata(
+                paths.run_dir,
+                recorded_input_path,
+                paths.list_page_paths(),
+                {
+                    **result,
+                    "raw_dir": str(paths.raw_dir),
+                },
+                write_json_fn=write_json_fn,
+            ),
+        )
+    finally:
+        shutil.rmtree(staged_paths.run_dir, ignore_errors=True)
+    _clear_prediction_outputs(paths)
     return paths.run_dir
 
 
@@ -218,6 +315,8 @@ def write_run_metadata(
         "config_path": ocr_result.get("config_path"),
         "layout_device": ocr_result.get("layout_device"),
     }
+    if paths.reviewed_layout_path.exists():
+        payload["reviewed_layout_path"] = str(paths.reviewed_layout_path)
     write_json_fn(paths.meta_path, payload)
 
 
@@ -228,10 +327,18 @@ def _create_staged_ocr_paths(paths: RunPaths) -> RunPaths:
     return RunPaths.from_run_dir(staging_dir)
 
 
+def _create_staged_review_paths(paths: RunPaths) -> RunPaths:
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix=f".{paths.run_name}-review-", dir=str(paths.run_dir.parent))
+    )
+    return RunPaths.from_run_dir(staging_dir)
+
+
 def _publish_staged_ocr_run(
     source_paths: RunPaths,
     target_paths: RunPaths,
     *,
+    include_pages: bool = True,
     post_publish: Callable[[], None] | None = None,
 ) -> None:
     backup_dir = Path(
@@ -246,8 +353,18 @@ def _publish_staged_ocr_run(
         if target_paths.meta_path.exists():
             _move_path(target_paths.meta_path, backup_paths.meta_path)
             backed_up_pairs.append((target_paths.meta_path, backup_paths.meta_path))
-        _move_ocr_artifacts(target_paths, backup_paths, moved_pairs=backed_up_pairs)
-        _move_ocr_artifacts(source_paths, target_paths, moved_pairs=published_pairs)
+        _move_ocr_artifacts(
+            target_paths,
+            backup_paths,
+            moved_pairs=backed_up_pairs,
+            include_pages=include_pages,
+        )
+        _move_ocr_artifacts(
+            source_paths,
+            target_paths,
+            moved_pairs=published_pairs,
+            include_pages=include_pages,
+        )
         _normalize_published_ocr_artifacts(
             target_paths,
             source_run_dir=source_paths.run_dir,
@@ -269,13 +386,74 @@ def _publish_staged_ocr_run(
     shutil.rmtree(backup_dir, ignore_errors=True)
 
 
+def _publish_staged_review_run(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    post_publish: Callable[[], None] | None = None,
+) -> None:
+    backup_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{target_paths.run_name}-review-backup-", dir=str(target_paths.run_dir.parent)
+        )
+    )
+    backup_paths = RunPaths.from_run_dir(backup_dir)
+    backed_up_pairs: list[tuple[Path, Path]] = []
+    published_pairs: list[tuple[Path, Path]] = []
+    try:
+        if target_paths.meta_path.exists():
+            _move_path(target_paths.meta_path, backup_paths.meta_path)
+            backed_up_pairs.append((target_paths.meta_path, backup_paths.meta_path))
+        _move_review_artifacts(target_paths, backup_paths, moved_pairs=backed_up_pairs)
+        _move_review_artifacts(source_paths, target_paths, moved_pairs=published_pairs)
+        _normalize_published_review_json(
+            target_paths.reviewed_layout_path,
+            source_run_dir=source_paths.run_dir,
+            target_run_dir=target_paths.run_dir,
+        )
+        if post_publish is not None:
+            post_publish()
+        _remove_replaced_ocr_outputs(target_paths)
+    except Exception:
+        try:
+            _remove_paths([target_paths.meta_path, *[target for _, target in published_pairs]])
+            _restore_moved_artifacts(backed_up_pairs)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "Failed to restore review artifacts after publish failure. "
+                f"Backup preserved at {backup_dir}."
+            ) from restore_exc
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        raise
+    shutil.rmtree(backup_dir, ignore_errors=True)
+
+
 def _move_ocr_artifacts(
     source_paths: RunPaths,
     target_paths: RunPaths,
     *,
     moved_pairs: list[tuple[Path, Path]] | None = None,
+    include_pages: bool = True,
 ) -> None:
-    for source, target in _ocr_artifact_pairs(source_paths, target_paths):
+    for source, target in _ocr_artifact_pairs(
+        source_paths,
+        target_paths,
+        include_pages=include_pages,
+    ):
+        if not source.exists():
+            continue
+        _move_path(source, target)
+        if moved_pairs is not None:
+            moved_pairs.append((source, target))
+
+
+def _move_review_artifacts(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    moved_pairs: list[tuple[Path, Path]] | None = None,
+) -> None:
+    for source, target in _review_artifact_pairs(source_paths, target_paths):
         if not source.exists():
             continue
         _move_path(source, target)
@@ -296,6 +474,19 @@ def _remove_ocr_artifacts(paths: RunPaths) -> None:
             target.unlink()
 
 
+def _remove_replaced_ocr_outputs(paths: RunPaths) -> None:
+    for target in (
+        paths.fallback_dir,
+        paths.ocr_markdown_path,
+        paths.ocr_json_path,
+        paths.ocr_fallback_path,
+    ):
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink()
+
+
 def _remove_paths(paths: list[Path]) -> None:
     for path in paths:
         if path.is_dir():
@@ -304,11 +495,38 @@ def _remove_paths(paths: list[Path]) -> None:
             path.unlink()
 
 
-def _ocr_artifact_pairs(source_paths: RunPaths, target_paths: RunPaths) -> list[tuple[Path, Path]]:
+def _ocr_artifact_pairs(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    include_pages: bool = True,
+) -> list[tuple[Path, Path]]:
+    source_artifacts = (
+        source_paths.published_ocr_artifact_paths()
+        if include_pages
+        else source_paths.published_reviewed_ocr_artifact_paths()
+    )
+    target_artifacts = (
+        target_paths.published_ocr_artifact_paths()
+        if include_pages
+        else target_paths.published_reviewed_ocr_artifact_paths()
+    )
     return list(
         zip(
-            source_paths.published_ocr_artifact_paths(),
-            target_paths.published_ocr_artifact_paths(),
+            source_artifacts,
+            target_artifacts,
+            strict=True,
+        )
+    )
+
+
+def _review_artifact_pairs(
+    source_paths: RunPaths, target_paths: RunPaths
+) -> list[tuple[Path, Path]]:
+    return list(
+        zip(
+            source_paths.published_review_artifact_paths(),
+            target_paths.published_review_artifact_paths(),
             strict=True,
         )
     )
@@ -365,6 +583,29 @@ def _normalize_published_ocr_json(
         target_run_dir=target_run_dir,
         page_keys=("page_path", "sdk_json_path"),
     )
+
+
+def _normalize_published_review_json(
+    payload_path: Path, *, source_run_dir: str | Path, target_run_dir: str | Path
+) -> None:
+    if not payload_path.exists():
+        return
+
+    payload = load_json(payload_path)
+    if not isinstance(payload, dict):
+        return
+
+    source_prefix = str(source_run_dir)
+    target_prefix = str(target_run_dir)
+    pages = payload.get("pages")
+    if isinstance(pages, list):
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            _rewrite_path_keys(
+                page, ("page_path", "source_sdk_json_path"), source_prefix, target_prefix
+            )
+    write_json(payload_path, payload)
 
 
 def _normalize_published_fallback_json(
@@ -437,10 +678,30 @@ def _clear_structured_outputs(paths: RunPaths, *, keep_metadata: bool = False) -
         paths.structured_metadata_path.unlink()
 
 
+def _clear_prediction_outputs(paths: RunPaths) -> None:
+    for path in (
+        paths.rules_prediction_path,
+        paths.canonical_prediction_path,
+    ):
+        if path.exists():
+            path.unlink()
+    _clear_structured_outputs(paths)
+
+
 def _remove_dir_if_empty(path: str | Path) -> None:
     target = Path(path)
     if target.exists() and not any(target.iterdir()):
         target.rmdir()
+
+
+def _load_existing_input_path(paths: RunPaths) -> str:
+    if not paths.meta_path.exists():
+        return str(paths.run_dir)
+    payload = load_json(paths.meta_path)
+    if not isinstance(payload, dict):
+        return str(paths.run_dir)
+    input_path = payload.get("input_path")
+    return str(input_path) if input_path else str(paths.run_dir)
 
 
 def _validate_structured_prediction(
