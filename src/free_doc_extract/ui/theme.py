@@ -23,3 +23,7 @@ BORDER = "#2E333D"
 # ── Bounding-box colours ────────────────────────────────────────────
 BOX_SELECTED = PRIMARY
 BOX_UNSELECTED = ACCENT_YELLOW
+BOX_TEXT_BLOCK = "#60A5FA"
+BOX_TABLE = SUCCESS
+BOX_FIGURE_IMAGE = "#F6E05E"
+BOX_HEADER = "#F6AD55"

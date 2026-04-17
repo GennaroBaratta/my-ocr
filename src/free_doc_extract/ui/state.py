@@ -9,6 +9,11 @@ from typing import Any, cast
 
 from free_doc_extract.ocr_fallback import normalize_bbox
 from free_doc_extract.paths import RunPaths
+from free_doc_extract.review_artifacts import (
+    build_review_layout_payload,
+    load_review_layout_payload,
+    save_review_layout_payload,
+)
 from free_doc_extract.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
@@ -122,6 +127,12 @@ class AppState:
             self.pages.append(PageData(index=i, image_path=pp, boxes=boxes_by_page.get(i, [])))
 
     def _load_boxes(self, page_paths: list[str]) -> dict[int, list[BoundingBox]]:
+        review_payload = self._load_review_payload()
+        if review_payload is not None:
+            review_boxes = self._load_review_boxes(review_payload, page_paths)
+            if review_boxes:
+                return review_boxes
+
         data = self._load_ocr_payload()
         if data is None:
             return {}
@@ -154,6 +165,69 @@ class AppState:
                         height=y2 - y1,
                         label=block.get("label", "unknown"),
                         content=block.get("content", ""),
+                    )
+                )
+            result[page_idx] = boxes
+        return result
+
+    def _load_review_boxes(
+        self, payload: dict[str, Any], page_paths: list[str]
+    ) -> dict[int, list[BoundingBox]]:
+        pages = payload.get("pages")
+        if not isinstance(pages, list):
+            return {}
+
+        result: dict[int, list[BoundingBox]] = {}
+        for fallback_idx, page in enumerate(pages):
+            if not isinstance(page, dict):
+                continue
+            page_data = cast(dict[str, Any], page)
+            page_number = page_data.get("page_number")
+            page_idx = (
+                page_number - 1
+                if isinstance(page_number, int) and page_number > 0
+                else fallback_idx
+            )
+            page_path = page_data.get("page_path")
+            resolved_page_path = self._resolve_page_path(
+                page_idx,
+                page_path if isinstance(page_path, str) else None,
+                page_paths,
+            )
+            image_width, image_height = (
+                get_image_size(resolved_page_path) if resolved_page_path else (0, 0)
+            )
+            blocks = page_data.get("blocks")
+            if not isinstance(blocks, list):
+                continue
+            boxes: list[BoundingBox] = []
+            for block_idx, block in enumerate(blocks):
+                if not isinstance(block, dict):
+                    continue
+                block_data = cast(dict[str, Any], block)
+                bbox = self._normalize_bbox(
+                    block_data.get("bbox"),
+                    image_width=image_width,
+                    image_height=image_height,
+                    coord_space=page_data.get("coord_space")
+                    if isinstance(page_data.get("coord_space"), str)
+                    else None,
+                )
+                if bbox is None:
+                    continue
+                x1, y1, x2, y2 = bbox
+                block_index = block_data.get("index", block_idx)
+                boxes.append(
+                    BoundingBox(
+                        id=str(block_data.get("id", f"p{page_idx}-b{block_index}")),
+                        page_index=page_idx,
+                        x=x1,
+                        y=y1,
+                        width=x2 - x1,
+                        height=y2 - y1,
+                        label=str(block_data.get("label", "unknown")),
+                        confidence=float(block_data.get("confidence", 1.0)),
+                        content=str(block_data.get("content", "")),
                     )
                 )
             result[page_idx] = boxes
@@ -214,6 +288,11 @@ class AppState:
             return json.loads(self.run_paths.ocr_json_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
+
+    def _load_review_payload(self) -> dict[str, Any] | None:
+        if not self.run_paths:
+            return None
+        return load_review_layout_payload(self.run_paths.reviewed_layout_path)
 
     def _load_json_path(self, path: Path) -> Any:
         candidate_paths = [path]
@@ -339,6 +418,7 @@ class AppState:
                 if box.id == box_id:
                     for k, v in kwargs.items():
                         setattr(box, k, v)
+                    self.save_reviewed_layout()
                     return
 
     def remove_box(self, box_id: str) -> None:
@@ -346,9 +426,69 @@ class AppState:
             page.boxes = [b for b in page.boxes if b.id != box_id]
         if self.selected_box_id == box_id:
             self.selected_box_id = None
+        self.save_reviewed_layout()
+
+    def save_reviewed_layout(self) -> None:
+        if not self.run_paths:
+            return
+
+        review_pages: list[dict[str, Any]] = []
+        for page in self.pages:
+            image_width, image_height = get_image_size(page.image_path)
+            review_pages.append(
+                {
+                    "page_number": page.index + 1,
+                    "page_path": page.image_path,
+                    "image_size": {"width": image_width, "height": image_height},
+                    "coord_space": "pixel",
+                    "source_sdk_json_path": self._review_source_sdk_json_path(page.index),
+                    "blocks": [
+                        {
+                            "id": box.id,
+                            "index": block_index,
+                            "label": box.label,
+                            "content": box.content,
+                            "confidence": box.confidence,
+                            "bbox": [
+                                round(box.x),
+                                round(box.y),
+                                round(box.x + box.width),
+                                round(box.y + box.height),
+                            ],
+                        }
+                        for block_index, box in enumerate(page.boxes)
+                    ],
+                }
+            )
+
+        payload = build_review_layout_payload(review_pages, status="reviewed")
+        save_review_layout_payload(self.run_paths.reviewed_layout_path, payload)
 
     @property
     def current_page(self) -> PageData | None:
         if 0 <= self.current_page_index < len(self.pages):
             return self.pages[self.current_page_index]
         return None
+
+    def _review_source_sdk_json_path(self, page_index: int) -> str | None:
+        payload = self._load_review_payload()
+        if payload is not None:
+            pages = payload.get("pages")
+            if isinstance(pages, list) and 0 <= page_index < len(pages):
+                page = pages[page_index]
+                if isinstance(page, dict):
+                    source_sdk_json_path = page.get("source_sdk_json_path")
+                    if isinstance(source_sdk_json_path, str):
+                        return source_sdk_json_path
+
+        ocr_payload = self._load_ocr_payload()
+        if not isinstance(ocr_payload, dict):
+            return None
+        pages = ocr_payload.get("pages")
+        if not isinstance(pages, list) or not (0 <= page_index < len(pages)):
+            return None
+        page = pages[page_index]
+        if not isinstance(page, dict):
+            return None
+        source_sdk_json_path = page.get("sdk_json_path")
+        return source_sdk_json_path if isinstance(source_sdk_json_path, str) else None

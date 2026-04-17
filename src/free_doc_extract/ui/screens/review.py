@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 import flet as ft
 
 from .. import theme
-from ..components.bbox_editor import build_bbox_editor
+from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
 from ..state import AppState
@@ -37,7 +37,31 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     content_row = ft.Row(spacing=0, expand=True)
 
     def rebuild() -> None:
-        content_row.controls = _build_panes(page, state, rebuild)
+        content_row.controls = _build_panes(
+            state,
+            on_page_select,
+            on_box_selected,
+            on_box_changed,
+            on_box_live_change,
+            on_deselect,
+            on_remove,
+        )
+        page.update()
+
+    def refresh_selection() -> None:
+        if len(content_row.controls) < 3:
+            rebuild()
+            return
+
+        bbox_editor = cast(ft.Container, content_row.controls[1])
+        refresh_bbox_editor(
+            bbox_editor,
+            state,
+            on_box_selected,
+            on_box_changed,
+            on_box_live_change,
+        )
+        content_row.controls[2] = build_inspector(state, on_deselect, on_box_changed, on_remove)
         page.update()
 
     # ── Toolbar ─────────────────────────────────────────────────────
@@ -81,7 +105,33 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         rebuild()
 
     def run_ocr() -> None:
-        _start_structured_extraction(page, state, progress_bar)
+        state.save_reviewed_layout()
+        _start_reviewed_ocr(page, state, progress_bar)
+
+    def on_page_select(idx: int) -> None:
+        state.current_page_index = idx
+        state.select_box(None)
+        page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
+        rebuild()
+
+    def on_box_selected(box_id: str | None) -> None:
+        state.select_box(box_id)
+        refresh_selection()
+
+    def on_box_changed() -> None:
+        state.save_reviewed_layout()
+        rebuild()
+
+    def on_box_live_change() -> None:
+        page.update()
+
+    def on_deselect() -> None:
+        state.select_box(None)
+        refresh_selection()
+
+    def on_remove(box_id: str) -> None:
+        state.remove_box(box_id)
+        rebuild()
 
     pagination_controls: list[ft.Control] = [
         ft.IconButton(
@@ -167,6 +217,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             "Run OCR",
             icon=ft.Icons.PLAY_ARROW,
             on_click=run_ocr,
+            tooltip="Run OCR using the reviewed layout boxes",
             bgcolor=theme.PRIMARY,
             color="white",
             style=ft.ButtonStyle(
@@ -188,7 +239,15 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     )
 
     # Initial build
-    content_row.controls = _build_panes(page, state, rebuild)
+    content_row.controls = _build_panes(
+        state,
+        on_page_select,
+        on_box_selected,
+        on_box_changed,
+        on_box_live_change,
+        on_deselect,
+        on_remove,
+    )
 
     return ft.View(
         route=f"/review/{state.run_id}",
@@ -205,44 +264,27 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
 
 def _build_panes(
-    page: ft.Page,
     state: AppState,
-    rebuild: Callable[[], None],
+    on_page_select: Callable[[int], None],
+    on_box_selected: Callable[[str | None], None],
+    on_box_changed: Callable[[], None],
+    on_box_live_change: Callable[[], None],
+    on_deselect: Callable[[], None],
+    on_remove: Callable[[str], None],
 ) -> list[ft.Control]:
-
-    def on_page_select(idx: int) -> None:
-        state.current_page_index = idx
-        state.select_box(None)
-        rebuild()
-
-    def on_box_selected(box_id: str | None) -> None:
-        state.select_box(box_id)
-        rebuild()
-
-    def on_box_changed() -> None:
-        rebuild()
-
-    def on_deselect() -> None:
-        state.select_box(None)
-        rebuild()
-
-    def on_remove(box_id: str) -> None:
-        state.remove_box(box_id)
-        rebuild()
-
     page_strip = build_page_strip(state, on_page_select)
-    bbox_editor = build_bbox_editor(state, on_box_selected, on_box_changed)
+    bbox_editor = build_bbox_editor(state, on_box_selected, on_box_changed, on_box_live_change)
     inspector = build_inspector(state, on_deselect, on_box_changed, on_remove)
 
     return [page_strip, bbox_editor, inspector]
 
 
-def _start_structured_extraction(
+def _start_reviewed_ocr(
     page: ft.Page,
     state: AppState,
     progress_bar: ft.ProgressBar,
 ) -> None:
-    from free_doc_extract.workflows import run_structured_workflow
+    from free_doc_extract.workflows import run_reviewed_ocr_workflow
 
     if not state.run_id:
         return
@@ -255,15 +297,13 @@ def _start_structured_extraction(
 
     run_id = state.run_id
 
-    async def do_extract() -> None:
+    async def do_ocr() -> None:
         try:
             await asyncio.to_thread(
                 functools.partial(
-                    run_structured_workflow,
+                    run_reviewed_ocr_workflow,
                     run_id,
                     run_root=state.run_root,
-                    model=state.ollama_model,
-                    endpoint=state.ollama_endpoint,
                 )
             )
             progress_bar.visible = False
@@ -273,10 +313,10 @@ def _start_structured_extraction(
             progress_bar.visible = False
             page.show_dialog(
                 ft.SnackBar(
-                    ft.Text(f"Extraction failed: {exc}"),
+                    ft.Text(f"OCR failed: {exc}"),
                     bgcolor=theme.ERROR,
                 )
             )
             page.update()
 
-    page.run_task(do_extract)
+    page.run_task(do_ocr)

@@ -9,7 +9,7 @@ from typing import cast
 import flet as ft
 
 from .. import theme
-from ..components.code_display import build_code_display
+from ..components.code_display import _ocr_json_text_for_state, build_code_display
 from ..components.doc_viewer import build_doc_viewer
 from ..components.split_pane import SplitPane
 from ..state import AppState
@@ -32,11 +32,37 @@ def build_results_view(
         if not filename:
             filename = state.run_id or ""
 
-    json_str = json.dumps(state.extraction_json, indent=2, ensure_ascii=False)
+    ocr_json_text = _ocr_json_text_for_state(state)
+    has_ocr_json = bool(ocr_json_text)
+
+    content_host = ft.Row(spacing=0, expand=True)
+
+    page_label = ft.Text(
+        _page_label_text(state),
+        size=13,
+        color=theme.TEXT_PRIMARY,
+        width=80,
+        text_align=ft.TextAlign.CENTER,
+    )
+
+    def rebuild() -> None:
+        page_label.value = _page_label_text(state)
+        content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
+        page.update()
+
+    def prev_page() -> None:
+        if state.current_page_index > 0:
+            state.current_page_index -= 1
+            rebuild()
+
+    def next_page() -> None:
+        if state.current_page_index < len(state.pages) - 1:
+            state.current_page_index += 1
+            rebuild()
 
     async def copy_clipboard() -> None:
-        await ft.Clipboard().set(json_str)
-        page.show_dialog(ft.SnackBar(ft.Text("Copied JSON to clipboard"), duration=1500))
+        await ft.Clipboard().set(ocr_json_text)
+        page.show_dialog(ft.SnackBar(ft.Text("Copied OCR JSON to clipboard"), duration=1500))
 
     async def download_json() -> None:
         save_path = await file_picker.save_file(
@@ -45,7 +71,7 @@ def build_results_view(
             allowed_extensions=["json"],
         )
         if save_path:
-            _save_json(save_path, json_str)
+            _save_json(save_path, ocr_json_text)
 
     toolbar_controls: list[ft.Control] = [
         ft.IconButton(
@@ -61,7 +87,7 @@ def build_results_view(
             size=18,
         ),
         ft.Text(
-            f"{filename} — Extraction Complete",
+            f"{filename} — OCR Complete",
             size=14,
             weight=ft.FontWeight.W_600,
             color=theme.TEXT_PRIMARY,
@@ -69,11 +95,40 @@ def build_results_view(
             max_lines=1,
             overflow=ft.TextOverflow.ELLIPSIS,
         ),
+        ft.Container(
+            content=ft.Row(
+                [
+                    ft.IconButton(
+                        icon=ft.Icons.CHEVRON_LEFT,
+                        icon_size=18,
+                        icon_color=theme.TEXT_MUTED,
+                        on_click=prev_page,
+                        tooltip="Previous page",
+                    ),
+                    page_label,
+                    ft.IconButton(
+                        icon=ft.Icons.CHEVRON_RIGHT,
+                        icon_size=18,
+                        icon_color=theme.TEXT_MUTED,
+                        on_click=next_page,
+                        tooltip="Next page",
+                    ),
+                ],
+                spacing=0,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            border=ft.border.all(1, theme.BORDER),
+            border_radius=6,
+            bgcolor=theme.BG_ELEVATED,
+            padding=ft.padding.symmetric(horizontal=2),
+        ),
+        ft.Container(width=8),
         ft.OutlinedButton(
-            "Copy to Clipboard",
+            "Copy OCR JSON",
             icon=ft.Icons.CONTENT_COPY,
-            tooltip="Copy JSON to clipboard",
+            tooltip="Copy OCR JSON to clipboard",
             on_click=copy_clipboard,
+            disabled=not has_ocr_json,
             style=ft.ButtonStyle(
                 color=theme.TEXT_PRIMARY,
                 side=ft.BorderSide(1, theme.BORDER),
@@ -81,10 +136,11 @@ def build_results_view(
             ),
         ),
         ft.ElevatedButton(
-            "Download .json",
+            "Download OCR JSON",
             icon=ft.Icons.DOWNLOAD,
-            tooltip="Download extracted JSON",
+            tooltip="Download OCR JSON",
             on_click=download_json,
+            disabled=not has_ocr_json,
             bgcolor=theme.PRIMARY,
             color="white",
             style=ft.ButtonStyle(
@@ -105,16 +161,13 @@ def build_results_view(
         border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
-    doc_viewer = build_doc_viewer(state)
-    code_display = build_code_display(state)
-
-    split = SplitPane(doc_viewer, code_display)
+    content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
 
     return ft.View(
         route=f"/results/{state.run_id}",
         controls=[
             ft.Column(
-                [toolbar, split],
+                [toolbar, content_host],
                 spacing=0,
                 expand=True,
             )
@@ -126,3 +179,11 @@ def build_results_view(
 
 def _save_json(path: str, content: str) -> None:
     Path(cast(str, path)).write_text(content, encoding="utf-8")
+
+
+def _page_label_text(state: AppState) -> str:
+    page_count = len(state.pages)
+    if page_count == 0:
+        return "Page 0 / 0"
+    page_number = min(max(state.current_page_index, 0), page_count - 1) + 1
+    return f"Page {page_number} / {page_count}"

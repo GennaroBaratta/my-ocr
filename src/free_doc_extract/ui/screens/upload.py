@@ -37,7 +37,7 @@ def build_upload_view(
         file_path = files[0].path
         if not file_path:
             return
-        _start_pipeline(page, state, file_path, progress_bar, status_text)
+        _start_review_prep(page, state, file_path, progress_bar, status_text)
 
     settings_btn = ft.IconButton(
         icon=ft.Icons.SETTINGS_OUTLINED,
@@ -54,7 +54,7 @@ def build_upload_view(
         color=theme.TEXT_PRIMARY,
     )
     subtitle = ft.Text(
-        "Upload a PDF or image scan for local OCR processing.",
+        "Upload a PDF or image scan to review detected layout boxes before OCR.",
         size=15,
         color=theme.TEXT_MUTED,
     )
@@ -108,7 +108,7 @@ def build_upload_view(
     )
 
 
-def _start_pipeline(
+def _start_review_prep(
     page: ft.Page,
     state: AppState,
     file_path: str,
@@ -118,19 +118,20 @@ def _start_pipeline(
     import asyncio
     import functools
 
-    from free_doc_extract.workflows import run_pipeline_workflow
+    from free_doc_extract.workflows import prepare_review_workflow
 
     progress_bar.visible = True
     progress_bar.value = None  # indeterminate
     status_text.visible = True
-    status_text.value = f"Processing {Path(file_path).name}…"
+    status_text.color = theme.TEXT_MUTED
+    status_text.value = f"Preparing layout review for {Path(file_path).name}…"
     page.update()
 
-    async def do_pipeline() -> None:
+    async def do_prepare_review() -> None:
         try:
             run_dir = await asyncio.to_thread(
                 functools.partial(
-                    run_pipeline_workflow,
+                    prepare_review_workflow,
                     file_path,
                     run_root=state.run_root,
                 )
@@ -138,12 +139,12 @@ def _start_pipeline(
             progress_bar.visible = False
             status_text.visible = False
             state.load_run(Path(run_dir).name)
-            page.go(f"/results/{state.run_id}")
+            page.go(f"/review/{state.run_id}")
         except Exception as exc:
             progress_bar.visible = False
             status_text.visible = True
-            status_text.value = f"Error: {exc}"
+            status_text.value = f"Error preparing review: {exc}"
             status_text.color = theme.ERROR
             page.update()
 
-    page.run_task(do_pipeline)
+    page.run_task(do_prepare_review)

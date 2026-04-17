@@ -20,17 +20,17 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
         filename = Path(run["input_path"]).name if run["input_path"] else run["run_id"]
         mtime = run.get("mtime", 0)
         date_str = time.strftime("%b %d, %Y", time.localtime(mtime)) if mtime else ""
-        status = run["status"]
-        is_ok = status == "extracted"
+        run_dir = Path(state.run_root) / run["run_id"]
+        route, badge_text, badge_color = _run_destination(run_dir)
 
         badge = ft.Container(
             content=ft.Text(
-                "Extracted" if is_ok else "Pending",
+                badge_text,
                 size=10,
                 weight=ft.FontWeight.W_500,
-                color=theme.SUCCESS if is_ok else theme.TEXT_MUTED,
+                color=badge_color,
             ),
-            bgcolor=f"{theme.SUCCESS}20" if is_ok else f"{theme.TEXT_MUTED}15",
+            bgcolor=f"{badge_color}20",
             padding=ft.padding.symmetric(horizontal=8, vertical=2),
             border_radius=4,
         )
@@ -55,7 +55,7 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
                 spacing=10,
             ),
             padding=ft.padding.symmetric(horizontal=14, vertical=10),
-            on_click=lambda e, rid=run_id: page.go(f"/results/{rid}"),
+            on_click=lambda e, target_route=route: page.go(target_route),
             ink=True,
             border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
         )
@@ -79,3 +79,15 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
         ],
         spacing=8,
     )
+
+
+def _run_destination(run_dir: Path) -> tuple[str, str, str]:
+    run_id = run_dir.name
+    has_review = (run_dir / "reviewed_layout.json").exists()
+    has_ocr = (run_dir / "ocr.json").exists()
+
+    if has_ocr:
+        return f"/results/{run_id}", "OCR Complete", theme.SUCCESS
+    if has_review:
+        return f"/review/{run_id}", "Review Ready", theme.PRIMARY
+    return f"/results/{run_id}", "Pending", theme.TEXT_MUTED

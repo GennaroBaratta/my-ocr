@@ -35,13 +35,13 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         text_align=ft.TextAlign.CENTER,
     )
 
-    def zoom_in(event_page: ft.Page) -> None:
+    def zoom_in(event_page: ft.Page | ft.BasePage) -> None:
         state.zoom_level = min(3.0, state.zoom_level + 0.25)
         zoom_text.value = f"{int(state.zoom_level * 100)}%"
         _rebuild_canvas(canvas_stack, page_data, state)
         event_page.update()
 
-    def zoom_out(event_page: ft.Page) -> None:
+    def zoom_out(event_page: ft.Page | ft.BasePage) -> None:
         state.zoom_level = max(0.25, state.zoom_level - 0.25)
         zoom_text.value = f"{int(state.zoom_level * 100)}%"
         _rebuild_canvas(canvas_stack, page_data, state)
@@ -127,7 +127,7 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
     overlays: list[ft.Control] = []
     for box in page_data.boxes:
         is_sel = box.selected
-        color = theme.BOX_SELECTED if is_sel else theme.BOX_UNSELECTED
+        color, fill = _overlay_colors(is_sel)
         overlays.append(
             ft.Container(
                 left=box.x * scale,
@@ -135,10 +135,16 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
                 width=box.width * scale,
                 height=box.height * scale,
                 border=ft.border.all(2 if is_sel else 1, color),
-                bgcolor=f"{color}1A",
+                bgcolor=fill,
             )
         )
 
     stack.width = canvas_width
     stack.height = canvas_height
     stack.controls = [image, *overlays]
+
+
+def _overlay_colors(is_selected: bool) -> tuple[str, str]:
+    if is_selected:
+        return theme.BOX_SELECTED, f"{theme.BOX_SELECTED}1A"
+    return f"{theme.BOX_UNSELECTED}88", f"{theme.BOX_UNSELECTED}0A"
