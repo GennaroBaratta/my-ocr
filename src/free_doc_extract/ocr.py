@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from importlib import import_module
 from pathlib import Path
+import sys
 from typing import Any
 
 from .ingest import IMAGE_SUFFIXES
@@ -25,6 +26,14 @@ from .review_artifacts import (
 )
 from .settings import resolve_ocr_api_client
 from .utils import load_json, write_json, write_text
+from . import layout_profile as _layout_profile_mod
+
+
+def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
+    warning = diagnostics.get("layout_profile_warning")
+    if not isinstance(warning, str) or not warning.strip():
+        return
+    print(f"Warning: {warning}", file=sys.stderr)
 
 
 def run_ocr(
@@ -33,9 +42,15 @@ def run_ocr(
     *,
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
+    layout_profile: str | None = "auto",
     reviewed_layout_path: str | Path | None = None,
 ) -> dict[str, Any]:
     normalized_page_paths = _normalize_page_paths(page_paths)
+
+    layout_dotted, layout_diagnostics = _layout_profile_mod.resolve_layout_profile(
+        config_path, layout_profile
+    )
+    _emit_layout_profile_warning(layout_diagnostics)
 
     parser_cls = _load_glmocr_parser()
     paths = RunPaths.from_run_dir(run_dir)
@@ -53,7 +68,7 @@ def run_ocr(
     fallback_pages: list[dict[str, Any]] = []
     source_counts: dict[str, int] = {}
 
-    with parser_cls(config_path=config_path, layout_device=layout_device) as parser:
+    with parser_cls(config_path=config_path, layout_device=layout_device, _dotted=layout_dotted) as parser:
         for page_number, page_path in enumerate(normalized_page_paths, start=1):
             page_result, fallback_result = _run_page_ocr(
                 parser,
@@ -104,6 +119,7 @@ def run_ocr(
         "raw_dir": str(paths.raw_dir),
         "config_path": config_path,
         "layout_device": layout_device,
+        "layout_diagnostics": layout_diagnostics,
     }
 
 
@@ -113,8 +129,14 @@ def prepare_review_artifacts(
     *,
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
+    layout_profile: str | None = "auto",
 ) -> dict[str, Any]:
     normalized_page_paths = _normalize_page_paths(page_paths)
+
+    layout_dotted, layout_diagnostics = _layout_profile_mod.resolve_layout_profile(
+        config_path, layout_profile
+    )
+    _emit_layout_profile_warning(layout_diagnostics)
 
     parser_cls = _load_glmocr_parser()
     paths = RunPaths.from_run_dir(run_dir)
@@ -122,7 +144,7 @@ def prepare_review_artifacts(
 
     review_pages: list[dict[str, Any]] = []
 
-    with parser_cls(config_path=config_path, layout_device=layout_device) as parser:
+    with parser_cls(config_path=config_path, layout_device=layout_device, _dotted=layout_dotted) as parser:
         for page_number, page_path in enumerate(normalized_page_paths, start=1):
             result = parser.parse(page_path)
             result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
@@ -162,6 +184,7 @@ def prepare_review_artifacts(
         "config_path": config_path,
         "layout_device": layout_device,
         "reviewed_layout_path": str(paths.reviewed_layout_path),
+        "layout_diagnostics": layout_diagnostics,
     }
 
 

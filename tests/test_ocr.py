@@ -62,7 +62,7 @@ class FakeResult:
 class FakeGlmOcr:
     calls: list[str] = []
 
-    def __init__(self, *, config_path: str, layout_device: str) -> None:
+    def __init__(self, *, config_path: str, layout_device: str, **kwargs: object) -> None:
         self.config_path = config_path
         self.layout_device = layout_device
 
@@ -109,6 +109,32 @@ def test_run_ocr_uses_page_images_and_public_outputs(tmp_path, monkeypatch) -> N
     assert json.loads((tmp_path / "run" / "ocr.json").read_text(encoding="utf-8")) == result["json"]
     assert (tmp_path / "run" / "ocr_raw" / "page-0001" / "artifact.txt").exists()
     assert not (tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001").exists()
+
+
+def test_run_ocr_emits_layout_profile_passthrough_warning_to_stderr(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setitem(sys.modules, "glmocr", SimpleNamespace(GlmOcr=FakeGlmOcr))
+    monkeypatch.setattr(
+        ocr._layout_profile_mod,
+        "resolve_layout_profile",
+        lambda *_args, **_kwargs: (
+            {},
+            {
+                "layout_profile_requested": "auto",
+                "layout_profile_source": "auto",
+                "layout_profile_status": "passthrough_existing_config",
+                "layout_profile_warning": "Proceeding with existing config/default mappings.",
+            },
+        ),
+    )
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    run_ocr([str(source)], tmp_path / "run")
+
+    captured = capsys.readouterr()
+    assert "Warning: Proceeding with existing config/default mappings." in captured.err
 
 
 def test_run_ocr_aggregates_pages_in_order_and_tracks_sources(tmp_path, monkeypatch) -> None:

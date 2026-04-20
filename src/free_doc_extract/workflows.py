@@ -26,6 +26,7 @@ def run_ocr_workflow(
     run_root: str = DEFAULT_RUN_ROOT,
     config_path: str = DEFAULT_CONFIG_PATH,
     layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
     normalize_document_fn: Callable[[str, str | Path], list[str]] = normalize_document,
     run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
@@ -42,6 +43,7 @@ def run_ocr_workflow(
             staged_paths.run_dir,
             config_path=config_path,
             layout_device=layout_device,
+            layout_profile=layout_profile,
         )
         _publish_staged_ocr_run(
             staged_paths,
@@ -75,6 +77,7 @@ def prepare_review_workflow(
     run_root: str = DEFAULT_RUN_ROOT,
     config_path: str = DEFAULT_CONFIG_PATH,
     layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
     normalize_document_fn: Callable[[str, str | Path], list[str]] = normalize_document,
     prepare_review_artifacts_fn: Callable[..., dict[str, Any]] = prepare_review_artifacts,
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
@@ -90,6 +93,7 @@ def prepare_review_workflow(
             staged_paths.run_dir,
             config_path=config_path,
             layout_device=layout_device,
+            layout_profile=layout_profile,
         )
         _publish_staged_review_run(
             staged_paths,
@@ -123,6 +127,7 @@ def run_reviewed_ocr_workflow(
     run_root: str = DEFAULT_RUN_ROOT,
     config_path: str = DEFAULT_CONFIG_PATH,
     layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
     run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
 ) -> Path:
@@ -139,6 +144,7 @@ def run_reviewed_ocr_workflow(
             staged_paths.run_dir,
             config_path=config_path,
             layout_device=layout_device,
+            layout_profile=layout_profile,
             reviewed_layout_path=(
                 paths.reviewed_layout_path if paths.reviewed_layout_path.exists() else None
             ),
@@ -260,6 +266,7 @@ def run_pipeline_workflow(
     run_root: str = DEFAULT_RUN_ROOT,
     config_path: str = DEFAULT_CONFIG_PATH,
     layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
     normalize_document_fn: Callable[[str, str | Path], list[str]] = normalize_document,
     run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
     extract_from_markdown_fn: Callable[[str], dict[str, Any]] = extract_from_markdown,
@@ -271,6 +278,7 @@ def run_pipeline_workflow(
         run_root=run_root,
         config_path=config_path,
         layout_device=layout_device,
+        layout_profile=layout_profile,
         normalize_document_fn=normalize_document_fn,
         run_ocr_fn=run_ocr_fn,
         write_json_fn=write_json_fn,
@@ -315,6 +323,9 @@ def write_run_metadata(
         "config_path": ocr_result.get("config_path"),
         "layout_device": ocr_result.get("layout_device"),
     }
+    layout_diagnostics = ocr_result.get("layout_diagnostics")
+    if layout_diagnostics:
+        payload["layout_diagnostics"] = layout_diagnostics
     if paths.reviewed_layout_path.exists():
         payload["reviewed_layout_path"] = str(paths.reviewed_layout_path)
     write_json_fn(paths.meta_path, payload)

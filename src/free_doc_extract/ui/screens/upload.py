@@ -15,6 +15,18 @@ from ..components.stepper import build_stepper
 from ..state import AppState
 
 
+def _show_layout_warning(page: ft.Page, state: AppState) -> None:
+    warning = state.layout_profile_warning()
+    if not warning:
+        return
+    page.show_dialog(
+        ft.SnackBar(
+            ft.Text(warning),
+            bgcolor=theme.ACCENT_YELLOW,
+        )
+    )
+
+
 def build_upload_view(
     page: ft.Page,
     state: AppState,
@@ -162,12 +174,14 @@ def _start_review_prep(
                     prepare_review_workflow,
                     file_path,
                     run_root=state.run_root,
+                    layout_profile=state.layout_profile,
                 )
             )
             loading_overlay.visible = False
             progress_ring.visible = False
             status_text.visible = False
             state.load_run(Path(run_dir).name)
+            _show_layout_warning(page, state)
             page.go(f"/review/{state.run_id}")
         except Exception as exc:
             loading_overlay.visible = False

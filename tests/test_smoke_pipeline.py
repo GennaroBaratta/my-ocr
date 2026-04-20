@@ -21,7 +21,7 @@ def test_smoke_pipeline_with_stubbed_ocr(tmp_path, monkeypatch) -> None:
         page.write_bytes(b"fake image")
         return [str(page)]
 
-    def fake_run_ocr(page_paths, run_dir, *, config_path, layout_device):
+    def fake_run_ocr(page_paths, run_dir, *, config_path, layout_device, **kwargs):
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         (Path(run_dir) / "ocr.md").write_text(
             "# Sample Report\nAda Lovelace\nExample University\n2024-01-15\nA concise summary line.",
@@ -85,7 +85,7 @@ def test_run_generates_run_id_when_omitted(tmp_path, monkeypatch) -> None:
         page.write_bytes(b"fake image")
         return [str(page)]
 
-    def fake_run_ocr(page_paths, run_dir, *, config_path, layout_device):
+    def fake_run_ocr(page_paths, run_dir, *, config_path, layout_device, **kwargs):
         Path(run_dir).mkdir(parents=True, exist_ok=True)
         (Path(run_dir) / "ocr.md").write_text("# Sample Report\nAda Lovelace", encoding="utf-8")
         (Path(run_dir) / "ocr.json").write_text("{}", encoding="utf-8")

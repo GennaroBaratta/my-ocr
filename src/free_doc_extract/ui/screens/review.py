@@ -17,6 +17,18 @@ from ..components.stepper import build_stepper
 from ..state import AppState
 
 
+def _show_layout_warning(page: ft.Page, state: AppState) -> None:
+    warning = state.layout_profile_warning()
+    if not warning:
+        return
+    page.show_dialog(
+        ft.SnackBar(
+            ft.Text(warning),
+            bgcolor=theme.ACCENT_YELLOW,
+        )
+    )
+
+
 def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     filename = ""
     if state.run_paths and state.run_paths.meta_path.exists():
@@ -77,7 +89,10 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             shape=ft.RoundedRectangleBorder(radius=6),
             bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
         )
-        add_box_btn.update()
+        try:
+            add_box_btn.update()
+        except RuntimeError:
+            pass
 
         bbox_editor = cast(ft.Container, content_row.controls[1])
         refresh_bbox_editor(
@@ -149,7 +164,10 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             shape=ft.RoundedRectangleBorder(radius=6),
             bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
         )
-        add_box_btn.update()
+        try:
+            add_box_btn.update()
+        except RuntimeError:
+            pass
         rebuild()
 
     def on_redetect_layout() -> None:
@@ -392,12 +410,14 @@ def _start_reviewed_ocr(
                     run_reviewed_ocr_workflow,
                     run_id,
                     run_root=state.run_root,
+                    layout_profile=state.layout_profile,
                 )
             )
             loading_overlay.visible = False
             progress_ring.visible = False
             status_text.visible = False
             state.load_run(run_id)
+            _show_layout_warning(page, state)
             page.go(f"/results/{run_id}")
         except Exception as exc:
             loading_overlay.visible = False
@@ -464,6 +484,7 @@ def _start_redetect_layout(
                         input_path,
                         run=run_id,
                         run_root=run_root,
+                        layout_profile=state.layout_profile,
                     )
                 )
                 loading_overlay.visible = False
@@ -472,6 +493,7 @@ def _start_redetect_layout(
                 status_text.value = "Running OCR..."
                 if run_id:
                     state.load_run(run_id)
+                _show_layout_warning(page, state)
                 rebuild()
             except Exception as exc:
                 loading_overlay.visible = False

@@ -78,7 +78,7 @@ def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> N
 
     captured: dict[str, str] = {}
 
-    def fake_prepare_review_workflow(input_path: str, *, run_root: str) -> Path:
+    def fake_prepare_review_workflow(input_path: str, *, run_root: str, **kwargs) -> Path:
         captured["input_path"] = input_path
         captured["run_root"] = run_root
         return run_dir
@@ -117,7 +117,7 @@ def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> N
 def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch) -> None:
     from free_doc_extract import workflows
 
-    def fake_prepare_review_workflow(_input_path: str, *, run_root: str) -> Path:
+    def fake_prepare_review_workflow(_input_path: str, *, run_root: str, **kwargs) -> Path:
         raise RuntimeError(f"bad input under {run_root}")
 
     async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
@@ -152,6 +152,77 @@ def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch)
     snackbar = cast(ft.SnackBar, page.dialogs[0])
     message = cast(ft.Text, snackbar.content)
     assert message.value == "Error preparing review: bad input under /tmp/runs"
+
+
+def test_start_review_prep_shows_layout_profile_warning_from_metadata(tmp_path, monkeypatch) -> None:
+    from free_doc_extract import workflows
+
+    image_module = import_module("PIL.Image")
+
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-ui"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+
+    page_path = pages_dir / "page-0001.png"
+    image_module.new("RGB", (100, 120), color="white").save(page_path)
+    (run_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "input_path": "/tmp/source.pdf",
+                "layout_diagnostics": {
+                    "layout_profile_warning": "Proceeding with existing config/default mappings."
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "reviewed_layout.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "prepared",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_path=str(page_path),
+                        source_sdk_json_path=str(
+                            run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json"
+                        ),
+                        blocks=[],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflows, "prepare_review_workflow", lambda *_args, **_kwargs: run_dir)
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    state = AppState()
+    state.run_root = str(run_root)
+    page = DummyPage()
+    loading_overlay = ft.Container(visible=False)
+    progress_ring = ft.ProgressRing()
+    status_text = ft.Text()
+
+    _start_review_prep(
+        cast(ft.Page, page),
+        state,
+        "/tmp/source.pdf",
+        loading_overlay,
+        progress_ring,
+        status_text,
+    )
+
+    assert len(page.dialogs) == 1
+    snackbar = cast(ft.SnackBar, page.dialogs[0])
+    message = cast(ft.Text, snackbar.content)
+    assert message.value == "Proceeding with existing config/default mappings."
 
 
 def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) -> None:
@@ -189,7 +260,7 @@ def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) ->
 
     captured: dict[str, str] = {}
 
-    def fake_run_reviewed_ocr_workflow(run: str, *, run_root: str) -> Path:
+    def fake_run_reviewed_ocr_workflow(run: str, *, run_root: str, **kwargs) -> Path:
         captured["run"] = run
         captured["run_root"] = run_root
         write_basic_ocr_outputs(
@@ -241,6 +312,113 @@ def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) ->
     assert state.ocr_markdown == "# Page 1"
 
 
+def test_start_reviewed_ocr_shows_layout_profile_warning_from_metadata(
+    tmp_path, monkeypatch
+) -> None:
+    from free_doc_extract import workflows
+
+    image_module = import_module("PIL.Image")
+
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-ui"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+
+    page_path = pages_dir / "page-0001.png"
+    image_module.new("RGB", (100, 120), color="white").save(page_path)
+
+    (run_dir / "reviewed_layout.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_path=str(page_path),
+                        source_sdk_json_path=str(
+                            run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json"
+                        ),
+                        blocks=[],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "input_path": "/tmp/source.pdf",
+                "layout_diagnostics": {
+                    "layout_profile_warning": "Proceeding with existing config/default mappings."
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run_reviewed_ocr_workflow(_run: str, *, run_root: str, **kwargs) -> Path:
+        write_basic_ocr_outputs(
+            run_dir,
+            markdown="# Page 1",
+            json_payload={
+                "pages": [
+                    build_ocr_page(
+                        page_path=str(page_path),
+                        markdown="# Page 1",
+                        sdk_json_path=str(
+                            run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json"
+                        ),
+                    )
+                ]
+            },
+        )
+        (run_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "input_path": "/tmp/source.pdf",
+                    "layout_diagnostics": {
+                        "layout_profile_warning": (
+                            "Proceeding with existing config/default mappings."
+                        )
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return run_dir
+
+    monkeypatch.setattr(workflows, "run_reviewed_ocr_workflow", fake_run_reviewed_ocr_workflow)
+
+    state = AppState()
+    state.run_root = str(run_root)
+    state.load_run("demo-ui")
+
+    page = DummyPage()
+    loading_overlay = ft.Container(visible=False)
+    progress_ring = ft.ProgressRing()
+    status_text = ft.Text()
+
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    _start_reviewed_ocr(
+        cast(ft.Page, page),
+        state,
+        loading_overlay,
+        progress_ring,
+        status_text,
+    )
+
+    assert len(page.dialogs) == 1
+    snackbar = cast(ft.SnackBar, page.dialogs[0])
+    message = cast(ft.Text, snackbar.content)
+    assert message.value == "Proceeding with existing config/default mappings."
+
+
 def test_review_selection_updates_in_place_without_remounting_editor(monkeypatch) -> None:
     monkeypatch.setattr(
         "free_doc_extract.ui.components.bbox_editor.get_image_size",
@@ -274,17 +452,17 @@ def test_review_selection_updates_in_place_without_remounting_editor(monkeypatch
     stack_row = cast(ft.Row, canvas.controls[0])
     initial_stack = cast(ft.Stack, stack_row.controls[0])
     select_box = cast(
-        Callable[[object], None], cast(ft.GestureDetector, initial_stack.controls[1]).on_tap
+        Callable[[object], None], cast(ft.GestureDetector, initial_stack.controls[2]).on_tap
     )
 
-    assert len(initial_stack.controls) == 2
+    assert len(initial_stack.controls) == 4
     select_box(SimpleNamespace())
 
     assert state.selected_box_id == "p0-b0"
     assert content_row.controls[1] is editor
     assert editor.content is canvas
     assert canvas.controls[0] is stack_row
-    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 11
+    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 13
     assert cast(ft.Container, content_row.controls[2]).width == 300
 
     inspector = cast(ft.Container, content_row.controls[2])
@@ -298,7 +476,7 @@ def test_review_selection_updates_in_place_without_remounting_editor(monkeypatch
     assert content_row.controls[1] is editor
     assert editor.content is canvas
     assert canvas.controls[0] is stack_row
-    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 2
+    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 4
     assert cast(ft.Container, content_row.controls[2]).width == 0
 
 

@@ -72,6 +72,7 @@ class AppState:
         self.ollama_endpoint: str = DEFAULT_OLLAMA_ENDPOINT
         self.ollama_model: str = DEFAULT_OLLAMA_MODEL
         self.run_root: str = DEFAULT_RUN_ROOT
+        self.layout_profile: str = "auto"
 
     # ── Recent runs ─────────────────────────────────────────────────
 
@@ -362,6 +363,21 @@ class AppState:
                 self.extraction_json = {}
         else:
             self.extraction_json = {}
+
+    def layout_profile_warning(self) -> str | None:
+        if not self.run_paths or not self.run_paths.meta_path.exists():
+            return None
+        try:
+            payload = json.loads(self.run_paths.meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        diagnostics = payload.get("layout_diagnostics")
+        if not isinstance(diagnostics, dict):
+            return None
+        warning = cast(dict[str, Any], diagnostics).get("layout_profile_warning")
+        return warning if isinstance(warning, str) and warning.strip() else None
 
     def _extract_markdown_from_ocr_payload(self, payload: Any) -> str:
         if not isinstance(payload, dict):

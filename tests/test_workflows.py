@@ -41,7 +41,7 @@ def test_run_ocr_workflow_preserves_existing_run_on_failure(tmp_path, failure_ph
             raise ValueError("unsupported input")
         return normalize_to_single_page(_input_path, run_dir_arg)
 
-    def failing_ocr(_page_paths, _run_dir_arg, *, config_path, layout_device):
+    def failing_ocr(_page_paths, _run_dir_arg, *, config_path, layout_device, **_kw):
         _ = (config_path, layout_device)
         raise RuntimeError("ocr failed")
 
@@ -69,7 +69,7 @@ def test_run_ocr_workflow_restores_existing_run_when_metadata_write_fails(tmp_pa
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -175,7 +175,7 @@ def test_run_ocr_workflow_rerun_keeps_existing_predictions(tmp_path) -> None:
 
     captured_page_paths = {}
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         captured_page_paths["value"] = _page_paths
         return build_basic_ocr_result(
             run_dir_arg,
@@ -218,7 +218,7 @@ def test_run_ocr_workflow_can_record_repo_relative_input_path(tmp_path) -> None:
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         return build_basic_ocr_result(
             run_dir_arg,
             config_path=config_path,
@@ -249,7 +249,7 @@ def test_run_ocr_workflow_accepts_directory_input_and_forwards_normalized_pages(
     source.mkdir()
     captured = {}
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         captured["page_paths"] = _page_paths
         return build_basic_ocr_result(
             run_dir_arg,
@@ -276,7 +276,7 @@ def test_run_ocr_workflow_publishes_fallback_artifacts(tmp_path) -> None:
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         result = build_basic_ocr_result(
             run_dir_arg,
@@ -314,7 +314,7 @@ def test_run_ocr_workflow_rewrites_staged_paths_in_published_json(tmp_path) -> N
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         staged_page = run_dir_path / "pages" / "page-0001.png"
         staged_page.parent.mkdir(parents=True, exist_ok=True)
@@ -396,7 +396,7 @@ def test_prepare_review_workflow_persists_review_artifact_without_ocr_outputs(tm
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -459,7 +459,7 @@ def test_prepare_review_workflow_clears_stale_predictions(tmp_path) -> None:
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -519,7 +519,7 @@ def test_prepare_review_workflow_restores_existing_ocr_outputs_when_metadata_wri
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_prepare_review(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -596,7 +596,7 @@ def test_run_reviewed_ocr_workflow_passes_reviewed_layout_artifact_to_ocr(tmp_pa
     )
     captured: dict[str, object] = {}
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, reviewed_layout_path):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, reviewed_layout_path, **_kw):
         captured["page_paths"] = _page_paths
         captured["reviewed_layout_path"] = reviewed_layout_path
         return build_basic_ocr_result(
@@ -643,7 +643,7 @@ def test_run_reviewed_ocr_workflow_clears_stale_predictions(tmp_path) -> None:
     page_path = run_dir / "pages" / "page-0001.png"
     write_reviewed_layout(run_dir, page_path=str(page_path))
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, reviewed_layout_path):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, reviewed_layout_path, **_kw):
         _ = (reviewed_layout_path,)
         return build_basic_ocr_result(
             run_dir_arg,
@@ -681,7 +681,7 @@ def test_run_pipeline_workflow_rerun_keeps_structured_outputs(tmp_path) -> None:
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         return build_basic_ocr_result(
             run_dir_arg,
             config_path=config_path,
@@ -980,7 +980,7 @@ def test_run_ocr_workflow_restores_existing_run_when_publish_fails(tmp_path, mon
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -1043,7 +1043,7 @@ def test_run_ocr_workflow_restores_existing_run_when_backup_move_fails(
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -1112,7 +1112,7 @@ def test_run_ocr_workflow_preserves_backup_when_restore_fails_midway(tmp_path, m
     source = tmp_path / "sample.pdf"
     source.write_bytes(b"%PDF-1.4 stub")
 
-    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device):
+    def fake_run_ocr(_page_paths, run_dir_arg, *, config_path, layout_device, **_kw):
         run_dir_path = Path(run_dir_arg)
         raw_dir = run_dir_path / "ocr_raw" / "page-0001"
         raw_dir.mkdir(parents=True, exist_ok=True)
