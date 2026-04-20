@@ -13,9 +13,14 @@ build/
 # Agent/skill artifacts
 .agents/
 .claude/
+.codex
+.qlty/
+.sisyphus/
 skills-lock.json
 
 # Runtime artifacts
+.dev-mcp/
+.playwright-mcp/
 data/raw/*
 data/runs/*
 data/reports/*
@@ -27,7 +32,3 @@ data/reports/*
 !data/gold/.gitkeep
 
 node_modules/
-
-.*/
-
-AGENT.md
