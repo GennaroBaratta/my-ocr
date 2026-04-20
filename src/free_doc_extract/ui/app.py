@@ -36,6 +36,13 @@ def create_app(page: ft.Page) -> None:
         if page.route != route:
             page.route = route
 
+        if route == "/":
+            page.title = "Step 1: Upload Document - Extract Document Layouts"
+        elif route.startswith("/review/"):
+            page.title = "Step 2: Review Layout - Extract Document Layouts"
+        elif route.startswith("/results/"):
+            page.title = "Step 3: OCR Results - Extract Document Layouts"
+
         page.views.clear()
 
         page.views.append(build_upload_view(page, state, file_picker))

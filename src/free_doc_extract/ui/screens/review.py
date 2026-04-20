@@ -12,6 +12,7 @@ from .. import theme
 from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
+from ..components.stepper import build_stepper
 from ..state import AppState
 
 
@@ -26,11 +27,23 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     if not filename:
         filename = state.run_id or "Document"
 
-    progress_bar = ft.ProgressBar(
+    progress_ring = ft.ProgressRing(
         visible=False,
-        value=None,
         color=theme.PRIMARY,
-        bgcolor=theme.BG_ELEVATED,
+        stroke_width=4,
+    )
+    status_text = ft.Text("Running OCR...", size=16, weight=ft.FontWeight.W_500, color=theme.TEXT_PRIMARY, visible=False)
+    
+    loading_overlay = ft.Container(
+        content=ft.Column(
+            [progress_ring, ft.Container(height=16), status_text],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        bgcolor=f"#CC{theme.BG_PAGE[1:]}",
+        visible=False,
+        alignment=ft.Alignment.CENTER,
+        expand=True,
     )
 
     # ── Mutable content containers ──────────────────────────────────
@@ -106,7 +119,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def run_ocr() -> None:
         state.save_reviewed_layout()
-        _start_reviewed_ocr(page, state, progress_bar)
+        _start_reviewed_ocr(page, state, loading_overlay, progress_ring, status_text)
 
     def on_page_select(idx: int) -> None:
         state.current_page_index = idx
@@ -253,7 +266,16 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         route=f"/review/{state.run_id}",
         controls=[
             ft.Column(
-                [toolbar, progress_bar, content_row],
+                [
+                    build_stepper(2, page, state),
+                    ft.Stack(
+                        [
+                            ft.Column([toolbar, content_row], spacing=0, expand=True),
+                            loading_overlay,
+                        ],
+                        expand=True,
+                    ),
+                ],
                 spacing=0,
                 expand=True,
             )
@@ -282,14 +304,18 @@ def _build_panes(
 def _start_reviewed_ocr(
     page: ft.Page,
     state: AppState,
-    progress_bar: ft.ProgressBar,
+    loading_overlay: ft.Container,
+    progress_ring: ft.ProgressRing,
+    status_text: ft.Text,
 ) -> None:
     from free_doc_extract.workflows import run_reviewed_ocr_workflow
 
     if not state.run_id:
         return
 
-    progress_bar.visible = True
+    loading_overlay.visible = True
+    progress_ring.visible = True
+    status_text.visible = True
     page.update()
 
     import asyncio
@@ -306,11 +332,15 @@ def _start_reviewed_ocr(
                     run_root=state.run_root,
                 )
             )
-            progress_bar.visible = False
+            loading_overlay.visible = False
+            progress_ring.visible = False
+            status_text.visible = False
             state.load_run(run_id)
             page.go(f"/results/{run_id}")
         except Exception as exc:
-            progress_bar.visible = False
+            loading_overlay.visible = False
+            progress_ring.visible = False
+            status_text.visible = False
             page.show_dialog(
                 ft.SnackBar(
                     ft.Text(f"OCR failed: {exc}"),
