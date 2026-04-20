@@ -26,6 +26,6 @@ data/reports/*
 !data/reports/.gitkeep
 !data/gold/.gitkeep
 
-.qlty/
-
 node_modules/
+
+.*/
