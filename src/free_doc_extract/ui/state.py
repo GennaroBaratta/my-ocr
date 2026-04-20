@@ -56,6 +56,7 @@ class AppState:
         self.current_page_index: int = 0
         self.selected_box_id: str | None = None
         self.zoom_level: float = 1.0
+        self.is_adding_box: bool = False
 
         # Processing
         self.processing: bool = False
@@ -116,6 +117,7 @@ class AppState:
         self._load_results()
         self.current_page_index = 0
         self.selected_box_id = None
+        self.is_adding_box = False
 
     def _load_pages(self) -> None:
         self.pages.clear()
@@ -421,7 +423,14 @@ class AppState:
                     self.save_reviewed_layout()
                     return
 
-    def add_box_to_current_page(self, label: str = "text") -> str | None:
+    def add_box_to_current_page(
+        self,
+        label: str = "text",
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+    ) -> str | None:
         page = self.current_page
         if not page:
             return None
@@ -431,17 +440,21 @@ class AppState:
             default_w = min(default_w, image_width)
         if image_height:
             default_h = min(default_h, image_height)
-        x = max(0, (image_width - default_w) // 2) if image_width else 0
-        y = max(0, (image_height - default_h) // 2) if image_height else 0
+        
+        final_x = x if x is not None else (max(0, (image_width - default_w) // 2) if image_width else 0)
+        final_y = y if y is not None else (max(0, (image_height - default_h) // 2) if image_height else 0)
+        final_w = width if width is not None else default_w
+        final_h = height if height is not None else default_h
+
         box_id = self._next_box_id(page.index)
         page.boxes.append(
             BoundingBox(
                 id=box_id,
                 page_index=page.index,
-                x=x,
-                y=y,
-                width=default_w,
-                height=default_h,
+                x=final_x,
+                y=final_y,
+                width=final_w,
+                height=final_h,
                 label=label,
                 confidence=1.0,
             )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from free_doc_extract.settings import (
@@ -44,3 +46,35 @@ def test_resolve_ocr_api_client_raises_on_invalid_yaml(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="Invalid OCR config YAML"):
         resolve_ocr_api_client(config)
+
+
+def test_repo_local_glmocr_config_includes_formula_pipeline_mappings() -> None:
+    glmocr_config = pytest.importorskip("glmocr.config")
+    config_path = Path(__file__).resolve().parents[1] / "config" / "local.yaml"
+
+    loaded = glmocr_config.load_config(config_path)
+
+    assert loaded.pipeline.page_loader.task_prompt_mapping == {
+        "text": "Text Recognition:",
+        "table": "Table Recognition:",
+        "formula": "Formula Recognition:",
+    }
+    assert loaded.pipeline.result_formatter.label_visualization_mapping == {
+        "table": ["table"],
+        "formula": ["formula", "display_formula", "inline_formula"],
+        "image": ["chart", "image"],
+        "text": [
+            "abstract",
+            "algorithm",
+            "content",
+            "doc_title",
+            "figure_title",
+            "paragraph_title",
+            "reference_content",
+            "text",
+            "vertical_text",
+            "vision_footnote",
+            "seal",
+            "formula_number",
+        ],
+    }

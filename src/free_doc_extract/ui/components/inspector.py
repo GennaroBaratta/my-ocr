@@ -19,6 +19,7 @@ LABEL_TO_BLOCK_TYPE = {
     "table": "Table",
     "figure": "Figure/Image",
     "image": "Figure/Image",
+    "formula": "Formula",
     "display_formula": "Formula",
     "inline_formula": "Formula",
     "formula_number": "Formula",
@@ -30,7 +31,7 @@ BLOCK_TYPE_TO_DEFAULT_LABEL = {
     "Header": "paragraph_title",
     "Table": "table",
     "Figure/Image": "figure",
-    "Formula": "display_formula",
+    "Formula": "formula",
 }
 
 

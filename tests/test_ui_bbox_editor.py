@@ -28,8 +28,8 @@ def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) 
     )
 
     stack = _editor_stack(editor)
-    box_detector = cast(ft.GestureDetector, stack.controls[1])
-    top_left_handle = cast(ft.GestureDetector, stack.controls[2])
+    box_detector = cast(ft.GestureDetector, stack.controls[2])
+    top_left_handle = cast(ft.GestureDetector, stack.controls[3])
     resize_update = cast(Callable[[object], None], top_left_handle.on_pan_update)
     resize_end = cast(Callable[[object], None], top_left_handle.on_pan_end)
 
@@ -67,9 +67,9 @@ def test_move_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) ->
     )
 
     stack = _editor_stack(editor)
-    box_detector = cast(ft.GestureDetector, stack.controls[1])
-    top_left_handle = cast(ft.GestureDetector, stack.controls[2])
-    move_handle = cast(ft.GestureDetector, stack.controls[10])
+    box_detector = cast(ft.GestureDetector, stack.controls[2])
+    top_left_handle = cast(ft.GestureDetector, stack.controls[3])
+    move_handle = cast(ft.GestureDetector, stack.controls[11])
     drag_update = cast(Callable[[object], None], move_handle.on_pan_update)
     drag_end = cast(Callable[[object], None], move_handle.on_pan_end)
 
@@ -152,10 +152,10 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     )
 
     stack = _editor_stack(editor)
-    text_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[1]).content)
-    table_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[11]).content)
-    figure_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[12]).content)
-    header_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[13]).content)
+    text_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[2]).content)
+    table_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[12]).content)
+    figure_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[13]).content)
+    header_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[14]).content)
 
     assert text_box.border == ft.Border.all(2, theme.BOX_TEXT_BLOCK)
     assert text_box.bgcolor == f"{theme.BOX_TEXT_BLOCK}1A"
@@ -168,6 +168,48 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
 
     assert header_box.border == ft.Border.all(1, f"{theme.BOX_HEADER}14")
     assert header_box.bgcolor == f"{theme.BOX_HEADER}02"
+
+
+def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        lambda _path: (100, 100),
+    )
+
+    state = AppState()
+    state.is_adding_box = True
+    state.pages = [PageData(index=0, image_path="/tmp/page-0001.png", boxes=[])]
+    state.current_page_index = 0
+
+    selected_ids: list[str | None] = []
+    commit_calls: list[str] = []
+    live_calls: list[str] = []
+
+    editor = build_bbox_editor(
+        state,
+        lambda box_id: selected_ids.append(box_id),
+        lambda: commit_calls.append("commit"),
+        lambda: live_calls.append("live"),
+    )
+
+    stack = _editor_stack(editor)
+    background = cast(ft.GestureDetector, stack.controls[1])
+    start_drag = cast(Callable[[object], None], background.on_pan_start)
+    update_drag = cast(Callable[[object], None], background.on_pan_update)
+    end_drag = cast(Callable[[object], None], background.on_pan_end)
+
+    start_drag(SimpleNamespace(local_position=SimpleNamespace(x=10, y=15)))
+    update_drag(SimpleNamespace(local_position=SimpleNamespace(x=40, y=55)))
+    end_drag(SimpleNamespace())
+
+    assert state.is_adding_box is False
+    assert len(state.pages[0].boxes) == 1
+    assert state.pages[0].boxes[0].label == "text"
+    assert (state.pages[0].boxes[0].x, state.pages[0].boxes[0].y) == (10, 15)
+    assert (state.pages[0].boxes[0].width, state.pages[0].boxes[0].height) == (30, 40)
+    assert selected_ids == [state.pages[0].boxes[0].id]
+    assert commit_calls == ["commit"]
+    assert live_calls == ["live", "live"]
 
 
 def _build_selected_state() -> AppState:

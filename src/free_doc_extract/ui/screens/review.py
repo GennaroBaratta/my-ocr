@@ -67,6 +67,18 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             rebuild()
             return
 
+        is_adding = getattr(state, "is_adding_box", False)
+        add_box_btn.text = "Cancel Add" if is_adding else "Add Box"
+        add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
+        add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
+        add_box_btn.style = ft.ButtonStyle(
+            color=theme.TEXT_PRIMARY,
+            side=ft.BorderSide(1, theme.BORDER),
+            shape=ft.RoundedRectangleBorder(radius=6),
+            bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
+        )
+        add_box_btn.update()
+
         bbox_editor = cast(ft.Container, content_row.controls[1])
         refresh_bbox_editor(
             bbox_editor,
@@ -123,9 +135,21 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         _start_reviewed_ocr(page, state, loading_overlay, progress_ring, status_text)
 
     def on_add_box() -> None:
-        new_id = state.add_box_to_current_page()
-        if new_id:
-            state.select_box(new_id)
+        state.is_adding_box = not state.is_adding_box
+        if state.is_adding_box:
+            state.select_box(None)
+            
+        is_adding = getattr(state, "is_adding_box", False)
+        add_box_btn.text = "Cancel Add" if is_adding else "Add Box"
+        add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
+        add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
+        add_box_btn.style = ft.ButtonStyle(
+            color=theme.TEXT_PRIMARY,
+            side=ft.BorderSide(1, theme.BORDER),
+            shape=ft.RoundedRectangleBorder(radius=6),
+            bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
+        )
+        add_box_btn.update()
         rebuild()
 
     def on_redetect_layout() -> None:
@@ -143,7 +167,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def on_box_changed() -> None:
         state.save_reviewed_layout()
-        rebuild()
+        refresh_selection()
 
     def on_box_live_change() -> None:
         page.update()
@@ -154,7 +178,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def on_remove(box_id: str) -> None:
         state.remove_box(box_id)
-        rebuild()
+        refresh_selection()
 
     pagination_controls: list[ft.Control] = [
         ft.IconButton(
@@ -191,6 +215,19 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             tooltip="Zoom in",
         ),
     ]
+
+    add_box_btn = ft.OutlinedButton(
+        "Cancel Add" if getattr(state, "is_adding_box", False) else "Add Box",
+        icon=ft.Icons.CLOSE if getattr(state, "is_adding_box", False) else ft.Icons.ADD_BOX_OUTLINED,
+        on_click=lambda _e=None: on_add_box(),
+        tooltip="Cancel adding box" if getattr(state, "is_adding_box", False) else "Add a new layout box on this page",
+        style=ft.ButtonStyle(
+            color=theme.TEXT_PRIMARY,
+            side=ft.BorderSide(1, theme.BORDER),
+            shape=ft.RoundedRectangleBorder(radius=6),
+            bgcolor=f"{theme.PRIMARY}20" if getattr(state, "is_adding_box", False) else None,
+        ),
+    )
 
     toolbar_controls: list[ft.Control] = [
         ft.IconButton(
@@ -243,17 +280,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             tooltip="Re-detect layout",
             on_click=lambda _e=None: on_redetect_layout(),
         ),
-        ft.OutlinedButton(
-            "Add Box",
-            icon=ft.Icons.ADD_BOX_OUTLINED,
-            on_click=lambda _e=None: on_add_box(),
-            tooltip="Add a new layout box on this page",
-            style=ft.ButtonStyle(
-                color=theme.TEXT_PRIMARY,
-                side=ft.BorderSide(1, theme.BORDER),
-                shape=ft.RoundedRectangleBorder(radius=6),
-            ),
-        ),
+        add_box_btn,
         ft.Container(width=8),
         ft.ElevatedButton(
             "Run OCR",

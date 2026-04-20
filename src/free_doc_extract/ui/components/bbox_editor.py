@@ -104,6 +104,71 @@ def _build_editor_stack(
         fit=BoxFit.FILL if canvas_width and canvas_height else BoxFit.CONTAIN,
     )
 
+    drawing_state = {"active": False, "start_x": 0.0, "start_y": 0.0}
+    drawing_box = ft.Container(
+        border=ft.Border.all(2, theme.PRIMARY),
+        bgcolor=f"{theme.PRIMARY}33",
+        visible=False,
+    )
+
+    def on_pan_start(e: ft.DragStartEvent) -> None:
+        if not getattr(state, "is_adding_box", False):
+            return
+        drawing_state["active"] = True
+        drawing_state["start_x"] = e.local_position.x
+        drawing_state["start_y"] = e.local_position.y
+        drawing_box.left = e.local_position.x
+        drawing_box.top = e.local_position.y
+        drawing_box.width = 0
+        drawing_box.height = 0
+        drawing_box.visible = True
+        on_box_live_change()
+
+    def on_pan_update(e: ft.DragUpdateEvent) -> None:
+        if not drawing_state["active"]:
+            return
+        cur_x = e.local_position.x
+        cur_y = e.local_position.y
+        start_x = float(drawing_state["start_x"])
+        start_y = float(drawing_state["start_y"])
+        
+        drawing_box.left = min(start_x, cur_x)
+        drawing_box.top = min(start_y, cur_y)
+        drawing_box.width = abs(cur_x - start_x)
+        drawing_box.height = abs(cur_y - start_y)
+        on_box_live_change()
+
+    def on_pan_end(e: ft.DragEndEvent) -> None:
+        if not drawing_state["active"]:
+            return
+        drawing_state["active"] = False
+        drawing_box.visible = False
+        
+        w = float(drawing_box.width or 0) / scale
+        h = float(drawing_box.height or 0) / scale
+        x = float(drawing_box.left or 0) / scale
+        y = float(drawing_box.top or 0) / scale
+        
+        state.is_adding_box = False
+        
+        if w > 5 and h > 5:
+            new_id = state.add_box_to_current_page(label="text", x=x, y=y, width=w, height=h)
+            if new_id:
+                state.select_box(new_id)
+                on_box_selected(new_id)
+        
+        on_box_changed()
+
+    background_detector = ft.GestureDetector(
+        mouse_cursor=ft.MouseCursor.PRECISE if getattr(state, "is_adding_box", False) else ft.MouseCursor.BASIC,
+        on_pan_start=on_pan_start,
+        on_pan_update=on_pan_update,
+        on_pan_end=on_pan_end,
+        width=canvas_width,
+        height=canvas_height,
+        content=ft.Container(width=canvas_width, height=canvas_height, bgcolor="transparent"),
+    )
+
     overlays: list[ft.Control] = []
     for box in page_data.boxes:
         overlays.extend(
@@ -119,7 +184,7 @@ def _build_editor_stack(
         )
 
     return ft.Stack(
-        [image, *overlays],
+        [image, background_detector, *overlays, drawing_box],
         width=canvas_width,
         height=canvas_height,
     )

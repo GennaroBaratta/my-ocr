@@ -266,7 +266,7 @@ def test_build_ocr_chunks_assigns_text_table_and_formula_prompts() -> None:
             "blocks": [
                 {"label": "text", "bbox_2d": [0, 0, 50, 50], "index": 1},
                 {"label": "table", "bbox_2d": [60, 0, 120, 50], "index": 2},
-                {"label": "display_formula", "bbox_2d": [0, 60, 50, 120], "index": 3},
+                {"label": "formula", "bbox_2d": [0, 60, 50, 120], "index": 3},
             ]
         },
         width=200,
@@ -278,6 +278,26 @@ def test_build_ocr_chunks_assigns_text_table_and_formula_prompts() -> None:
     assert [chunk["prompt"] for chunk in chunks] == [
         TEXT_RECOGNITION_PROMPT,
         TABLE_RECOGNITION_PROMPT,
+        FORMULA_RECOGNITION_PROMPT,
+    ]
+
+
+def test_build_ocr_chunks_treats_display_and_inline_formula_labels_as_formula() -> None:
+    chunks = build_ocr_chunks(
+        {
+            "blocks": [
+                {"label": "display_formula", "bbox_2d": [0, 0, 50, 50], "index": 1},
+                {"label": "inline_formula", "bbox_2d": [60, 0, 120, 50], "index": 2},
+            ]
+        },
+        width=200,
+        height=200,
+        coord_space="pixel",
+    )
+
+    assert [chunk["task"] for chunk in chunks] == ["formula", "formula"]
+    assert [chunk["prompt"] for chunk in chunks] == [
+        FORMULA_RECOGNITION_PROMPT,
         FORMULA_RECOGNITION_PROMPT,
     ]
 
