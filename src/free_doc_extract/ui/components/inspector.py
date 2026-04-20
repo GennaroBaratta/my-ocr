@@ -10,14 +10,27 @@ from .. import theme
 from ..state import AppState
 
 
-BLOCK_TYPES = ["Text Block", "Table", "Figure/Image", "Header"]
+BLOCK_TYPES = ["Text Block", "Title", "Header", "Table", "Figure/Image", "Formula"]
 
 LABEL_TO_BLOCK_TYPE = {
-    "doc_title": "Header",
+    "doc_title": "Title",
     "paragraph_title": "Header",
+    "figure_title": "Header",
     "table": "Table",
     "figure": "Figure/Image",
     "image": "Figure/Image",
+    "display_formula": "Formula",
+    "inline_formula": "Formula",
+    "formula_number": "Formula",
+}
+
+BLOCK_TYPE_TO_DEFAULT_LABEL = {
+    "Text Block": "text",
+    "Title": "doc_title",
+    "Header": "paragraph_title",
+    "Table": "table",
+    "Figure/Image": "figure",
+    "Formula": "display_formula",
 }
 
 
@@ -34,10 +47,12 @@ def build_inspector(
     block_type_value = LABEL_TO_BLOCK_TYPE.get(box.label, "Text Block")
 
     def on_type_change(e: ft.Event[ft.Dropdown]) -> None:
-        reverse = {v: k for k, v in LABEL_TO_BLOCK_TYPE.items()}
         selected = e.control.value
-        if selected is not None:
-            box.label = reverse.get(selected, box.label)
+        if selected is None:
+            return
+        current_type = LABEL_TO_BLOCK_TYPE.get(box.label, "Text Block")
+        if selected != current_type:
+            box.label = BLOCK_TYPE_TO_DEFAULT_LABEL[selected]
         on_change()
 
     def make_coord_handler(attr: str) -> Callable[[ft.Event[ft.TextField]], None]:
@@ -237,8 +252,10 @@ def _coord_field(
 
 def _icon_for_type(block_type: str) -> ft.IconData:
     return {
+        "Title": ft.Icons.TITLE,
         "Header": ft.Icons.TITLE,
         "Table": ft.Icons.TABLE_CHART,
         "Figure/Image": ft.Icons.IMAGE,
         "Text Block": ft.Icons.NOTES,
+        "Formula": ft.Icons.FUNCTIONS,
     }.get(block_type, ft.Icons.NOTES)

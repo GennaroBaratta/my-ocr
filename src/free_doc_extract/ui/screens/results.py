@@ -12,6 +12,7 @@ from .. import theme
 from ..components.code_display import _ocr_json_text_for_state, build_code_display
 from ..components.doc_viewer import build_doc_viewer
 from ..components.split_pane import SplitPane
+from ..components.stepper import build_stepper
 from ..state import AppState
 
 
@@ -78,8 +79,16 @@ def build_results_view(
             icon=ft.Icons.ARROW_BACK,
             icon_color=theme.TEXT_PRIMARY,
             icon_size=20,
-            tooltip="Back",
+            tooltip="Back to Layout Review",
             on_click=lambda: page.go(f"/review/{state.run_id}"),
+        ),
+        ft.VerticalDivider(width=1, color=theme.BORDER),
+        ft.IconButton(
+            icon=ft.Icons.RESTART_ALT,
+            icon_color=theme.TEXT_PRIMARY,
+            icon_size=20,
+            tooltip="Start New Document",
+            on_click=lambda: page.go("/"),
         ),
         ft.Icon(
             ft.Icons.CHECK_CIRCLE,
@@ -167,7 +176,10 @@ def build_results_view(
         route=f"/results/{state.run_id}",
         controls=[
             ft.Column(
-                [toolbar, content_host],
+                [
+                    build_stepper(3, page, state),
+                    ft.Column([toolbar, content_host], spacing=0, expand=True)
+                ],
                 spacing=0,
                 expand=True,
             )

@@ -83,21 +83,75 @@ def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> N
         captured["run_root"] = run_root
         return run_dir
 
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
     monkeypatch.setattr(workflows, "prepare_review_workflow", fake_prepare_review_workflow)
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
 
     state = AppState()
     state.run_root = str(run_root)
     page = DummyPage()
-    progress_bar = ft.ProgressBar()
+    loading_overlay = ft.Container(visible=False)
+    progress_ring = ft.ProgressRing()
     status_text = ft.Text()
 
-    _start_review_prep(cast(ft.Page, page), state, "/tmp/source.pdf", progress_bar, status_text)
+    _start_review_prep(
+        cast(ft.Page, page),
+        state,
+        "/tmp/source.pdf",
+        loading_overlay,
+        progress_ring,
+        status_text,
+    )
 
     assert captured == {"input_path": "/tmp/source.pdf", "run_root": str(run_root)}
     assert state.run_id == "demo-ui"
     assert page.route == "/review/demo-ui"
-    assert progress_bar.visible is False
+    assert loading_overlay.visible is False
+    assert progress_ring.visible is False
     assert status_text.visible is False
+    assert page.dialogs == []
+
+
+def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch) -> None:
+    from free_doc_extract import workflows
+
+    def fake_prepare_review_workflow(_input_path: str, *, run_root: str) -> Path:
+        raise RuntimeError(f"bad input under {run_root}")
+
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflows, "prepare_review_workflow", fake_prepare_review_workflow)
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    state = AppState()
+    state.run_root = "/tmp/runs"
+    page = DummyPage()
+    loading_overlay = ft.Container(visible=False)
+    progress_ring = ft.ProgressRing()
+    status_text = ft.Text()
+
+    _start_review_prep(
+        cast(ft.Page, page),
+        state,
+        "/tmp/source.pdf",
+        loading_overlay,
+        progress_ring,
+        status_text,
+    )
+
+    assert state.run_id is None
+    assert page.route is None
+    assert loading_overlay.visible is False
+    assert progress_ring.visible is False
+    assert status_text.visible is False
+    assert len(page.dialogs) == 1
+
+    snackbar = cast(ft.SnackBar, page.dialogs[0])
+    message = cast(ft.Text, snackbar.content)
+    assert message.value == "Error preparing review: bad input under /tmp/runs"
 
 
 def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) -> None:
@@ -162,13 +216,28 @@ def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) ->
     state.load_run("demo-ui")
 
     page = DummyPage()
-    progress_bar = ft.ProgressBar()
+    loading_overlay = ft.Container(visible=False)
+    progress_ring = ft.ProgressRing()
+    status_text = ft.Text()
 
-    _start_reviewed_ocr(cast(ft.Page, page), state, progress_bar)
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    _start_reviewed_ocr(
+        cast(ft.Page, page),
+        state,
+        loading_overlay,
+        progress_ring,
+        status_text,
+    )
 
     assert captured == {"run": "demo-ui", "run_root": str(run_root)}
     assert page.route == "/results/demo-ui"
-    assert progress_bar.visible is False
+    assert loading_overlay.visible is False
+    assert progress_ring.visible is False
+    assert status_text.visible is False
     assert state.ocr_markdown == "# Page 1"
 
 
@@ -215,7 +284,7 @@ def test_review_selection_updates_in_place_without_remounting_editor(monkeypatch
     assert content_row.controls[1] is editor
     assert editor.content is canvas
     assert canvas.controls[0] is stack_row
-    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 10
+    assert len(cast(ft.Stack, stack_row.controls[0]).controls) == 11
     assert cast(ft.Container, content_row.controls[2]).width == 300
 
     inspector = cast(ft.Container, content_row.controls[2])
@@ -353,13 +422,14 @@ def test_results_view_uses_ocr_json_actions_without_predictions(tmp_path) -> Non
     state.load_run("demo-ui")
 
     view = build_results_view(cast(ft.Page, DummyPage()), state, ft.FilePicker())
-    content = cast(ft.Column, view.controls[0])
-    toolbar = cast(ft.Container, content.controls[0])
+    outer = cast(ft.Column, view.controls[0])
+    inner = cast(ft.Column, outer.controls[1])
+    toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
-    copy_button = cast(ft.OutlinedButton, toolbar_row.controls[5])
-    download_button = cast(ft.ElevatedButton, toolbar_row.controls[6])
+    copy_button = cast(ft.OutlinedButton, toolbar_row.controls[7])
+    download_button = cast(ft.ElevatedButton, toolbar_row.controls[8])
 
-    assert cast(ft.Text, toolbar_row.controls[2]).value == "source.pdf — OCR Complete"
+    assert cast(ft.Text, toolbar_row.controls[4]).value == "source.pdf — OCR Complete"
     assert cast(Any, copy_button)._values["content"] == "Copy OCR JSON"
     assert copy_button.disabled is False
     assert cast(Any, download_button)._values["content"] == "Download OCR JSON"
@@ -430,5 +500,7 @@ def test_recent_runs_route_review_ready_and_ocr_complete_runs_correctly(tmp_path
 
 
 def _review_content_row(view: ft.View) -> ft.Row:
-    content = cast(ft.Column, view.controls[0])
-    return cast(ft.Row, content.controls[2])
+    outer = cast(ft.Column, view.controls[0])
+    stack = cast(ft.Stack, outer.controls[1])
+    inner = cast(ft.Column, stack.controls[0])
+    return cast(ft.Row, inner.controls[1])

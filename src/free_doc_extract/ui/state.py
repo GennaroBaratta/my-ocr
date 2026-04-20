@@ -421,6 +421,43 @@ class AppState:
                     self.save_reviewed_layout()
                     return
 
+    def add_box_to_current_page(self, label: str = "text") -> str | None:
+        page = self.current_page
+        if not page:
+            return None
+        image_width, image_height = get_image_size(page.image_path)
+        default_w, default_h = 240, 80
+        if image_width:
+            default_w = min(default_w, image_width)
+        if image_height:
+            default_h = min(default_h, image_height)
+        x = max(0, (image_width - default_w) // 2) if image_width else 0
+        y = max(0, (image_height - default_h) // 2) if image_height else 0
+        box_id = self._next_box_id(page.index)
+        page.boxes.append(
+            BoundingBox(
+                id=box_id,
+                page_index=page.index,
+                x=x,
+                y=y,
+                width=default_w,
+                height=default_h,
+                label=label,
+                confidence=1.0,
+            )
+        )
+        self.save_reviewed_layout()
+        return box_id
+
+    def _next_box_id(self, page_index: int) -> str:
+        existing = {b.id for p in self.pages for b in p.boxes}
+        i = len(self.pages[page_index].boxes)
+        while True:
+            candidate = f"p{page_index}-u{i}"
+            if candidate not in existing:
+                return candidate
+            i += 1
+
     def remove_box(self, box_id: str) -> None:
         for page in self.pages:
             page.boxes = [b for b in page.boxes if b.id != box_id]

@@ -11,6 +11,7 @@ from ..components.drop_zone import build_drop_zone
 from ..components.ollama_status import OllamaStatus
 from ..components.recent_runs import build_recent_runs
 from ..components.settings_dialog import open_settings_dialog
+from ..components.stepper import build_stepper
 from ..state import AppState
 
 
@@ -19,13 +20,26 @@ def build_upload_view(
     state: AppState,
     file_picker: ft.FilePicker,
 ) -> ft.View:
+    state.load_recent_runs()
 
-    progress_bar = ft.ProgressBar(
+    progress_ring = ft.ProgressRing(
         visible=False,
         color=theme.PRIMARY,
-        bgcolor=theme.BG_ELEVATED,
+        stroke_width=4,
     )
-    status_text = ft.Text("", size=12, color=theme.TEXT_MUTED, visible=False)
+    status_text = ft.Text("", size=16, weight=ft.FontWeight.W_500, color=theme.TEXT_PRIMARY, visible=False)
+    
+    loading_overlay = ft.Container(
+        content=ft.Column(
+            [progress_ring, ft.Container(height=16), status_text],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        bgcolor=f"#CC{theme.BG_PAGE[1:]}",
+        visible=False,
+        alignment=ft.Alignment.CENTER,
+        expand=True,
+    )
 
     async def browse_files() -> None:
         files = await file_picker.pick_files(
@@ -37,7 +51,7 @@ def build_upload_view(
         file_path = files[0].path
         if not file_path:
             return
-        _start_review_prep(page, state, file_path, progress_bar, status_text)
+        _start_review_prep(page, state, file_path, loading_overlay, progress_ring, status_text)
 
     settings_btn = ft.IconButton(
         icon=ft.Icons.SETTINGS_OUTLINED,
@@ -65,15 +79,10 @@ def build_upload_view(
 
     content = ft.Column(
         [
-            ft.Row([ft.Container(expand=True), settings_btn]),
-            ft.Container(height=8),
             title,
             subtitle,
             ft.Container(height=20),
             drop_zone,
-            ft.Container(height=4),
-            progress_bar,
-            status_text,
             ft.Container(height=20),
             recent_runs,
         ],
@@ -84,21 +93,39 @@ def build_upload_view(
     return ft.View(
         route="/",
         controls=[
-            ft.Stack(
+            ft.Column(
                 [
-                    ft.Container(
-                        content=content,
-                        width=600,
-                        padding=ft.padding.symmetric(horizontal=24, vertical=16),
-                        alignment=ft.Alignment.TOP_CENTER,
+                    build_stepper(1, page, state),
+                    ft.Stack(
+                        [
+                            ft.Container(
+                                content=ft.Container(
+                                    content=content,
+                                    width=600,
+                                    padding=ft.padding.symmetric(horizontal=24, vertical=16),
+                                ),
+                                alignment=ft.Alignment.CENTER,
+                                top=0,
+                                bottom=0,
+                                left=0,
+                                right=0,
+                            ),
+                            ft.Container(
+                                content=settings_btn,
+                                top=16,
+                                right=24,
+                            ),
+                            ft.Container(
+                                content=ollama_badge,
+                                left=16,
+                                bottom=16,
+                            ),
+                            loading_overlay,
+                        ],
                         expand=True,
-                    ),
-                    ft.Container(
-                        content=ollama_badge,
-                        left=16,
-                        bottom=16,
-                    ),
+                    )
                 ],
+                spacing=0,
                 expand=True,
             )
         ],
@@ -112,7 +139,8 @@ def _start_review_prep(
     page: ft.Page,
     state: AppState,
     file_path: str,
-    progress_bar: ft.ProgressBar,
+    loading_overlay: ft.Container,
+    progress_ring: ft.ProgressRing,
     status_text: ft.Text,
 ) -> None:
     import asyncio
@@ -120,10 +148,10 @@ def _start_review_prep(
 
     from free_doc_extract.workflows import prepare_review_workflow
 
-    progress_bar.visible = True
-    progress_bar.value = None  # indeterminate
+    loading_overlay.visible = True
+    progress_ring.visible = True
     status_text.visible = True
-    status_text.color = theme.TEXT_MUTED
+    status_text.color = theme.TEXT_PRIMARY
     status_text.value = f"Preparing layout review for {Path(file_path).name}…"
     page.update()
 
@@ -136,15 +164,21 @@ def _start_review_prep(
                     run_root=state.run_root,
                 )
             )
-            progress_bar.visible = False
+            loading_overlay.visible = False
+            progress_ring.visible = False
             status_text.visible = False
             state.load_run(Path(run_dir).name)
             page.go(f"/review/{state.run_id}")
         except Exception as exc:
-            progress_bar.visible = False
-            status_text.visible = True
-            status_text.value = f"Error preparing review: {exc}"
-            status_text.color = theme.ERROR
+            loading_overlay.visible = False
+            progress_ring.visible = False
+            status_text.visible = False
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(f"Error preparing review: {exc}"),
+                    bgcolor=theme.ERROR,
+                )
+            )
             page.update()
 
     page.run_task(do_prepare_review)

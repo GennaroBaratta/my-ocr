@@ -18,10 +18,13 @@ _BOX_KIND_COLORS = {
     "Table": theme.BOX_TABLE,
     "Figure/Image": theme.BOX_FIGURE_IMAGE,
     "Header": theme.BOX_HEADER,
+    "Title": theme.BOX_HEADER,
+    "Formula": theme.BOX_FORMULA,
 }
 
-_UNSELECTED_BORDER_ALPHA = "26"
+_UNSELECTED_BORDER_ALPHA = "14"
 _UNSELECTED_FILL_ALPHA = "02"
+_MOVE_HANDLE_SIZE = 16
 
 
 def build_bbox_editor(
@@ -143,14 +146,19 @@ def _build_box_overlay(
     )
 
     handles: list[ft.GestureDetector] = []
+    move_handle_ref: list[ft.GestureDetector] = []
 
     def refresh_overlay() -> None:
         _sync_box_overlay(box_container, box_content, handles, box, scale)
+        if move_handle_ref:
+            mx, my = _move_handle_position(box, scale)
+            move_handle_ref[0].left = mx
+            move_handle_ref[0].top = my
 
     def on_tap(e: ft.TapEvent) -> None:
         on_select(box.id)
 
-    def on_drag(e: ft.DragUpdateEvent) -> None:
+    def on_move(e: ft.DragUpdateEvent) -> None:
         delta = e.local_delta or e.global_delta
         if delta is None:
             return
@@ -160,20 +168,19 @@ def _build_box_overlay(
         refresh_overlay()
         on_live_change()
 
-    def on_drag_end(e: ft.DragEndEvent) -> None:
+    def on_move_end(e: ft.DragEndEvent) -> None:
         on_change()
 
     box_container = ft.GestureDetector(
         content=box_content,
         mouse_cursor=ft.MouseCursor.MOVE if is_sel else ft.MouseCursor.CLICK,
         on_tap=on_tap,
-        on_pan_update=on_drag if is_sel else None,
-        on_pan_end=on_drag_end if is_sel else None,
         left=box.x * scale,
         top=box.y * scale,
     )
 
-    # Resize handles for selected box
+    overlays: list[ft.Control] = [box_container]
+
     if is_sel:
         handles = _build_resize_handles(
             box,
@@ -184,8 +191,12 @@ def _build_box_overlay(
             on_live_change,
             refresh_overlay,
         )
+        move_handle = _build_move_handle(box, scale, on_move, on_move_end)
+        move_handle_ref.append(move_handle)
+        overlays.extend(handles)
+        overlays.append(move_handle)
 
-    return [box_container, *handles]
+    return overlays
 
 
 def _build_resize_handles(
@@ -258,6 +269,40 @@ def _build_resize_handles(
         )
 
     return handles
+
+
+def _move_handle_position(box: BoundingBox, scale: float) -> tuple[float, float]:
+    return box.x * scale + 2, box.y * scale + 2
+
+
+def _build_move_handle(
+    box: BoundingBox,
+    scale: float,
+    on_move: Callable[[ft.DragUpdateEvent], None],
+    on_move_end: Callable[[ft.DragEndEvent], None],
+) -> ft.GestureDetector:
+    left, top = _move_handle_position(box, scale)
+    return ft.GestureDetector(
+        content=ft.Container(
+            width=_MOVE_HANDLE_SIZE,
+            height=_MOVE_HANDLE_SIZE,
+            bgcolor=theme.PRIMARY,
+            border=ft.Border.all(1, "white"),
+            border_radius=3,
+            content=ft.Icon(
+                ft.Icons.OPEN_WITH,
+                size=_MOVE_HANDLE_SIZE - 4,
+                color="white",
+            ),
+            alignment=ft.Alignment.CENTER,
+            tooltip="Drag to move",
+        ),
+        mouse_cursor=ft.MouseCursor.MOVE,
+        on_pan_update=on_move,
+        on_pan_end=on_move_end,
+        left=left,
+        top=top,
+    )
 
 
 def _sync_box_overlay(

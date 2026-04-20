@@ -12,6 +12,7 @@ from .. import theme
 from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
+from ..components.stepper import build_stepper
 from ..state import AppState
 
 
@@ -26,11 +27,23 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     if not filename:
         filename = state.run_id or "Document"
 
-    progress_bar = ft.ProgressBar(
+    progress_ring = ft.ProgressRing(
         visible=False,
-        value=None,
         color=theme.PRIMARY,
-        bgcolor=theme.BG_ELEVATED,
+        stroke_width=4,
+    )
+    status_text = ft.Text("Running OCR...", size=16, weight=ft.FontWeight.W_500, color=theme.TEXT_PRIMARY, visible=False)
+    
+    loading_overlay = ft.Container(
+        content=ft.Column(
+            [progress_ring, ft.Container(height=16), status_text],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        bgcolor=f"#CC{theme.BG_PAGE[1:]}",
+        visible=False,
+        alignment=ft.Alignment.CENTER,
+        expand=True,
     )
 
     # ── Mutable content containers ──────────────────────────────────
@@ -106,7 +119,16 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def run_ocr() -> None:
         state.save_reviewed_layout()
-        _start_reviewed_ocr(page, state, progress_bar)
+        _start_reviewed_ocr(page, state, loading_overlay, progress_ring, status_text)
+
+    def on_add_box() -> None:
+        new_id = state.add_box_to_current_page()
+        if new_id:
+            state.select_box(new_id)
+        rebuild()
+
+    def on_redetect_layout() -> None:
+        _start_redetect_layout(page, state, loading_overlay, progress_ring, status_text, rebuild)
 
     def on_page_select(idx: int) -> None:
         state.current_page_index = idx
@@ -213,6 +235,25 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             padding=ft.padding.symmetric(horizontal=2),
         ),
         ft.Container(width=8),
+        ft.IconButton(
+            icon=ft.Icons.REFRESH,
+            icon_color=theme.TEXT_MUTED,
+            icon_size=20,
+            tooltip="Re-detect layout",
+            on_click=lambda _e=None: on_redetect_layout(),
+        ),
+        ft.OutlinedButton(
+            "Add Box",
+            icon=ft.Icons.ADD_BOX_OUTLINED,
+            on_click=lambda _e=None: on_add_box(),
+            tooltip="Add a new layout box on this page",
+            style=ft.ButtonStyle(
+                color=theme.TEXT_PRIMARY,
+                side=ft.BorderSide(1, theme.BORDER),
+                shape=ft.RoundedRectangleBorder(radius=6),
+            ),
+        ),
+        ft.Container(width=8),
         ft.ElevatedButton(
             "Run OCR",
             icon=ft.Icons.PLAY_ARROW,
@@ -238,6 +279,12 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
+    def on_keyboard(e: ft.KeyboardEvent) -> None:
+        if e.key == "Delete" and state.selected_box_id:
+            on_remove(state.selected_box_id)
+
+    page.on_keyboard_event = on_keyboard
+
     # Initial build
     content_row.controls = _build_panes(
         state,
@@ -253,7 +300,16 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         route=f"/review/{state.run_id}",
         controls=[
             ft.Column(
-                [toolbar, progress_bar, content_row],
+                [
+                    build_stepper(2, page, state),
+                    ft.Stack(
+                        [
+                            ft.Column([toolbar, content_row], spacing=0, expand=True),
+                            loading_overlay,
+                        ],
+                        expand=True,
+                    ),
+                ],
                 spacing=0,
                 expand=True,
             )
@@ -282,14 +338,18 @@ def _build_panes(
 def _start_reviewed_ocr(
     page: ft.Page,
     state: AppState,
-    progress_bar: ft.ProgressBar,
+    loading_overlay: ft.Container,
+    progress_ring: ft.ProgressRing,
+    status_text: ft.Text,
 ) -> None:
     from free_doc_extract.workflows import run_reviewed_ocr_workflow
 
     if not state.run_id:
         return
 
-    progress_bar.visible = True
+    loading_overlay.visible = True
+    progress_ring.visible = True
+    status_text.visible = True
     page.update()
 
     import asyncio
@@ -306,11 +366,15 @@ def _start_reviewed_ocr(
                     run_root=state.run_root,
                 )
             )
-            progress_bar.visible = False
+            loading_overlay.visible = False
+            progress_ring.visible = False
+            status_text.visible = False
             state.load_run(run_id)
             page.go(f"/results/{run_id}")
         except Exception as exc:
-            progress_bar.visible = False
+            loading_overlay.visible = False
+            progress_ring.visible = False
+            status_text.visible = False
             page.show_dialog(
                 ft.SnackBar(
                     ft.Text(f"OCR failed: {exc}"),
@@ -320,3 +384,103 @@ def _start_reviewed_ocr(
             page.update()
 
     page.run_task(do_ocr)
+
+
+def _start_redetect_layout(
+    page: ft.Page,
+    state: AppState,
+    loading_overlay: ft.Container,
+    progress_ring: ft.ProgressRing,
+    status_text: ft.Text,
+    rebuild: Callable[[], None],
+) -> None:
+    from free_doc_extract.workflows import prepare_review_workflow
+
+    if not state.run_id or not state.run_paths:
+        return
+
+    try:
+        meta = json.loads(state.run_paths.meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        meta = {}
+    input_path = meta.get("input_path")
+    if not input_path:
+        page.show_dialog(
+            ft.SnackBar(
+                ft.Text("Cannot re-detect: original input path is missing."),
+                bgcolor=theme.ERROR,
+            )
+        )
+        page.update()
+        return
+
+    has_prior_review = state.run_paths.reviewed_layout_path.exists()
+
+    def start_redetect() -> None:
+        import asyncio
+        import functools
+
+        run_id = state.run_id
+        run_root = state.run_root
+        loading_overlay.visible = True
+        progress_ring.visible = True
+        status_text.value = "Re-detecting layout…"
+        status_text.visible = True
+        page.update()
+
+        async def do_redetect() -> None:
+            try:
+                await asyncio.to_thread(
+                    functools.partial(
+                        prepare_review_workflow,
+                        input_path,
+                        run=run_id,
+                        run_root=run_root,
+                    )
+                )
+                loading_overlay.visible = False
+                progress_ring.visible = False
+                status_text.visible = False
+                status_text.value = "Running OCR..."
+                if run_id:
+                    state.load_run(run_id)
+                rebuild()
+            except Exception as exc:
+                loading_overlay.visible = False
+                progress_ring.visible = False
+                status_text.visible = False
+                status_text.value = "Running OCR..."
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(f"Re-detect failed: {exc}"),
+                        bgcolor=theme.ERROR,
+                    )
+                )
+                page.update()
+
+        page.run_task(do_redetect)
+
+    if not has_prior_review:
+        start_redetect()
+        return
+
+    dialog = ft.AlertDialog(modal=True)
+
+    def close_dialog() -> None:
+        dialog.open = False
+        page.update()
+
+    def confirm() -> None:
+        close_dialog()
+        start_redetect()
+
+    dialog.title = ft.Text("Re-detect layout?")
+    dialog.content = ft.Text(
+        "Re-detecting will replace the current layout boxes on all pages. Continue?"
+    )
+    dialog.actions = [
+        ft.TextButton("Cancel", on_click=lambda _e=None: close_dialog()),
+        ft.FilledButton("Re-detect", on_click=lambda _e=None: confirm()),
+    ]
+    page.show_dialog(dialog)
+    page.update()

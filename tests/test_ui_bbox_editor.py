@@ -49,7 +49,7 @@ def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) 
     assert commit_calls == ["commit"]
 
 
-def test_box_drag_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> None:
+def test_move_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> None:
     monkeypatch.setattr(
         "free_doc_extract.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 100),
@@ -69,8 +69,11 @@ def test_box_drag_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> No
     stack = _editor_stack(editor)
     box_detector = cast(ft.GestureDetector, stack.controls[1])
     top_left_handle = cast(ft.GestureDetector, stack.controls[2])
-    drag_update = cast(Callable[[object], None], box_detector.on_pan_update)
-    drag_end = cast(Callable[[object], None], box_detector.on_pan_end)
+    move_handle = cast(ft.GestureDetector, stack.controls[10])
+    drag_update = cast(Callable[[object], None], move_handle.on_pan_update)
+    drag_end = cast(Callable[[object], None], move_handle.on_pan_end)
+
+    assert box_detector.on_pan_update is None
 
     drag_update(_drag_event(8, -4))
 
@@ -80,6 +83,7 @@ def test_box_drag_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> No
     assert commit_calls == []
     assert (box_detector.left, box_detector.top) == (18, 16)
     assert (top_left_handle.left, top_left_handle.top) == (14, 12)
+    assert (move_handle.left, move_handle.top) == (20, 18)
 
     drag_end(SimpleNamespace())
 
@@ -149,20 +153,20 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
 
     stack = _editor_stack(editor)
     text_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[1]).content)
-    table_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[10]).content)
-    figure_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[11]).content)
-    header_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[12]).content)
+    table_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[11]).content)
+    figure_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[12]).content)
+    header_box = cast(ft.Container, cast(ft.GestureDetector, stack.controls[13]).content)
 
     assert text_box.border == ft.Border.all(2, theme.BOX_TEXT_BLOCK)
     assert text_box.bgcolor == f"{theme.BOX_TEXT_BLOCK}1A"
 
-    assert table_box.border == ft.Border.all(1, f"{theme.BOX_TABLE}26")
+    assert table_box.border == ft.Border.all(1, f"{theme.BOX_TABLE}14")
     assert table_box.bgcolor == f"{theme.BOX_TABLE}02"
 
-    assert figure_box.border == ft.Border.all(1, f"{theme.BOX_FIGURE_IMAGE}26")
+    assert figure_box.border == ft.Border.all(1, f"{theme.BOX_FIGURE_IMAGE}14")
     assert figure_box.bgcolor == f"{theme.BOX_FIGURE_IMAGE}02"
 
-    assert header_box.border == ft.Border.all(1, f"{theme.BOX_HEADER}26")
+    assert header_box.border == ft.Border.all(1, f"{theme.BOX_HEADER}14")
     assert header_box.bgcolor == f"{theme.BOX_HEADER}02"
 
 
