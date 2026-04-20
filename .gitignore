@@ -29,3 +29,5 @@ data/reports/*
 node_modules/
 
 .*/
+
+AGENT.md

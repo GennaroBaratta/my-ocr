@@ -1,7 +1,7 @@
 # free-doc-extract
 
 <p align="center">
-  <img src="docs/screenshots/hero-overview.png" alt="free-doc-extract interface overview" width="100%" />
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-39-07.png" alt="free-doc-extract OCR results workspace" width="100%" />
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@ The screenshots in this README are real GUI captures from a local demo run of [`
 Start from a focused upload screen with a clear document drop zone, lightweight run history, and local Ollama status.
 
 <p align="center">
-  <img src="docs/screenshots/upload-workspace.png" alt="Upload workspace" width="88%" />
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-05.png" alt="Upload workspace" width="88%" />
 </p>
 
 ### 2. Review The Layout
@@ -40,15 +40,31 @@ Start from a focused upload screen with a clear document drop zone, lightweight 
 The core idea of the project is here: inspect the detected regions, move page by page, add boxes, remove boxes, and fix the layout before OCR becomes canonical.
 
 <p align="center">
-  <img src="docs/screenshots/review-workspace.png" alt="Document review workspace" width="88%" />
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-54.png" alt="Document review workspace" width="88%" />
 </p>
 
-### 3. Inspect OCR Results
+### 3. Adjust Region Types
+
+The review panel also exposes per-box metadata, so you can correct the detected block type and coordinates for images, figures, and text before running OCR.
+
+<p align="center">
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-29-31.png" alt="Layout review properties panel" width="88%" />
+</p>
+
+### 4. Inspect OCR Results
 
 Once OCR is complete, the results workspace keeps the document, markdown, JSON, and raw page payloads side by side so debugging extraction quality is fast.
 
 <p align="center">
-  <img src="docs/screenshots/results-workspace.png" alt="Results workspace" width="88%" />
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-32.png" alt="Results workspace" width="88%" />
+</p>
+
+### 5. Validate The Extracted Text
+
+You can also inspect the OCR markdown against the page preview in a cleaner reading layout before exporting markdown or JSON artifacts.
+
+<p align="center">
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-39-07.png" alt="OCR markdown validation workspace" width="88%" />
 </p>
 
 ## Core Flow
