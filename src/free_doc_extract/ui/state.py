@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -40,6 +41,7 @@ class BoundingBox:
 @dataclass
 class PageData:
     index: int
+    page_number: int
     image_path: str
     boxes: list[BoundingBox] = field(default_factory=list)
 
@@ -127,7 +129,14 @@ class AppState:
         page_paths = self.run_paths.list_page_paths()
         boxes_by_page = self._load_boxes(page_paths)
         for i, pp in enumerate(page_paths):
-            self.pages.append(PageData(index=i, image_path=pp, boxes=boxes_by_page.get(i, [])))
+            self.pages.append(
+                PageData(
+                    index=i,
+                    page_number=_infer_page_number(pp, i + 1),
+                    image_path=pp,
+                    boxes=boxes_by_page.get(i, []),
+                )
+            )
 
     def _load_boxes(self, page_paths: list[str]) -> dict[int, list[BoundingBox]]:
         review_payload = self._load_review_payload()
@@ -141,7 +150,9 @@ class AppState:
             return {}
 
         result: dict[int, list[BoundingBox]] = {}
-        for page_idx, page_layout, coord_space, page_path in self._iter_page_layouts(data):
+        for page_idx, page_layout, coord_space, page_path in self._iter_page_layouts(
+            data, page_paths
+        ):
             resolved_page_path = self._resolve_page_path(page_idx, page_path, page_paths)
             image_width, image_height = (
                 get_image_size(resolved_page_path) if resolved_page_path else (0, 0)
@@ -185,12 +196,7 @@ class AppState:
             if not isinstance(page, dict):
                 continue
             page_data = cast(dict[str, Any], page)
-            page_number = page_data.get("page_number")
-            page_idx = (
-                page_number - 1
-                if isinstance(page_number, int) and page_number > 0
-                else fallback_idx
-            )
+            page_idx = self._payload_page_index(page_data, fallback_idx, page_paths)
             page_path = page_data.get("page_path")
             resolved_page_path = self._resolve_page_path(
                 page_idx,
@@ -236,7 +242,9 @@ class AppState:
             result[page_idx] = boxes
         return result
 
-    def _iter_page_layouts(self, payload: Any) -> list[tuple[int, Any, str | None, str | None]]:
+    def _iter_page_layouts(
+        self, payload: Any, page_paths: list[str]
+    ) -> list[tuple[int, Any, str | None, str | None]]:
         if isinstance(payload, dict):
             pages = payload.get("pages")
             if isinstance(pages, list):
@@ -246,12 +254,6 @@ class AppState:
                         page_layouts.append((fallback_idx, page, None, None))
                         continue
                     page_data = cast(dict[str, Any], page)
-                    page_number = page_data.get("page_number")
-                    page_idx = (
-                        page_number - 1
-                        if isinstance(page_number, int) and page_number > 0
-                        else fallback_idx
-                    )
                     layout = page_data.get("sdk_json")
                     if layout is None:
                         layout_path = page_data.get("sdk_json_path")
@@ -266,6 +268,7 @@ class AppState:
                         )
                         if isinstance(coord_value, str):
                             coord_space = coord_value
+                    page_idx = self._payload_page_index(page_data, fallback_idx, page_paths)
                     page_layouts.append(
                         (
                             page_idx,
@@ -394,6 +397,48 @@ class AppState:
                 markdown_parts.append(markdown.strip())
         return "\n\n".join(markdown_parts)
 
+    def _payload_page_index(
+        self,
+        page_data: dict[str, Any],
+        fallback_idx: int,
+        page_paths: list[str],
+    ) -> int:
+        payload_page_path = page_data.get("page_path")
+        if isinstance(payload_page_path, str):
+            page_idx = self._find_page_index_by_path(payload_page_path, page_paths)
+            if page_idx is not None:
+                return page_idx
+
+        page_number = page_data.get("page_number")
+        if isinstance(page_number, int) and page_number > 0:
+            page_idx = self._find_page_index_by_number(page_number, page_paths)
+            if page_idx is not None:
+                return page_idx
+
+        return fallback_idx
+
+    def _find_page_index_by_path(self, page_path: str, page_paths: list[str]) -> int | None:
+        lookup_strings: set[str] = {page_path}
+        lookup_names: set[str] = {Path(page_path).name}
+
+        candidate = Path(page_path)
+        lookup_strings.add(str(candidate))
+        if self.run_paths and not candidate.is_absolute():
+            lookup_strings.add(str(self.run_paths.run_dir / candidate))
+
+        for page_idx, candidate_path in enumerate(page_paths):
+            candidate_name = Path(candidate_path).name
+            if candidate_path in lookup_strings or candidate_name in lookup_names:
+                return page_idx
+
+        return None
+
+    def _find_page_index_by_number(self, page_number: int, page_paths: list[str]) -> int | None:
+        for page_idx, page_path in enumerate(page_paths):
+            if _infer_page_number(page_path, page_idx + 1) == page_number:
+                return page_idx
+        return None
+
     def _resolve_page_path(
         self,
         page_idx: int,
@@ -503,7 +548,7 @@ class AppState:
             image_width, image_height = get_image_size(page.image_path)
             review_pages.append(
                 {
-                    "page_number": page.index + 1,
+                    "page_number": page.page_number,
                     "page_path": page.image_path,
                     "image_size": {"width": image_width, "height": image_height},
                     "coord_space": "pixel",
@@ -536,6 +581,15 @@ class AppState:
             return self.pages[self.current_page_index]
         return None
 
+    def page_number_for_index(self, page_index: int) -> int:
+        if 0 <= page_index < len(self.pages):
+            return self.pages[page_index].page_number
+        return page_index + 1
+
+    @property
+    def current_page_number(self) -> int:
+        return self.page_number_for_index(self.current_page_index)
+
     def _review_source_sdk_json_path(self, page_index: int) -> str | None:
         payload = self._load_review_payload()
         if payload is not None:
@@ -558,3 +612,10 @@ class AppState:
             return None
         source_sdk_json_path = page.get("sdk_json_path")
         return source_sdk_json_path if isinstance(source_sdk_json_path, str) else None
+
+
+def _infer_page_number(page_path: str | Path, fallback_number: int) -> int:
+    match = re.fullmatch(r"page-(\d+)", Path(page_path).stem)
+    if match is None:
+        return fallback_number
+    return int(match.group(1))

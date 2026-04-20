@@ -80,7 +80,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             return
 
         is_adding = getattr(state, "is_adding_box", False)
-        add_box_btn.text = "Cancel Add" if is_adding else "Add Box"
+        add_box_label.value = "Cancel Add" if is_adding else "Add Box"
         add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
         add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
         add_box_btn.style = ft.ButtonStyle(
@@ -107,7 +107,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     # ── Toolbar ─────────────────────────────────────────────────────
     page_label = ft.Text(
-        f"Page {state.current_page_index + 1} / {len(state.pages)}",
+        f"Page {state.current_page_number} / {len(state.pages)}",
         size=13,
         color=theme.TEXT_PRIMARY,
         width=80,
@@ -125,14 +125,14 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         if state.current_page_index > 0:
             state.current_page_index -= 1
             state.select_box(None)
-            page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
+            page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
             rebuild()
 
     def next_page() -> None:
         if state.current_page_index < len(state.pages) - 1:
             state.current_page_index += 1
             state.select_box(None)
-            page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
+            page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
             rebuild()
 
     def zoom_in() -> None:
@@ -155,7 +155,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             state.select_box(None)
             
         is_adding = getattr(state, "is_adding_box", False)
-        add_box_btn.text = "Cancel Add" if is_adding else "Add Box"
+        add_box_label.value = "Cancel Add" if is_adding else "Add Box"
         add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
         add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
         add_box_btn.style = ft.ButtonStyle(
@@ -176,7 +176,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     def on_page_select(idx: int) -> None:
         state.current_page_index = idx
         state.select_box(None)
-        page_label.value = f"Page {state.current_page_index + 1} / {len(state.pages)}"
+        page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
         rebuild()
 
     def on_box_selected(box_id: str | None) -> None:
@@ -234,8 +234,11 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         ),
     ]
 
+    add_box_label = ft.Text(
+        "Cancel Add" if getattr(state, "is_adding_box", False) else "Add Box"
+    )
     add_box_btn = ft.OutlinedButton(
-        "Cancel Add" if getattr(state, "is_adding_box", False) else "Add Box",
+        content=add_box_label,
         icon=ft.Icons.CLOSE if getattr(state, "is_adding_box", False) else ft.Icons.ADD_BOX_OUTLINED,
         on_click=lambda _e=None: on_add_box(),
         tooltip="Cancel adding box" if getattr(state, "is_adding_box", False) else "Add a new layout box on this page",

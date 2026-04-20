@@ -29,7 +29,6 @@ def build_code_display(state: AppState) -> ft.Column:
                 selectable=True,
                 extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
             ),
-            expand=True,
             padding=12,
         ),
     )
@@ -41,7 +40,6 @@ def build_code_display(state: AppState) -> ft.Column:
                 selectable=True,
                 extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
             ),
-            expand=True,
             padding=12,
         )
     else:
@@ -51,7 +49,6 @@ def build_code_display(state: AppState) -> ft.Column:
                 color=theme.TEXT_MUTED,
                 size=13,
             ),
-            expand=True,
             padding=12,
         )
     json_view = _build_panel(
@@ -71,7 +68,6 @@ def build_code_display(state: AppState) -> ft.Column:
                 size=12,
                 color=theme.TEXT_PRIMARY,
             ),
-            expand=True,
             padding=12,
         ),
     )
@@ -175,6 +171,25 @@ def _raw_page_text_for_state(state: AppState) -> str:
     if 0 <= current_page_index < len(pages):
         return json.dumps(pages[current_page_index], indent=2, ensure_ascii=False)
     return "No OCR page payload available for this page."
+
+
+def _current_page_markdown_for_state(state: AppState) -> str:
+    markdown_pages = _markdown_pages_for_state(state)
+    current_page_index = _current_page_index(state, markdown_pages)
+    if 0 <= current_page_index < len(markdown_pages):
+        return markdown_pages[current_page_index]
+    return ""
+
+
+def _current_page_ocr_markdown_for_state(state: AppState) -> str:
+    pages = _ocr_pages_for_state(state)
+    if not pages:
+        return ""
+    current_page_index = state.current_page_index
+    if not 0 <= current_page_index < len(pages):
+        return ""
+    markdown = pages[current_page_index].get("markdown")
+    return markdown if isinstance(markdown, str) else ""
 
 
 def _ocr_json_text_for_state(state: AppState) -> str:

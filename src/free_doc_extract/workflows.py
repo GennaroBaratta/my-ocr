@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 import re
 import shutil
 import tempfile
@@ -9,8 +10,17 @@ from typing import Any, Callable
 from .evaluate import evaluate_directories, write_markdown_report
 from .extract_rules import extract_from_markdown
 from .ingest import normalize_document
+from .ocr_fallback import detect_bbox_coord_space, extract_layout_blocks
 from .ocr import prepare_review_artifacts, run_ocr
 from .paths import RunPaths
+from .review_artifacts import (
+    REVIEW_LAYOUT_VERSION,
+    build_review_page_from_layout,
+    build_review_layout_payload,
+    load_review_layout_payload,
+    review_layout_pages_by_number,
+    save_review_layout_payload,
+)
 from .settings import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,
@@ -165,6 +175,106 @@ def run_reviewed_ocr_workflow(
             ),
         )
     finally:
+        shutil.rmtree(staged_paths.run_dir, ignore_errors=True)
+    _clear_prediction_outputs(paths)
+    return paths.run_dir
+
+
+def prepare_review_page_workflow(
+    run: str,
+    page_number: int,
+    *,
+    run_root: str = DEFAULT_RUN_ROOT,
+    config_path: str = DEFAULT_CONFIG_PATH,
+    layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
+    prepare_review_artifacts_fn: Callable[..., dict[str, Any]] = prepare_review_artifacts,
+    write_json_fn: Callable[[str | Path, Any], None] = write_json,
+) -> Path:
+    paths = RunPaths.from_named_run(run, run_root=run_root)
+    page_path = _resolve_page_path_for_number(paths, page_number)
+    recorded_input_path = _load_existing_input_path(paths)
+
+    staged_paths = _create_staged_review_paths(paths)
+    partial_paths = _create_staged_review_paths(paths)
+    try:
+        _copy_review_artifact_snapshot(paths, staged_paths)
+        result = prepare_review_artifacts_fn(
+            [page_path],
+            partial_paths.run_dir,
+            config_path=config_path,
+            layout_device=layout_device,
+            layout_profile=layout_profile,
+        )
+        _merge_review_page_artifacts(paths, staged_paths, partial_paths, page_number)
+        _publish_staged_review_run(
+            staged_paths,
+            paths,
+            post_publish=lambda: write_run_metadata(
+                paths.run_dir,
+                recorded_input_path,
+                paths.list_page_paths(),
+                {
+                    **result,
+                    "raw_dir": str(paths.raw_dir),
+                },
+                write_json_fn=write_json_fn,
+            ),
+        )
+    finally:
+        shutil.rmtree(partial_paths.run_dir, ignore_errors=True)
+        shutil.rmtree(staged_paths.run_dir, ignore_errors=True)
+    _clear_prediction_outputs(paths)
+    return paths.run_dir
+
+
+def run_reviewed_ocr_page_workflow(
+    run: str,
+    page_number: int,
+    *,
+    run_root: str = DEFAULT_RUN_ROOT,
+    config_path: str = DEFAULT_CONFIG_PATH,
+    layout_device: str = DEFAULT_LAYOUT_DEVICE,
+    layout_profile: str | None = "auto",
+    run_ocr_fn: Callable[..., dict[str, Any]] = run_ocr,
+    write_json_fn: Callable[[str | Path, Any], None] = write_json,
+) -> Path:
+    paths = RunPaths.from_named_run(run, run_root=run_root)
+    page_path = _resolve_page_path_for_number(paths, page_number)
+    recorded_input_path = _load_existing_input_path(paths)
+
+    staged_paths = _create_staged_ocr_paths(paths)
+    partial_paths = _create_staged_ocr_paths(paths)
+    try:
+        _copy_reviewed_ocr_artifact_snapshot(paths, staged_paths)
+        result = run_ocr_fn(
+            [page_path],
+            partial_paths.run_dir,
+            config_path=config_path,
+            layout_device=layout_device,
+            layout_profile=layout_profile,
+            reviewed_layout_path=(
+                paths.reviewed_layout_path if paths.reviewed_layout_path.exists() else None
+            ),
+        )
+        _merge_ocr_page_artifacts(staged_paths, partial_paths, paths, page_number)
+        _publish_staged_ocr_run(
+            staged_paths,
+            paths,
+            include_pages=False,
+            post_publish=lambda: write_run_metadata(
+                paths.run_dir,
+                recorded_input_path,
+                paths.list_page_paths(),
+                {
+                    **result,
+                    "raw_dir": str(paths.raw_dir),
+                },
+                write_json_fn=write_json_fn,
+            ),
+        )
+    finally:
+        shutil.rmtree(partial_paths.run_dir, ignore_errors=True)
         shutil.rmtree(staged_paths.run_dir, ignore_errors=True)
     _clear_prediction_outputs(paths)
     return paths.run_dir
@@ -676,6 +786,364 @@ def _rewrite_path_value(value: Any, source_prefix: str, target_prefix: str) -> A
     if isinstance(value, str) and source_prefix in value:
         return value.replace(source_prefix, target_prefix)
     return value
+
+
+def _resolve_page_path_for_number(paths: RunPaths, page_number: int) -> str:
+    for page_path in paths.list_page_paths():
+        if _page_number_for_path(page_path) == page_number:
+            return page_path
+    raise FileNotFoundError(f"Page {page_number} not found in {paths.pages_dir}")
+
+
+def _page_number_for_path(page_path: str | Path) -> int:
+    match = re.fullmatch(r"page-(\d+)", Path(page_path).stem)
+    if match is None:
+        raise ValueError(f"Cannot determine page number from {page_path}")
+    return int(match.group(1))
+
+
+def _copy_review_artifact_snapshot(source_paths: RunPaths, staged_paths: RunPaths) -> None:
+    staged_paths.ensure_run_dir()
+    for source, target in (
+        (source_paths.pages_dir, staged_paths.pages_dir),
+        (source_paths.raw_dir, staged_paths.raw_dir),
+        (source_paths.reviewed_layout_path, staged_paths.reviewed_layout_path),
+    ):
+        if source.exists():
+            _copy_path(source, target)
+
+
+def _copy_reviewed_ocr_artifact_snapshot(source_paths: RunPaths, staged_paths: RunPaths) -> None:
+    staged_paths.ensure_run_dir()
+    for source, target in (
+        (source_paths.raw_dir, staged_paths.raw_dir),
+        (source_paths.fallback_dir, staged_paths.fallback_dir),
+        (source_paths.ocr_markdown_path, staged_paths.ocr_markdown_path),
+        (source_paths.ocr_json_path, staged_paths.ocr_json_path),
+        (source_paths.ocr_fallback_path, staged_paths.ocr_fallback_path),
+    ):
+        if source.exists():
+            _copy_path(source, target)
+
+
+def _merge_review_page_artifacts(
+    source_paths: RunPaths,
+    staged_paths: RunPaths,
+    partial_paths: RunPaths,
+    page_number: int,
+) -> None:
+    partial_payload = load_review_layout_payload(partial_paths.reviewed_layout_path)
+    if partial_payload is None:
+        raise FileNotFoundError(f"Missing partial reviewed layout: {partial_paths.reviewed_layout_path}")
+
+    partial_page = review_layout_pages_by_number(partial_payload).get(page_number)
+    if partial_page is None:
+        raise KeyError(f"Partial reviewed layout is missing page {page_number}")
+
+    _rewrite_path_keys(
+        partial_page,
+        ("page_path", "source_sdk_json_path"),
+        str(partial_paths.run_dir),
+        str(staged_paths.run_dir),
+    )
+    _copy_page_dir(partial_paths.raw_page_dir(page_number), staged_paths.raw_page_dir(page_number))
+
+    existing_payload = load_review_layout_payload(staged_paths.reviewed_layout_path) or {
+        "version": REVIEW_LAYOUT_VERSION,
+        "status": "prepared",
+        "pages": [],
+        "summary": {"page_count": 0},
+    }
+    existing_pages = existing_payload.get("pages")
+    if not isinstance(existing_pages, list):
+        existing_pages = []
+    existing_by_number = _seed_review_pages_for_merge(
+        source_paths,
+        staged_paths,
+        review_layout_pages_by_number(existing_payload),
+    )
+    existing_by_number[page_number] = partial_page
+    ordered_pages = _ordered_page_records(existing_pages, existing_by_number, staged_paths.pages_dir)
+    status = partial_payload.get("status")
+    payload = build_review_layout_payload(
+        ordered_pages,
+        status=status if isinstance(status, str) and status.strip() else "prepared",
+    )
+    save_review_layout_payload(staged_paths.reviewed_layout_path, payload)
+
+
+def _seed_review_pages_for_merge(
+    source_paths: RunPaths,
+    staged_paths: RunPaths,
+    review_pages_by_number: dict[int, dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    seeded_pages = dict(review_pages_by_number)
+    expected_page_numbers = [
+        _page_number_for_path(page_path) for page_path in staged_paths.list_page_paths()
+    ]
+    missing_page_numbers = [
+        page_number for page_number in expected_page_numbers if page_number not in seeded_pages
+    ]
+    if not missing_page_numbers:
+        return seeded_pages
+
+    ocr_payload = load_json(source_paths.ocr_json_path)
+    if not isinstance(ocr_payload, dict):
+        raise FileNotFoundError(
+            "Missing OCR payload required to preserve untouched review pages: "
+            f"{source_paths.ocr_json_path}"
+        )
+
+    ocr_pages_by_number = _pages_by_number(ocr_payload)
+    for missing_page_number in missing_page_numbers:
+        ocr_page = ocr_pages_by_number.get(missing_page_number)
+        if ocr_page is None:
+            raise KeyError(
+                "OCR payload is missing untouched page "
+                f"{missing_page_number} required for review merge"
+            )
+        seeded_pages[missing_page_number] = _build_review_page_from_ocr_page(
+            source_paths,
+            staged_paths,
+            missing_page_number,
+            ocr_page,
+        )
+    return seeded_pages
+
+
+def _build_review_page_from_ocr_page(
+    source_paths: RunPaths,
+    staged_paths: RunPaths,
+    page_number: int,
+    ocr_page: dict[str, Any],
+) -> dict[str, Any]:
+    sdk_json_path = _resolve_sdk_json_path_for_page(source_paths, page_number, ocr_page)
+    if not sdk_json_path.exists():
+        raise FileNotFoundError(
+            f"Missing SDK JSON for untouched page {page_number}: {sdk_json_path}"
+        )
+
+    page_path = _resolve_page_path_for_number(staged_paths, page_number)
+    _copy_path(sdk_json_path.parent, staged_paths.raw_page_dir(page_number))
+    staged_sdk_json_path = staged_paths.raw_page_dir(page_number) / sdk_json_path.name
+    layout = load_json(sdk_json_path)
+    blocks = extract_layout_blocks(layout)
+    coord_space = _detect_coord_space(blocks, page_path)
+    image_width, image_height = _get_image_size(page_path)
+    return build_review_page_from_layout(
+        page_number=page_number,
+        page_path=page_path,
+        source_sdk_json_path=str(staged_sdk_json_path),
+        layout=layout,
+        coord_space=coord_space,
+        image_width=image_width,
+        image_height=image_height,
+    )
+
+
+def _resolve_sdk_json_path_for_page(
+    source_paths: RunPaths,
+    page_number: int,
+    ocr_page: dict[str, Any],
+) -> Path:
+    sdk_json_path = ocr_page.get("sdk_json_path")
+    if not isinstance(sdk_json_path, str) or not sdk_json_path.strip():
+        raise KeyError(f"OCR payload is missing sdk_json_path for untouched page {page_number}")
+
+    candidate = Path(sdk_json_path)
+    if candidate.exists():
+        return candidate
+    if candidate.is_absolute():
+        raise FileNotFoundError(candidate)
+
+    resolved = source_paths.run_dir / candidate
+    if resolved.exists():
+        return resolved
+    raise FileNotFoundError(resolved)
+
+
+def _get_image_size(page_path: str | Path) -> tuple[int, int]:
+    try:
+        image_module = import_module("PIL.Image")
+    except ImportError as exc:
+        raise RuntimeError("Review page merge requires Pillow.") from exc
+
+    with image_module.open(page_path) as image:
+        return image.size
+
+
+def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str | Path) -> str:
+    if not blocks:
+        return "unknown"
+
+    try:
+        image_width, image_height = _get_image_size(page_path)
+    except OSError:
+        return detect_bbox_coord_space(blocks)
+
+    return detect_bbox_coord_space(blocks, width=image_width, height=image_height)
+
+
+def _merge_ocr_page_artifacts(
+    staged_paths: RunPaths,
+    partial_paths: RunPaths,
+    target_paths: RunPaths,
+    page_number: int,
+) -> None:
+    partial_payload = load_json(partial_paths.ocr_json_path)
+    if not isinstance(partial_payload, dict):
+        raise FileNotFoundError(f"Missing partial OCR payload: {partial_paths.ocr_json_path}")
+
+    partial_pages = _pages_by_number(partial_payload)
+    partial_page = partial_pages.get(page_number)
+    if partial_page is None:
+        raise KeyError(f"Partial OCR payload is missing page {page_number}")
+
+    _rewrite_path_keys(
+        partial_page,
+        ("page_path", "sdk_json_path"),
+        str(partial_paths.run_dir),
+        str(staged_paths.run_dir),
+    )
+    _copy_page_dir(partial_paths.raw_page_dir(page_number), staged_paths.raw_page_dir(page_number))
+
+    existing_payload = load_json(staged_paths.ocr_json_path)
+    if not isinstance(existing_payload, dict):
+        raise FileNotFoundError(f"Missing existing OCR payload: {staged_paths.ocr_json_path}")
+    existing_pages = existing_payload.get("pages")
+    if not isinstance(existing_pages, list):
+        raise ValueError(f"Invalid OCR pages payload: {staged_paths.ocr_json_path}")
+
+    existing_by_number = _pages_by_number(existing_payload)
+    existing_by_number[page_number] = partial_page
+    merged_pages = _ordered_page_records(existing_pages, existing_by_number, target_paths.pages_dir)
+
+    merged_payload = dict(existing_payload)
+    merged_payload["pages"] = merged_pages
+    merged_summary = {
+        "page_count": len(merged_pages),
+        "sources": _count_page_sources(merged_pages),
+    }
+    if target_paths.reviewed_layout_path.exists():
+        merged_summary["reviewed_layout"] = {
+            "path": str(target_paths.reviewed_layout_path),
+            "page_count": len(merged_pages),
+            "apply_mode": "planning_and_fallback_only",
+        }
+    merged_payload["summary"] = merged_summary
+    write_json(staged_paths.ocr_json_path, merged_payload)
+    _write_merged_markdown(staged_paths.ocr_markdown_path, merged_pages)
+    _merge_fallback_page_artifacts(staged_paths, partial_paths, existing_pages, page_number)
+
+
+def _merge_fallback_page_artifacts(
+    staged_paths: RunPaths,
+    partial_paths: RunPaths,
+    existing_pages: list[Any],
+    page_number: int,
+) -> None:
+    partial_payload = load_json(partial_paths.ocr_fallback_path) if partial_paths.ocr_fallback_path.exists() else {}
+    partial_pages = _pages_by_number(partial_payload if isinstance(partial_payload, dict) else {})
+    partial_page = partial_pages.get(page_number)
+    partial_fallback_dir = partial_paths.fallback_dir / f"page-{page_number:04d}"
+    staged_fallback_dir = staged_paths.fallback_dir / f"page-{page_number:04d}"
+    _remove_paths([staged_fallback_dir])
+    if partial_fallback_dir.exists():
+        _copy_page_dir(partial_fallback_dir, staged_fallback_dir)
+
+    existing_payload = load_json(staged_paths.ocr_fallback_path) if staged_paths.ocr_fallback_path.exists() else {}
+    existing_by_number = _pages_by_number(existing_payload if isinstance(existing_payload, dict) else {})
+    if partial_page is None:
+        existing_by_number.pop(page_number, None)
+    else:
+        _rewrite_path_keys(
+            partial_page,
+            ("page_path",),
+            str(partial_paths.run_dir),
+            str(staged_paths.run_dir),
+        )
+        chunks = partial_page.get("chunks")
+        if isinstance(chunks, list):
+            for chunk in chunks:
+                if isinstance(chunk, dict):
+                    _rewrite_path_keys(
+                        chunk,
+                        ("crop_path", "text_path"),
+                        str(partial_paths.run_dir),
+                        str(staged_paths.run_dir),
+                    )
+        existing_by_number[page_number] = partial_page
+
+    merged_pages = _ordered_page_records(existing_pages, existing_by_number, staged_paths.pages_dir)
+    if not merged_pages:
+        _remove_paths([staged_paths.ocr_fallback_path, staged_paths.fallback_dir])
+        return
+    write_json(
+        staged_paths.ocr_fallback_path,
+        {"pages": merged_pages, "summary": {"page_count": len(merged_pages)}},
+    )
+
+
+def _ordered_page_records(
+    existing_pages: list[Any],
+    pages_by_number: dict[int, dict[str, Any]],
+    pages_dir: Path,
+) -> list[dict[str, Any]]:
+    ordered_numbers: list[int] = []
+    for page in existing_pages:
+        if not isinstance(page, dict):
+            continue
+        page_number = page.get("page_number")
+        if isinstance(page_number, int) and page_number > 0 and page_number not in ordered_numbers:
+            ordered_numbers.append(page_number)
+    for page_path in sorted(str(path) for path in pages_dir.iterdir() if path.is_file()) if pages_dir.exists() else []:
+        page_number = _page_number_for_path(page_path)
+        if page_number not in ordered_numbers:
+            ordered_numbers.append(page_number)
+    for page_number in sorted(pages_by_number):
+        if page_number not in ordered_numbers:
+            ordered_numbers.append(page_number)
+    return [pages_by_number[page_number] for page_number in ordered_numbers if page_number in pages_by_number]
+
+
+def _pages_by_number(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    pages = payload.get("pages")
+    if not isinstance(pages, list):
+        return {}
+    indexed: dict[int, dict[str, Any]] = {}
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        page_number = page.get("page_number")
+        if isinstance(page_number, int) and page_number > 0:
+            indexed[page_number] = page
+    return indexed
+
+
+def _count_page_sources(pages: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for page in pages:
+        source = page.get("markdown_source")
+        if not isinstance(source, str) or not source:
+            continue
+        counts[source] = counts.get(source, 0) + 1
+    return counts
+
+
+def _write_merged_markdown(path: Path, pages: list[dict[str, Any]]) -> None:
+    markdown_parts = []
+    for page in pages:
+        markdown = page.get("markdown")
+        if isinstance(markdown, str) and markdown.strip():
+            markdown_parts.append(markdown.strip())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n\n".join(markdown_parts), encoding="utf-8")
+
+
+def _copy_page_dir(source: Path, target: Path) -> None:
+    if not source.exists():
+        raise FileNotFoundError(f"Missing staged page directory: {source}")
+    _copy_path(source, target)
 
 
 def _clear_structured_outputs(paths: RunPaths, *, keep_metadata: bool = False) -> None:

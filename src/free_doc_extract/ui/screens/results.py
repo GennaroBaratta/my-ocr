@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 from pathlib import Path
 from typing import cast
@@ -9,7 +11,11 @@ from typing import cast
 import flet as ft
 
 from .. import theme
-from ..components.code_display import _ocr_json_text_for_state, build_code_display
+from ..components.code_display import (
+    _current_page_ocr_markdown_for_state,
+    _ocr_json_text_for_state,
+    build_code_display,
+)
 from ..components.doc_viewer import build_doc_viewer
 from ..components.split_pane import SplitPane
 from ..components.stepper import build_stepper
@@ -33,9 +39,6 @@ def build_results_view(
         if not filename:
             filename = state.run_id or ""
 
-    ocr_json_text = _ocr_json_text_for_state(state)
-    has_ocr_json = bool(ocr_json_text)
-
     content_host = ft.Row(spacing=0, expand=True)
 
     page_label = ft.Text(
@@ -46,8 +49,24 @@ def build_results_view(
         text_align=ft.TextAlign.CENTER,
     )
 
+    def current_ocr_json_text() -> str:
+        return _ocr_json_text_for_state(state)
+
+    def current_ocr_markdown_text() -> str:
+        return state.ocr_markdown
+
+    def current_page_export_markdown_text() -> str:
+        return _current_page_ocr_markdown_for_state(state)
+
+    def sync_toolbar_state() -> None:
+        copy_json_button.disabled = not bool(current_ocr_json_text())
+        download_json_button.disabled = copy_json_button.disabled
+        download_markdown_button.disabled = not bool(current_ocr_markdown_text().strip())
+        download_page_markdown_button.disabled = not bool(current_page_export_markdown_text().strip())
+
     def rebuild() -> None:
         page_label.value = _page_label_text(state)
+        sync_toolbar_state()
         content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
         page.update()
 
@@ -62,10 +81,16 @@ def build_results_view(
             rebuild()
 
     async def copy_clipboard() -> None:
+        ocr_json_text = current_ocr_json_text()
+        if not ocr_json_text:
+            return
         await ft.Clipboard().set(ocr_json_text)
         page.show_dialog(ft.SnackBar(ft.Text("Copied OCR JSON to clipboard"), duration=1500))
 
     async def download_json() -> None:
+        ocr_json_text = current_ocr_json_text()
+        if not ocr_json_text:
+            return
         save_path = await file_picker.save_file(
             file_name=f"{state.run_id or 'result'}.json",
             file_type=ft.FilePickerFileType.CUSTOM,
@@ -73,6 +98,155 @@ def build_results_view(
         )
         if save_path:
             _save_json(save_path, ocr_json_text)
+
+    async def download_markdown() -> None:
+        ocr_markdown_text = current_ocr_markdown_text()
+        if not ocr_markdown_text.strip():
+            return
+        save_path = await file_picker.save_file(
+            file_name=f"{state.run_id or 'result'}.md",
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["md"],
+        )
+        if save_path:
+            _save_markdown(save_path, ocr_markdown_text)
+
+    async def download_page_markdown() -> None:
+        page_markdown_text = current_page_export_markdown_text()
+        if not page_markdown_text.strip():
+            return
+        current_page_number = state.current_page_number
+        save_path = await file_picker.save_file(
+            file_name=f"{state.run_id or 'result'}-page-{current_page_number:04d}.md",
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["md"],
+        )
+        if save_path:
+            _save_markdown(save_path, page_markdown_text)
+
+    def reload_state(page_index: int) -> None:
+        if not state.run_id:
+            return
+        state.load_run(state.run_id)
+        if state.pages:
+            state.current_page_index = min(max(page_index, 0), len(state.pages) - 1)
+        else:
+            state.current_page_index = 0
+
+    def rerun_page_layout() -> None:
+        from free_doc_extract.workflows import prepare_review_page_workflow
+
+        if not state.run_id:
+            return
+        run_id = state.run_id
+        page_index = state.current_page_index
+        page_number = state.current_page_number
+
+        async def do_rerun() -> None:
+            try:
+                await asyncio.to_thread(
+                    functools.partial(
+                        prepare_review_page_workflow,
+                        run_id,
+                        page_number,
+                        run_root=state.run_root,
+                        layout_profile=state.layout_profile,
+                    )
+                )
+                reload_state(page_index)
+                page.go(f"/review/{run_id}")
+            except Exception as exc:
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(f"Page layout re-detect failed: {exc}"),
+                        bgcolor=theme.ERROR,
+                    )
+                )
+                page.update()
+
+        page.run_task(do_rerun)
+
+    def rerun_page_ocr() -> None:
+        from free_doc_extract.workflows import run_reviewed_ocr_page_workflow
+
+        if not state.run_id:
+            return
+        run_id = state.run_id
+        page_index = state.current_page_index
+        page_number = state.current_page_number
+
+        async def do_rerun() -> None:
+            try:
+                await asyncio.to_thread(
+                    functools.partial(
+                        run_reviewed_ocr_page_workflow,
+                        run_id,
+                        page_number,
+                        run_root=state.run_root,
+                        layout_profile=state.layout_profile,
+                    )
+                )
+                reload_state(page_index)
+                rebuild()
+            except Exception as exc:
+                page.show_dialog(
+                    ft.SnackBar(
+                        ft.Text(f"Page OCR rerun failed: {exc}"),
+                        bgcolor=theme.ERROR,
+                    )
+                )
+                page.update()
+
+        page.run_task(do_rerun)
+
+    copy_json_button = ft.OutlinedButton(
+        "Copy OCR JSON",
+        icon=ft.Icons.CONTENT_COPY,
+        tooltip="Copy OCR JSON to clipboard",
+        on_click=copy_clipboard,
+        disabled=False,
+        style=ft.ButtonStyle(
+            color=theme.TEXT_PRIMARY,
+            side=ft.BorderSide(1, theme.BORDER),
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
+    download_page_markdown_button = ft.ElevatedButton(
+        "Download Page Markdown",
+        icon=ft.Icons.DOWNLOAD,
+        tooltip="Download OCR Markdown for this page",
+        on_click=download_page_markdown,
+        disabled=False,
+        bgcolor=theme.BG_ELEVATED,
+        color=theme.TEXT_PRIMARY,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
+    download_markdown_button = ft.ElevatedButton(
+        "Download OCR Markdown",
+        icon=ft.Icons.DOWNLOAD,
+        tooltip="Download OCR Markdown",
+        on_click=download_markdown,
+        disabled=False,
+        bgcolor=theme.BG_ELEVATED,
+        color=theme.TEXT_PRIMARY,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
+    download_json_button = ft.ElevatedButton(
+        "Download OCR JSON",
+        icon=ft.Icons.DOWNLOAD,
+        tooltip="Download OCR JSON",
+        on_click=download_json,
+        disabled=False,
+        bgcolor=theme.PRIMARY,
+        color="white",
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
 
     toolbar_controls: list[ft.Control] = [
         ft.IconButton(
@@ -132,31 +306,35 @@ def build_results_view(
             padding=ft.padding.symmetric(horizontal=2),
         ),
         ft.Container(width=8),
-        ft.OutlinedButton(
-            "Copy OCR JSON",
-            icon=ft.Icons.CONTENT_COPY,
-            tooltip="Copy OCR JSON to clipboard",
-            on_click=copy_clipboard,
-            disabled=not has_ocr_json,
+        copy_json_button,
+        download_page_markdown_button,
+        download_markdown_button,
+        ft.ElevatedButton(
+            "Re-detect This Page Layout",
+            icon=ft.Icons.AUTO_FIX_HIGH,
+            tooltip="Re-detect layout only for the active page",
+            on_click=lambda _e=None: rerun_page_layout(),
+            bgcolor=theme.BG_ELEVATED,
+            color=theme.TEXT_PRIMARY,
             style=ft.ButtonStyle(
-                color=theme.TEXT_PRIMARY,
-                side=ft.BorderSide(1, theme.BORDER),
                 shape=ft.RoundedRectangleBorder(radius=6),
             ),
         ),
         ft.ElevatedButton(
-            "Download OCR JSON",
-            icon=ft.Icons.DOWNLOAD,
-            tooltip="Download OCR JSON",
-            on_click=download_json,
-            disabled=not has_ocr_json,
-            bgcolor=theme.PRIMARY,
-            color="white",
+            "Re-run OCR For This Page",
+            icon=ft.Icons.REFRESH,
+            tooltip="Re-run OCR only for the active page",
+            on_click=lambda _e=None: rerun_page_ocr(),
+            bgcolor=theme.BG_ELEVATED,
+            color=theme.TEXT_PRIMARY,
             style=ft.ButtonStyle(
                 shape=ft.RoundedRectangleBorder(radius=6),
             ),
         ),
+        download_json_button,
     ]
+
+    sync_toolbar_state()
 
     toolbar = ft.Container(
         content=ft.Row(
@@ -189,6 +367,10 @@ def build_results_view(
     )
 
 
+def _save_markdown(path: str, content: str) -> None:
+    Path(cast(str, path)).write_text(content, encoding="utf-8")
+
+
 def _save_json(path: str, content: str) -> None:
     Path(cast(str, path)).write_text(content, encoding="utf-8")
 
@@ -197,5 +379,5 @@ def _page_label_text(state: AppState) -> str:
     page_count = len(state.pages)
     if page_count == 0:
         return "Page 0 / 0"
-    page_number = min(max(state.current_page_index, 0), page_count - 1) + 1
+    page_number = state.current_page_number
     return f"Page {page_number} / {page_count}"

@@ -100,6 +100,7 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     state.pages = [
         PageData(
             index=0,
+            page_number=1,
             image_path="/tmp/page-0001.png",
             boxes=[
                 BoundingBox(
@@ -178,7 +179,7 @@ def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatc
 
     state = AppState()
     state.is_adding_box = True
-    state.pages = [PageData(index=0, image_path="/tmp/page-0001.png", boxes=[])]
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png", boxes=[])]
     state.current_page_index = 0
 
     selected_ids: list[str | None] = []
@@ -217,6 +218,7 @@ def _build_selected_state() -> AppState:
     state.pages = [
         PageData(
             index=0,
+            page_number=1,
             image_path="/tmp/page-0001.png",
             boxes=[
                 BoundingBox(
