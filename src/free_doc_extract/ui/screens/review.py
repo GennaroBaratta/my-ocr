@@ -13,6 +13,7 @@ from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
+from ..components.stepper import build_stepper
 from ..state import AppState
 
 
