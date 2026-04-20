@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_input_args(ocr_parser)
     ocr_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     ocr_parser.add_argument("--layout-device", default=DEFAULT_LAYOUT_DEVICE)
+    ocr_parser.add_argument("--layout-profile", choices=["auto", "pp_doclayout_formula", "pp_doclayout_split_formula"], default="auto")
     ocr_parser.set_defaults(func=cmd_ocr)
 
     rules_parser = subparsers.add_parser("extract-rules", help="Run rules baseline on OCR output")
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_input_args(run_parser)
     run_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
     run_parser.add_argument("--layout-device", default=DEFAULT_LAYOUT_DEVICE)
+    run_parser.add_argument("--layout-profile", choices=["auto", "pp_doclayout_formula", "pp_doclayout_split_formula"], default="auto")
     run_parser.set_defaults(func=cmd_run)
 
     return parser
@@ -74,6 +76,7 @@ def cmd_ocr(args: argparse.Namespace) -> Path:
         run_root=args.run_root,
         config_path=args.config,
         layout_device=args.layout_device,
+        layout_profile=args.layout_profile,
         normalize_document_fn=normalize_document,
         run_ocr_fn=run_ocr,
         write_json_fn=write_json,
@@ -122,6 +125,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         run_root=args.run_root,
         config_path=args.config,
         layout_device=args.layout_device,
+        layout_profile=args.layout_profile,
         normalize_document_fn=normalize_document,
         run_ocr_fn=run_ocr,
         extract_from_markdown_fn=extract_from_markdown,

@@ -9,7 +9,7 @@ import yaml
 
 DEFAULT_RUN_ROOT = "data/runs"
 DEFAULT_CONFIG_PATH = "config/local.yaml"
-DEFAULT_LAYOUT_DEVICE = "cpu"
+DEFAULT_LAYOUT_DEVICE = "cuda"
 DEFAULT_OLLAMA_MODEL = "glm-ocr:latest"
 DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 DEFAULT_OLLAMA_NUM_CTX = 8192

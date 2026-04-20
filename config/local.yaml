@@ -2,7 +2,40 @@ pipeline:
   maas:
     enabled: false
 
-  enable_layout: true
+  # Keep this file self-contained.
+  # GLM-OCR validates it against code defaults and does not merge it with the
+  # richer sample config shipped inside the package.
+  page_loader:
+    task_prompt_mapping:
+      text: "Text Recognition:"
+      table: "Table Recognition:"
+      formula: "Formula Recognition:"
+
+  result_formatter:
+    label_visualization_mapping:
+      table:
+        - table
+      formula:
+        - formula
+        - display_formula
+        - inline_formula
+      image:
+        - chart
+        - image
+      text:
+        - abstract
+        - algorithm
+        - content
+        - doc_title
+        - figure_title
+        - paragraph_title
+        - reference_content
+        - text
+        - vertical_text
+        - vision_footnote
+        - seal
+        - formula_number
+
   layout:
     model_dir: PaddlePaddle/PP-DocLayoutV3_safetensors
     label_task_mapping:
@@ -22,6 +55,7 @@ pipeline:
       table:
         - table
       formula:
+        - formula
         - display_formula
         - inline_formula
       skip:

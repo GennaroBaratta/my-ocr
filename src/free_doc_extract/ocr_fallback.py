@@ -33,7 +33,7 @@ TEXT_LABELS = {
     "formula_number",
 }
 TABLE_LABELS = {"table"}
-FORMULA_LABELS = {"display_formula", "inline_formula"}
+FORMULA_LABELS = {"formula", "display_formula", "inline_formula"}
 OCR_LABELS = TEXT_LABELS | TABLE_LABELS | FORMULA_LABELS
 SYMBOLIC_CONTENT_RE = re.compile(r"[=+*/\\^_()\[\]{}<>∑∫√≈≠≤≥×÷]")
 BOX_PADDING_X = 8

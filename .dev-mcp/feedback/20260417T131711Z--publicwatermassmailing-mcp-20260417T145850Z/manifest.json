@@ -1,0 +1,26 @@
+{
+  "bundle_id": "20260417T131711Z--publicwatermassmailing-mcp-20260417T145850Z",
+  "created_at": "2026-04-17T13:17:14+00:00",
+  "run_id": "publicwatermassmailing-mcp-20260417T145850Z",
+  "run_dir": "data/runs/publicwatermassmailing-mcp-20260417T145850Z",
+  "summary": "UX analysis snapshot for current results view",
+  "notes": "Continuous feedback capture during analyze-mode.",
+  "issues": [
+    {
+      "severity": "medium",
+      "location": "results",
+      "note": "Baseline screenshot for UX analysis session."
+    }
+  ],
+  "screenshots": [
+    {
+      "kind": "captured",
+      "route": "/results/publicwatermassmailing-mcp-20260417T145850Z",
+      "ui_url": "http://127.0.0.1:8550",
+      "copied_path": ".dev-mcp/feedback/20260417T131711Z--publicwatermassmailing-mcp-20260417T145850Z/attachments/screenshot-01.png",
+      "size_bytes": 201399
+    }
+  ],
+  "capture_route": "/results/publicwatermassmailing-mcp-20260417T145850Z",
+  "related_paths": []
+}

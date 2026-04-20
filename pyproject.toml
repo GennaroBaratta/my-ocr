@@ -12,20 +12,34 @@ authors = [
   { name = "OpenAI Assistant" }
 ]
 dependencies = [
-  "Pillow>=10",
-  "PyYAML>=6",
+  "Pillow>=12.2.0",
+  "PyYAML>=6.0.3",
 ]
 
 [dependency-groups]
 dev = [
-  "pytest>=8.0",
-  "ruff>=0.6",
+  "flet>=0.84.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.10",
+]
+dev-mcp = [
+  "mcp>=1.12.4",
+  "playwright>=1.55.0",
+  "starlette>=0.48.0",
+  "uvicorn>=0.35.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
-  "ruff>=0.6",
+  "flet>=0.84.0",
+  "pytest>=9.0.3",
+  "ruff>=0.15.10",
+]
+dev-mcp = [
+  "mcp>=1.12.4",
+  "playwright>=1.55.0",
+  "starlette>=0.48.0",
+  "uvicorn>=0.35.0",
 ]
 pdf = [
   "PyMuPDF>=1.24",
@@ -33,6 +47,12 @@ pdf = [
 glmocr = [
   "glmocr[selfhosted]",
 ]
+ui = [
+  "flet>=0.84.0",
+]
+
+[project.scripts]
+free-doc-extract-ui = "free_doc_extract.ui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
