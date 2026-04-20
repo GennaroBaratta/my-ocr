@@ -27,3 +27,5 @@ data/reports/*
 !data/gold/.gitkeep
 
 .qlty/
+
+node_modules/
