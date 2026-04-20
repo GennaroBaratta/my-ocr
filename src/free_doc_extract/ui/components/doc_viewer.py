@@ -8,6 +8,7 @@ from flet import BoxFit
 from .. import theme
 from ..image_utils import get_image_size
 from ..state import AppState, PageData
+from .overlay_styles import overlay_colors_for_label
 
 
 def build_doc_viewer(state: AppState) -> ft.Column:
@@ -127,7 +128,7 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
     overlays: list[ft.Control] = []
     for box in page_data.boxes:
         is_sel = box.selected
-        color, fill = _overlay_colors(is_sel)
+        color, fill = overlay_colors_for_label(box.label, is_sel)
         overlays.append(
             ft.Container(
                 left=box.x * scale,
@@ -142,9 +143,3 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
     stack.width = canvas_width
     stack.height = canvas_height
     stack.controls = [image, *overlays]
-
-
-def _overlay_colors(is_selected: bool) -> tuple[str, str]:
-    if is_selected:
-        return theme.BOX_SELECTED, f"{theme.BOX_SELECTED}1A"
-    return f"{theme.BOX_UNSELECTED}88", f"{theme.BOX_UNSELECTED}0A"

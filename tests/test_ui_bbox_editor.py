@@ -164,11 +164,11 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     assert table_box.border == ft.Border.all(1, f"{theme.BOX_TABLE}14")
     assert table_box.bgcolor == f"{theme.BOX_TABLE}02"
 
-    assert figure_box.border == ft.Border.all(1, f"{theme.BOX_FIGURE_IMAGE}14")
-    assert figure_box.bgcolor == f"{theme.BOX_FIGURE_IMAGE}02"
+    assert figure_box.border == ft.Border.all(1, f"{theme.BOX_FIGURE_IMAGE}0E")
+    assert figure_box.bgcolor == f"{theme.BOX_FIGURE_IMAGE}01"
 
-    assert header_box.border == ft.Border.all(1, f"{theme.BOX_HEADER}14")
-    assert header_box.bgcolor == f"{theme.BOX_HEADER}02"
+    assert header_box.border == ft.Border.all(1, f"{theme.BOX_HEADER}0E")
+    assert header_box.bgcolor == f"{theme.BOX_HEADER}01"
 
 
 def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatch) -> None:

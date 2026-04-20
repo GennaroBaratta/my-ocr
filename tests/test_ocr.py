@@ -1041,3 +1041,79 @@ def test_prepare_review_artifacts_retries_same_page_once_on_cpu_after_cuda_oom(
     assert result["reviewed_layout"]["pages"][0]["source_sdk_json_path"] == str(
         tmp_path / "review-run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
     )
+
+
+def test_run_ocr_closes_failed_parser_before_cpu_retry(tmp_path, monkeypatch) -> None:
+    empty_cache_calls: list[str] = []
+
+    class CudaOomGlmOcr(FakeGlmOcr):
+        close_devices: list[str] = []
+
+        def parse(self, input_path: str):
+            if self.layout_device == "cuda":
+                raise RuntimeError("CUDA out of memory while running layout detection")
+            return FakeResult(
+                markdown_result="# cpu doc",
+                json_result={"doc": Path(input_path).name},
+                artifact_stem=Path(input_path).stem,
+            )
+
+        def close(self) -> None:
+            self.close_devices.append(self.layout_device)
+
+    _patch_parser_cls(monkeypatch, CudaOomGlmOcr)
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: empty_cache_calls.append("called"))),
+    )
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr([str(source)], tmp_path / "run")
+
+    assert CudaOomGlmOcr.close_devices == ["cuda"]
+    assert empty_cache_calls == ["called"]
+    assert result["markdown"] == "# cpu doc"
+
+
+def test_prepare_review_artifacts_closes_failed_parser_before_cpu_retry(tmp_path, monkeypatch) -> None:
+    empty_cache_calls: list[str] = []
+
+    class ReviewCudaOomGlmOcr(FakeGlmOcr):
+        close_devices: list[str] = []
+
+        def parse(self, input_path: str):
+            raise AssertionError("review preparation should use layout-only parsing")
+
+        def parse_layout_only(self, input_path: str):
+            if self.layout_device == "cuda":
+                raise RuntimeError("CUDA out of memory while parsing review artifacts")
+            return FakeResult(
+                markdown_result="",
+                json_result={"doc": Path(input_path).name},
+                saved_model_json={
+                    "blocks": [
+                        {"label": "text", "content": "Recovered text", "bbox_2d": [0, 0, 10, 10]}
+                    ]
+                },
+                artifact_stem=Path(input_path).stem,
+            )
+
+        def close(self) -> None:
+            self.close_devices.append(self.layout_device)
+
+    _patch_parser_cls(monkeypatch, ReviewCudaOomGlmOcr)
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: empty_cache_calls.append("called"))),
+    )
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = prepare_review_artifacts([str(source)], tmp_path / "review-run")
+
+    assert ReviewCudaOomGlmOcr.close_devices == ["cuda"]
+    assert empty_cache_calls == ["called"]
+    assert result["reviewed_layout"]["summary"] == {"page_count": 1}

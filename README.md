@@ -1,52 +1,75 @@
 # free-doc-extract
 
-Local OCR and document-field extraction pipeline built around GLM-OCR + Ollama.
+<p align="center">
+  <img src="docs/screenshots/hero-overview.png" alt="free-doc-extract interface overview" width="100%" />
+</p>
 
-## What it does
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11%20to%203.13-0f172a?style=flat-square" alt="Python 3.11 to 3.13" />
+  <img src="https://img.shields.io/badge/runtime-local%20first-0f172a?style=flat-square" alt="Local first" />
+  <img src="https://img.shields.io/badge/OCR-GLM--OCR%20%2B%20Ollama-0f172a?style=flat-square" alt="GLM-OCR and Ollama" />
+  <img src="https://img.shields.io/badge/UI-Flet-0f172a?style=flat-square" alt="Flet UI" />
+</p>
+
+Local-first document extraction workbench for PDFs and scanned images.
+
+`free-doc-extract` turns a document into normalized page images, lets you review and correct the detected layout before OCR, stores reproducible run artifacts, and supports both rule-based and LLM-based structured extraction on top of the OCR output.
+
+The screenshots in this README are real GUI captures from a local demo run of [`docs/demo/PublicWaterMassMailing.pdf`](docs/demo/PublicWaterMassMailing.pdf), a public sample document checked into the repo for reproducible screenshots.
+
+## Why It Works Well In Practice
+
+- Review-first workflow. You do not have to accept OCR output blindly. The app exposes page-level layout boxes before extraction so you can correct the structure that downstream OCR depends on.
+- Local stack. OCR and structured extraction run against local Ollama endpoints instead of a hosted SaaS dependency.
+- Reproducible runs. Each document gets a run folder with pages, raw OCR payloads, markdown, JSON, metadata, predictions, and reports.
+- Multi-path extraction. You can compare a deterministic rules baseline against direct structured generation.
+- Evaluation built in. Gold labels and markdown reports make it easy to measure changes instead of guessing.
+
+## Product Walkthrough
+
+### 1. Upload A Document
+
+Start from a focused upload screen with a clear document drop zone, lightweight run history, and local Ollama status.
+
+<p align="center">
+  <img src="docs/screenshots/upload-workspace.png" alt="Upload workspace" width="88%" />
+</p>
+
+### 2. Review The Layout
+
+The core idea of the project is here: inspect the detected regions, move page by page, add boxes, remove boxes, and fix the layout before OCR becomes canonical.
+
+<p align="center">
+  <img src="docs/screenshots/review-workspace.png" alt="Document review workspace" width="88%" />
+</p>
+
+### 3. Inspect OCR Results
+
+Once OCR is complete, the results workspace keeps the document, markdown, JSON, and raw page payloads side by side so debugging extraction quality is fast.
+
+<p align="center">
+  <img src="docs/screenshots/results-workspace.png" alt="Results workspace" width="88%" />
+</p>
+
+## Core Flow
 
 1. Ingest a PDF or image.
-2. Normalize input into ordered page images.
-3. Run local OCR through GLM-OCR via Ollama.
-4. Save OCR markdown, JSON, and raw SDK artifacts.
-5. Extract a small fixed schema with:
-   - deterministic rules over OCR text
-   - direct structured extraction through Ollama `/api/generate`
-6. Evaluate predictions against hand-labeled gold annotations.
-7. Save reproducible run outputs and Markdown reports.
+2. Normalize it into ordered page images.
+3. Detect document layout locally.
+4. Review and adjust the layout in the UI.
+5. Run OCR and generate page-level markdown and JSON.
+6. Extract structured fields with rules or with Ollama.
+7. Evaluate predictions against hand-labeled gold data.
 
-## Repository layout
+## Quick Start
 
-```text
-free-doc-extract/
-  README.md
-  pyproject.toml
-  Makefile
-  config/
-    local.yaml
-  data/
-    raw/
-    gold/
-    runs/
-    reports/
-  src/free_doc_extract/
-    cli.py
-    ingest.py
-    ocr.py
-    extract_rules.py
-    experimental/
-      extract_glmocr.py
-    schema.py
-    evaluate.py
-    utils.py
-  tests/
-    test_schema.py
-    test_extract_rules.py
-    test_smoke_pipeline.py
-```
+### Requirements
 
-## Setup
+- Python `3.11`, `3.12`, or `3.13`
+- `uv`
+- Ollama running locally
 
-### 1. Create an environment with `uv`
+### Install
 
 ```bash
 uv python install 3.11
@@ -54,102 +77,56 @@ uv venv --python 3.11
 uv sync --group dev --extra pdf --extra glmocr
 ```
 
-To use the dev-only MCP sidecar for UX review, install its optional extra too:
+### Pull The OCR Model
 
 ```bash
-uv sync --group dev --extra pdf --extra glmocr --extra dev-mcp
-```
-
-Run commands with `uv run`:
-
-```bash
-uv run python -m free_doc_extract.cli --help
-uv run pytest
-```
-
-### Why this is the default
-
-- `glmocr[selfhosted]` is more likely to work on Python 3.11/3.12 than on 3.14.
-- `uv sync` installs from `pyproject.toml` directly.
-- The `dev` tools are modeled as a `uv` dependency group, while `pdf` and `glmocr` remain optional extras.
-
-### Alternative: editable install with `uv pip`
-
-```bash
-uv venv --python 3.11
-uv pip install -e .[dev,pdf,glmocr]
-```
-
-Do not mix these styles in one step. In particular, avoid:
-
-```bash
-uv run pip install -e .[dev,pdf,glmocr]
-```
-
-### 2. Pull and serve the model
-
-```bash
-ollama pull glm-ocr-8k
-# or update config/local.yaml to point at a different local model tag
-
+ollama pull glm-ocr:latest
 ollama serve
 ```
 
-### 3. Configure GLM-OCR
+The default OCR endpoint is `http://localhost:11434/api/generate`.
 
-The default local config is already checked in at `config/local.yaml` and points to Ollama at `localhost:11434` using `/api/generate`.
+### Launch The UI
 
-## Commands
-
-### OCR a document
+Desktop app:
 
 ```bash
-uv run python -m free_doc_extract.cli ocr data/raw/sample.pdf --run demo001
+uv run free-doc-extract-ui
 ```
 
-Artifacts are written to `data/runs/demo001/`:
+Browser mode:
 
-- `pages/`
-- `ocr_raw/`
-- `ocr.md`
-- `ocr.json`
-- `meta.json`
+```bash
+uv run python -m free_doc_extract.ui --web --host 127.0.0.1 --port 8550
+```
 
-`ocr.json` stores project-owned OCR results per page and references the saved GLM-OCR payload via
-`sdk_json_path`. Raw vendor JSON remains under `ocr_raw/` and is not embedded into `ocr.json`.
+### Run The CLI Pipeline
 
-### Run rule-based extraction over OCR
+OCR only:
+
+```bash
+uv run python -m free_doc_extract.cli ocr data/raw/PublicWaterMassMailing.pdf --run demo001
+```
+
+Rule-based extraction:
 
 ```bash
 uv run python -m free_doc_extract.cli extract-rules --run demo001
 ```
 
-Writes:
-
-- `data/runs/demo001/predictions/rules.json`
-
-### Run direct structured extraction through Ollama
-
-This path is experimental and lives under `src/free_doc_extract/experimental/`.
+Direct structured extraction:
 
 ```bash
 uv run python -m free_doc_extract.cli extract-glmocr --run demo001
 ```
 
-Writes:
-
-- `data/runs/demo001/predictions/glmocr_structured.json`
-- `data/runs/demo001/predictions/glmocr_structured_meta.json`
-
-### Run a small end-to-end pipeline
+End-to-end OCR plus rule extraction:
 
 ```bash
-uv run python -m free_doc_extract.cli run data/raw/sample.pdf --run demo001
+uv run python -m free_doc_extract.cli run data/raw/PublicWaterMassMailing.pdf --run demo001
 ```
 
-This normalizes pages, runs OCR, and writes the rule-based extraction result.
-
-### Evaluate against gold labels
+Evaluate predictions:
 
 ```bash
 uv run python -m free_doc_extract.cli eval \
@@ -158,25 +135,60 @@ uv run python -m free_doc_extract.cli eval \
   --output data/reports/demo001.md
 ```
 
-## Gold data format
+## What Gets Written To Disk
 
-Each gold file should be a JSON document keyed by input stem, for example:
+Each run lands in `data/runs/<run-id>/`.
 
-`data/gold/sample.json`
-
-```json
-{
-  "document_type": "report",
-  "title": "Sample Report",
-  "authors": ["Ada Lovelace"],
-  "institution": "Analytical Engine Institute",
-  "date": "2024-01-15",
-  "language": "en",
-  "summary_line": "A short summary from the document."
-}
+```text
+data/runs/demo001/
+  pages/
+  ocr_raw/
+  reviewed_layout.json
+  ocr.md
+  ocr.json
+  ocr_fallback.json
+  meta.json
+  predictions/
 ```
 
-## Make targets
+Important files:
+
+- `reviewed_layout.json`: the page-by-page layout state used by the review step
+- `ocr.md`: merged markdown output for the run
+- `ocr.json`: project-owned OCR payload with page records and references to raw SDK artifacts
+- `ocr_raw/`: saved GLM-OCR model payloads per page
+- `predictions/`: rules and structured extraction outputs
+
+## Tech Stack
+
+- UI: Flet
+- OCR pipeline: GLM-OCR
+- Local inference serving: Ollama
+- PDF/image normalization: Pillow and PyMuPDF
+- Evaluation and reporting: project-native Python utilities
+
+## Repository Layout
+
+```text
+src/free_doc_extract/
+  cli.py
+  ingest.py
+  ocr.py
+  ocr_fallback.py
+  workflows.py
+  review_artifacts.py
+  evaluate.py
+  experimental/extract_glmocr.py
+  ui/
+
+data/
+  raw/
+  gold/
+  runs/
+  reports/
+```
+
+## Make Targets
 
 ```bash
 make install
@@ -185,19 +197,13 @@ make lint
 make report RUN_ID=demo001
 ```
 
-## Dev MCP sidecar for UX review
+## Current Limits
 
-The repo includes a localhost-only MCP sidecar under `tools/dev_mcp/` for iterating on the Flet UX and saving structured feedback bundles, including autonomous screenshot capture through Playwright. See `tools/dev_mcp/README.md` for setup, browser install, start, disable, and test instructions.
+- PDF rasterization requires the `pdf` extra.
+- OCR and structured extraction both assume a local Ollama setup is available.
+- The rules extractor is intentionally narrow and should be treated as a baseline.
+- Very large or visually dense pages can still stress local inference latency.
 
-## Known limitations
+## Dev Note
 
-- PDF rasterization requires the `pdf` extra (`PyMuPDF`).
-- The experimental direct structured extractor prefers OCR markdown and otherwise falls back to the first page image; very large pages can still stress Ollama.
-- Language detection in the rules baseline is heuristic.
-- The rule extractor is intentionally simple and should be treated as a baseline, not a production parser.
-
-## Suggested next steps
-
-- Add a hand-labeled dataset under `data/gold/`.
-- Record latency and token metadata from Ollama batch runs.
-- Add an `error_analysis.md` file once you have model outputs to inspect.
+The repo also includes a localhost-only MCP sidecar under [`tools/dev_mcp/README.md`](tools/dev_mcp/README.md) for UX review workflows and automated feedback capture.

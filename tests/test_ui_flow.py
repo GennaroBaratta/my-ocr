@@ -968,6 +968,182 @@ def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) ->
     assert _markdown_pages_for_state(state) == ["# Page 1", "# Updated Page 2"]
 
 
+def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_path, monkeypatch) -> None:
+    from free_doc_extract import workflows
+
+    image_module = import_module("PIL.Image")
+
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-ui"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    page_one = pages_dir / "page-0001.png"
+    page_two = pages_dir / "page-0002.png"
+    image_module.new("RGB", (100, 120), color="white").save(page_one)
+    image_module.new("RGB", (100, 120), color="white").save(page_two)
+    write_basic_ocr_outputs(
+        run_dir,
+        markdown="# Page 1\n\n# Page 2",
+        json_payload={
+            "pages": [
+                build_ocr_page(
+                    page_number=1,
+                    page_path=str(page_one),
+                    markdown="# Page 1",
+                    sdk_json_path=str(run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json"),
+                ),
+                build_ocr_page(
+                    page_number=2,
+                    page_path=str(page_two),
+                    markdown="# Page 2",
+                    sdk_json_path=str(run_dir / "ocr_raw" / "page-0002" / "page-0002_model.json"),
+                ),
+            ],
+            "summary": {"page_count": 2},
+        },
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_prepare_review_page_workflow(run: str, page_number: int, *, run_root: str, **kwargs) -> Path:
+        captured["run"] = run
+        captured["page_number"] = page_number
+        captured["run_root"] = run_root
+        captured["layout_profile"] = kwargs.get("layout_profile")
+        return run_dir
+
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(workflows, "prepare_review_page_workflow", fake_prepare_review_page_workflow)
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    class DeferredTaskPage(DummyPage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.tasks: list[Callable[[], Any]] = []
+
+        def run_task(self, task) -> None:  # noqa: ANN001
+            self.tasks.append(task)
+
+    state = AppState()
+    state.run_root = str(run_root)
+    state.load_run("demo-ui")
+    state.current_page_index = 1
+
+    page = DeferredTaskPage()
+    view = build_results_view(cast(ft.Page, page), state, ft.FilePicker())
+    outer = cast(ft.Column, view.controls[0])
+    inner = cast(ft.Column, outer.controls[1])
+    toolbar = cast(ft.Container, inner.controls[0])
+    toolbar_row = cast(ft.Row, toolbar.content)
+    buttons = _toolbar_buttons_by_content(toolbar_row)
+    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
+    rerun_button = cast(ft.ElevatedButton, buttons["Re-run OCR For This Page"])
+
+    cast(Callable[..., None], layout_button.on_click)()
+    cast(Callable[..., None], rerun_button.on_click)()
+
+    assert len(page.tasks) == 1
+    assert layout_button.disabled is True
+    assert rerun_button.disabled is True
+
+    asyncio.run(page.tasks[0]())
+
+    assert captured == {
+        "run": "demo-ui",
+        "page_number": 2,
+        "run_root": str(run_root),
+        "layout_profile": "auto",
+    }
+    assert page.route == "/review/demo-ui"
+    assert layout_button.disabled is False
+    assert rerun_button.disabled is False
+
+
+def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkeypatch) -> None:
+    from free_doc_extract import workflows
+
+    image_module = import_module("PIL.Image")
+
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-ui"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    page_one = pages_dir / "page-0001.png"
+    page_two = pages_dir / "page-0002.png"
+    image_module.new("RGB", (100, 120), color="white").save(page_one)
+    image_module.new("RGB", (100, 120), color="white").save(page_two)
+    write_basic_ocr_outputs(
+        run_dir,
+        markdown="# Page 1\n\n# Page 2",
+        json_payload={
+            "pages": [
+                build_ocr_page(
+                    page_number=1,
+                    page_path=str(page_one),
+                    markdown="# Page 1",
+                    sdk_json_path=str(run_dir / "ocr_raw" / "page-0001" / "page-0001_model.json"),
+                ),
+                build_ocr_page(
+                    page_number=2,
+                    page_path=str(page_two),
+                    markdown="# Page 2",
+                    sdk_json_path=str(run_dir / "ocr_raw" / "page-0002" / "page-0002_model.json"),
+                ),
+            ],
+            "summary": {"page_count": 2},
+        },
+    )
+
+    calls: list[int] = []
+
+    def failing_prepare_review_page_workflow(
+        run: str, page_number: int, *, run_root: str, **kwargs: Any
+    ) -> Path:
+        _ = (run, run_root, kwargs)
+        calls.append(page_number)
+        raise RuntimeError("boom")
+
+    async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(
+        workflows,
+        "prepare_review_page_workflow",
+        failing_prepare_review_page_workflow,
+    )
+    monkeypatch.setattr(asyncio, "to_thread", run_in_place)
+
+    state = AppState()
+    state.run_root = str(run_root)
+    state.load_run("demo-ui")
+    state.current_page_index = 1
+
+    page = DummyPage()
+    view = build_results_view(cast(ft.Page, page), state, ft.FilePicker())
+    outer = cast(ft.Column, view.controls[0])
+    inner = cast(ft.Column, outer.controls[1])
+    toolbar = cast(ft.Container, inner.controls[0])
+    toolbar_row = cast(ft.Row, toolbar.content)
+    buttons = _toolbar_buttons_by_content(toolbar_row)
+    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
+
+    cast(Callable[..., None], layout_button.on_click)()
+
+    assert calls == [2]
+    assert layout_button.disabled is False
+    assert len(page.dialogs) == 1
+    snackbar = cast(ft.SnackBar, page.dialogs[0])
+    message = cast(ft.Text, snackbar.content)
+    assert message.value == "Page layout re-detect failed: boom"
+
+    cast(Callable[..., None], layout_button.on_click)()
+
+    assert calls == [2, 2]
+    assert layout_button.disabled is False
+
+
 def test_results_view_sparse_page_number_actions_use_actual_page_number(tmp_path, monkeypatch) -> None:
     from free_doc_extract import workflows
 

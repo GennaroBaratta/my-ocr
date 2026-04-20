@@ -7,23 +7,11 @@ from typing import Callable, cast
 import flet as ft
 from flet import Alignment, BoxFit
 
-from .inspector import LABEL_TO_BLOCK_TYPE
+from .overlay_styles import overlay_colors_for_label
 from .. import theme
 from ..image_utils import get_image_size
 from ..state import AppState, BoundingBox
 
-
-_BOX_KIND_COLORS = {
-    "Text Block": theme.BOX_TEXT_BLOCK,
-    "Table": theme.BOX_TABLE,
-    "Figure/Image": theme.BOX_FIGURE_IMAGE,
-    "Header": theme.BOX_HEADER,
-    "Title": theme.BOX_HEADER,
-    "Formula": theme.BOX_FORMULA,
-}
-
-_UNSELECTED_BORDER_ALPHA = "14"
-_UNSELECTED_FILL_ALPHA = "02"
 _MOVE_HANDLE_SIZE = 16
 
 
@@ -421,11 +409,4 @@ def _clamp_box(box: BoundingBox, max_width: int, max_height: int) -> None:
 
 
 def _overlay_colors(box: BoundingBox) -> tuple[str, str]:
-    block_type = LABEL_TO_BLOCK_TYPE.get(box.label, "Text Block")
-    base_color = _BOX_KIND_COLORS.get(block_type, theme.BOX_TEXT_BLOCK)
-    if box.selected:
-        return base_color, f"{base_color}1A"
-    return (
-        f"{base_color}{_UNSELECTED_BORDER_ALPHA}",
-        f"{base_color}{_UNSELECTED_FILL_ALPHA}",
-    )
+    return overlay_colors_for_label(box.label, box.selected)

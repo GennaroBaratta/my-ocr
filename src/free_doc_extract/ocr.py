@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import suppress
 import gc
 from importlib import import_module
 from pathlib import Path
@@ -584,6 +585,11 @@ def _parse_page_with_cpu_fallback(
     except Exception as exc:
         if not _should_retry_parse_on_cpu(exc, layout_device):
             raise
+
+    close = getattr(parser, "close", None)
+    if callable(close):
+        with suppress(Exception):
+            close()
 
     _cleanup_after_cuda_oom()
     with parser_cls(config_path=config_path, layout_device="cpu", _dotted=layout_dotted) as cpu_parser:

@@ -58,11 +58,21 @@ def build_results_view(
     def current_page_export_markdown_text() -> str:
         return _current_page_ocr_markdown_for_state(state)
 
+    rerun_in_progress = False
+
     def sync_toolbar_state() -> None:
         copy_json_button.disabled = not bool(current_ocr_json_text())
         download_json_button.disabled = copy_json_button.disabled
         download_markdown_button.disabled = not bool(current_ocr_markdown_text().strip())
         download_page_markdown_button.disabled = not bool(current_page_export_markdown_text().strip())
+        layout_rerun_button.disabled = rerun_in_progress
+        ocr_rerun_button.disabled = rerun_in_progress
+
+    def set_rerun_in_progress(active: bool) -> None:
+        nonlocal rerun_in_progress
+        rerun_in_progress = active
+        sync_toolbar_state()
+        page.update()
 
     def rebuild() -> None:
         page_label.value = _page_label_text(state)
@@ -136,11 +146,12 @@ def build_results_view(
     def rerun_page_layout() -> None:
         from free_doc_extract.workflows import prepare_review_page_workflow
 
-        if not state.run_id:
+        if not state.run_id or rerun_in_progress:
             return
         run_id = state.run_id
         page_index = state.current_page_index
         page_number = state.current_page_number
+        set_rerun_in_progress(True)
 
         async def do_rerun() -> None:
             try:
@@ -163,17 +174,20 @@ def build_results_view(
                     )
                 )
                 page.update()
+            finally:
+                set_rerun_in_progress(False)
 
         page.run_task(do_rerun)
 
     def rerun_page_ocr() -> None:
         from free_doc_extract.workflows import run_reviewed_ocr_page_workflow
 
-        if not state.run_id:
+        if not state.run_id or rerun_in_progress:
             return
         run_id = state.run_id
         page_index = state.current_page_index
         page_number = state.current_page_number
+        set_rerun_in_progress(True)
 
         async def do_rerun() -> None:
             try:
@@ -196,6 +210,8 @@ def build_results_view(
                     )
                 )
                 page.update()
+            finally:
+                set_rerun_in_progress(False)
 
         page.run_task(do_rerun)
 
@@ -243,6 +259,29 @@ def build_results_view(
         disabled=False,
         bgcolor=theme.PRIMARY,
         color="white",
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
+
+    layout_rerun_button = ft.ElevatedButton(
+        "Re-detect This Page Layout",
+        icon=ft.Icons.AUTO_FIX_HIGH,
+        tooltip="Re-detect layout only for the active page",
+        on_click=lambda _e=None: rerun_page_layout(),
+        bgcolor=theme.BG_ELEVATED,
+        color=theme.TEXT_PRIMARY,
+        style=ft.ButtonStyle(
+            shape=ft.RoundedRectangleBorder(radius=6),
+        ),
+    )
+    ocr_rerun_button = ft.ElevatedButton(
+        "Re-run OCR For This Page",
+        icon=ft.Icons.REFRESH,
+        tooltip="Re-run OCR only for the active page",
+        on_click=lambda _e=None: rerun_page_ocr(),
+        bgcolor=theme.BG_ELEVATED,
+        color=theme.TEXT_PRIMARY,
         style=ft.ButtonStyle(
             shape=ft.RoundedRectangleBorder(radius=6),
         ),
@@ -309,28 +348,8 @@ def build_results_view(
         copy_json_button,
         download_page_markdown_button,
         download_markdown_button,
-        ft.ElevatedButton(
-            "Re-detect This Page Layout",
-            icon=ft.Icons.AUTO_FIX_HIGH,
-            tooltip="Re-detect layout only for the active page",
-            on_click=lambda _e=None: rerun_page_layout(),
-            bgcolor=theme.BG_ELEVATED,
-            color=theme.TEXT_PRIMARY,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=6),
-            ),
-        ),
-        ft.ElevatedButton(
-            "Re-run OCR For This Page",
-            icon=ft.Icons.REFRESH,
-            tooltip="Re-run OCR only for the active page",
-            on_click=lambda _e=None: rerun_page_ocr(),
-            bgcolor=theme.BG_ELEVATED,
-            color=theme.TEXT_PRIMARY,
-            style=ft.ButtonStyle(
-                shape=ft.RoundedRectangleBorder(radius=6),
-            ),
-        ),
+        layout_rerun_button,
+        ocr_rerun_button,
         download_json_button,
     ]
 
