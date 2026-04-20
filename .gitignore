@@ -11,6 +11,8 @@ build/
 .DS_Store
 
 # Agent/skill artifacts
+AGENT.md
+AGENTS.md
 .agents/
 .claude/
 .codex
