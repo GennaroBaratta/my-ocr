@@ -9,81 +9,98 @@
   <img src="https://img.shields.io/badge/runtime-local%20first-0f172a?style=flat-square" alt="Local first" />
   <img src="https://img.shields.io/badge/OCR-GLM--OCR%20%2B%20Ollama-0f172a?style=flat-square" alt="GLM-OCR and Ollama" />
   <img src="https://img.shields.io/badge/UI-Flet-0f172a?style=flat-square" alt="Flet UI" />
+  <img src="https://img.shields.io/badge/tests-pytest-0f172a?style=flat-square" alt="pytest" />
 </p>
 
-Local-first document extraction workbench for PDFs and scanned images.
+**A local-first document extraction workbench for PDFs and scanned images.**
 
-`free-doc-extract` turns a document into normalized page images, lets you review and correct the detected layout before OCR, stores reproducible run artifacts, and supports both rule-based and LLM-based structured extraction on top of the OCR output.
+Drop a document in, **review and correct the detected layout before OCR runs**, then export markdown, JSON, and structured fields. Everything runs against a local Ollama endpoint — no hosted SaaS, no data leaving the machine.
 
-The screenshots in this README are real GUI captures from a local demo run of [`docs/demo/PublicWaterMassMailing.pdf`](docs/demo/PublicWaterMassMailing.pdf), a public sample document checked into the repo for reproducible screenshots.
+What makes it different: most OCR tools treat layout detection as a hidden step. Here it is a first-class, editable stage, because layout errors are the single largest cause of bad OCR output downstream.
 
-## Why It Works Well In Practice
+The screenshots below are real GUI captures from a local run of [`docs/demo/PublicWaterMassMailing.pdf`](docs/demo/PublicWaterMassMailing.pdf), a public sample document checked into the repo for reproducible demos.
 
-- Review-first workflow. You do not have to accept OCR output blindly. The app exposes page-level layout boxes before extraction so you can correct the structure that downstream OCR depends on.
-- Local stack. OCR and structured extraction run against local Ollama endpoints instead of a hosted SaaS dependency.
-- Reproducible runs. Each document gets a run folder with pages, raw OCR payloads, markdown, JSON, metadata, predictions, and reports.
-- Multi-path extraction. You can compare a deterministic rules baseline against direct structured generation.
-- Evaluation built in. Gold labels and markdown reports make it easy to measure changes instead of guessing.
+## Highlights
+
+- **Review-first workflow.** Edit layout boxes per page before OCR becomes canonical.
+- **Local stack.** OCR and structured extraction talk to Ollama on `localhost`.
+- **Reproducible runs.** Every run writes pages, raw OCR payloads, markdown, JSON, metadata, predictions, and reports to a single folder.
+- **Two extraction paths.** Compare a deterministic rules baseline against direct structured generation.
+- **Evaluation built in.** Gold labels and markdown reports let you measure changes, not guess.
+
+## Pipeline
+
+```text
+  PDF / image
+      │
+      ▼
+  ingest ──► normalize pages ──► detect layout
+                                      │
+                                      ▼
+                         ┌── REVIEW & EDIT LAYOUT ──┐   ◄── the differentiator
+                         │  (add / remove / retype) │
+                         └────────────┬─────────────┘
+                                      ▼
+                                   run OCR
+                                      │
+                      ┌───────────────┴───────────────┐
+                      ▼                               ▼
+              rules extraction              structured extraction
+                      │                               │
+                      └───────────────┬───────────────┘
+                                      ▼
+                         evaluate vs. gold labels
+```
 
 ## Product Walkthrough
 
-### 1. Upload A Document
+### 1. Upload a document
 
-Start from a focused upload screen with a clear document drop zone, lightweight run history, and local Ollama status.
+Focused upload screen with a clear drop zone, lightweight run history, and local Ollama status.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-05.png" alt="Upload workspace" width="88%" />
 </p>
 
-### 2. Review The Layout
+### 2. Review the layout
 
-The core idea of the project is here: inspect the detected regions, move page by page, add boxes, remove boxes, and fix the layout before OCR becomes canonical.
+The core idea of the project: inspect detected regions, page by page, add boxes, remove boxes, and fix the layout *before* OCR becomes canonical.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-54.png" alt="Document review workspace" width="88%" />
 </p>
 
-### 3. Adjust Region Types
+### 3. Adjust region types
 
-The review panel also exposes per-box metadata, so you can correct the detected block type and coordinates for images, figures, and text before running OCR.
+Per-box metadata lets you correct block type and coordinates for images, figures, and text before OCR runs.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-29-31.png" alt="Layout review properties panel" width="88%" />
 </p>
 
-### 4. Inspect OCR Results
+### 4. Inspect OCR results
 
-Once OCR is complete, the results workspace keeps the document, markdown, JSON, and raw page payloads side by side so debugging extraction quality is fast.
+Document, markdown, JSON, and raw page payloads sit side by side so debugging extraction quality is fast.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-32.png" alt="Results workspace" width="88%" />
 </p>
 
-### 5. Validate The Extracted Text
+### 5. Validate the extracted text
 
-You can also inspect the OCR markdown against the page preview in a cleaner reading layout before exporting markdown or JSON artifacts.
+Clean reading layout for comparing OCR markdown against the page preview before exporting.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-39-07.png" alt="OCR markdown validation workspace" width="88%" />
 </p>
-
-## Core Flow
-
-1. Ingest a PDF or image.
-2. Normalize it into ordered page images.
-3. Detect document layout locally.
-4. Review and adjust the layout in the UI.
-5. Run OCR and generate page-level markdown and JSON.
-6. Extract structured fields with rules or with Ollama.
-7. Evaluate predictions against hand-labeled gold data.
 
 ## Quick Start
 
 ### Requirements
 
 - Python `3.11`, `3.12`, or `3.13`
-- `uv`
-- Ollama running locally
+- [`uv`](https://docs.astral.sh/uv/)
+- [Ollama](https://ollama.com/) running locally
 
 ### Install
 
@@ -93,65 +110,59 @@ uv venv --python 3.11
 uv sync --group dev --extra pdf --extra glmocr
 ```
 
-### Pull The OCR Model
+### Pull the OCR model
 
 ```bash
 ollama pull glm-ocr:latest
 ollama serve
 ```
 
-The default OCR endpoint is `http://localhost:11434/api/generate`.
+Default OCR endpoint: `http://localhost:11434/api/generate`.
 
-### Launch The UI
-
-Desktop app:
+### Launch the UI
 
 ```bash
+# Desktop
 uv run free-doc-extract-ui
-```
 
-Browser mode:
-
-```bash
+# Browser
 uv run python -m free_doc_extract.ui --web --host 127.0.0.1 --port 8550
 ```
 
-### Run The CLI Pipeline
+### Run the pipeline (CLI)
 
-OCR only:
+A sample document ships at `docs/demo/PublicWaterMassMailing.pdf`, so the commands below work on a fresh clone.
 
-```bash
-uv run python -m free_doc_extract.cli ocr data/raw/PublicWaterMassMailing.pdf --run demo001
-```
+| Command | What it does |
+| --- | --- |
+| `ocr <pdf> --run <id>` | Ingest, layout-detect, and OCR a document |
+| `extract-rules --run <id>` | Run the deterministic rules extractor |
+| `extract-glmocr --run <id>` | Run structured extraction via GLM-OCR |
+| `run <pdf> --run <id>` | End-to-end: OCR + rules extraction |
+| `eval --gold-dir ... --pred-dir ... --output ...` | Score predictions against gold labels |
 
-Rule-based extraction:
-
-```bash
-uv run python -m free_doc_extract.cli extract-rules --run demo001
-```
-
-Direct structured extraction:
+End-to-end example:
 
 ```bash
-uv run python -m free_doc_extract.cli extract-glmocr --run demo001
-```
+# OCR + rules extraction in one shot
+uv run python -m free_doc_extract.cli run docs/demo/PublicWaterMassMailing.pdf --run demo001
 
-End-to-end OCR plus rule extraction:
-
-```bash
-uv run python -m free_doc_extract.cli run data/raw/PublicWaterMassMailing.pdf --run demo001
-```
-
-Evaluate predictions:
-
-```bash
+# Optional: evaluate predictions against hand-labeled gold data
 uv run python -m free_doc_extract.cli eval \
   --gold-dir data/gold \
   --pred-dir data/runs/demo001/predictions \
   --output data/reports/demo001.md
 ```
 
-## What Gets Written To Disk
+### Try other sample documents
+
+Three additional public-sample PDFs ship in `docs/demo/` for quick experimentation:
+
+- [`stub-cv.pdf`](docs/demo/stub-cv.pdf)
+- [`stub-invoice.pdf`](docs/demo/stub-invoice.pdf)
+- [`stub-research-note.pdf`](docs/demo/stub-research-note.pdf)
+
+## What Gets Written to Disk
 
 Each run lands in `data/runs/<run-id>/`.
 
@@ -167,21 +178,32 @@ data/runs/demo001/
   predictions/
 ```
 
-Important files:
+Key files:
 
-- `reviewed_layout.json`: the page-by-page layout state used by the review step
-- `ocr.md`: merged markdown output for the run
-- `ocr.json`: project-owned OCR payload with page records and references to raw SDK artifacts
-- `ocr_raw/`: saved GLM-OCR model payloads per page
-- `predictions/`: rules and structured extraction outputs
+- `reviewed_layout.json` — page-by-page layout state used by the review step
+- `ocr.md` — merged markdown output for the run
+- `ocr.json` — project-owned OCR payload with page records and references to raw SDK artifacts
+- `ocr_raw/` — saved GLM-OCR model payloads per page
+- `predictions/` — rules and structured extraction outputs
+
+## Design Decisions & Trade-offs
+
+Choices that shaped this codebase, and what they cost:
+
+- **Local-first over SaaS OCR.** Keeps documents on the machine and makes runs fully reproducible. Cost: latency on dense pages depends on local hardware.
+- **Review-first layout correction.** OCR quality is bottlenecked by layout detection, so the UI exposes layout boxes as an editable stage instead of a hidden one. Cost: adds a human step; worth it for noisy scans.
+- **Rules baseline alongside LLM extraction.** Gives a deterministic floor and a regression guard when LLM output drifts. Cost: the rules extractor is narrow by design.
+- **Run-folder artifacts over a database.** Every run is a self-contained folder that can be zipped, diffed, or shared. Cost: no built-in query layer — swap in a DB if you need one.
+- **Flet for the UI.** Python-only stack, no JS toolchain, fast to iterate for a single-machine workbench. Cost: smaller ecosystem than Electron/web stacks.
+- **Intentional scope cuts.** No multi-tenant mode, no hosted deployment, no user management. This is a local workbench, not a product.
 
 ## Tech Stack
 
-- UI: Flet
-- OCR pipeline: GLM-OCR
-- Local inference serving: Ollama
-- PDF/image normalization: Pillow and PyMuPDF
-- Evaluation and reporting: project-native Python utilities
+- **UI:** Flet
+- **OCR pipeline:** GLM-OCR
+- **Local inference serving:** Ollama
+- **PDF / image normalization:** Pillow, PyMuPDF
+- **Evaluation and reporting:** project-native Python utilities
 
 ## Repository Layout
 
@@ -204,22 +226,32 @@ data/
   reports/
 ```
 
+## Testing
+
+The repo ships with a pytest suite (18 modules under `tests/`) covering CLI workflows, OCR glue code, review artifacts, evaluation, and the Flet UI components.
+
+```bash
+make test     # uv run pytest
+make lint     # uv run ruff check src tests
+```
+
 ## Make Targets
 
 ```bash
-make install
-make test
-make lint
-make report RUN_ID=demo001
+make install                 # uv sync with dev + pdf + glmocr extras
+make test                    # run pytest
+make lint                    # run ruff
+make report RUN_ID=demo001   # regenerate evaluation report for a run
 ```
 
-## Current Limits
+## Known Limits
 
 - PDF rasterization requires the `pdf` extra.
 - OCR and structured extraction both assume a local Ollama setup is available.
 - The rules extractor is intentionally narrow and should be treated as a baseline.
-- Very large or visually dense pages can still stress local inference latency.
+- Very large or visually dense pages can stress local inference latency.
+- No CI/CD yet — tests are run locally via `make test`.
 
 ## Dev Note
 
-The repo also includes a localhost-only MCP sidecar under [`tools/dev_mcp/README.md`](tools/dev_mcp/README.md) for UX review workflows and automated feedback capture.
+A localhost-only MCP sidecar lives at [`tools/dev_mcp/README.md`](tools/dev_mcp/README.md) for UX-review workflows and automated feedback capture.
