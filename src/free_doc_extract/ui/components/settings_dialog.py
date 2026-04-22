@@ -41,7 +41,7 @@ def open_settings_dialog(page: ft.Page, state: AppState) -> None:
 
     actions: list[ft.Control] = [
         ft.TextButton("Cancel", on_click=cancel),
-        ft.ElevatedButton("Save", on_click=save, bgcolor=theme.PRIMARY, color="white"),
+        ft.Button("Save", on_click=save, bgcolor=theme.PRIMARY, color="white"),
     ]
 
     dialog = ft.AlertDialog(

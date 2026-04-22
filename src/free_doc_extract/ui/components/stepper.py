@@ -25,7 +25,7 @@ def build_stepper(current: int, page: ft.Page, state: AppState) -> ft.Container:
                     width=24,
                     height=1,
                     bgcolor=theme.BORDER,
-                    margin=ft.margin.symmetric(horizontal=4),
+                    margin=ft.Margin.symmetric(horizontal=4),
                 )
             )
 
@@ -38,8 +38,8 @@ def build_stepper(current: int, page: ft.Page, state: AppState) -> ft.Container:
         ),
         height=40,
         bgcolor=theme.BG_SURFACE,
-        border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
-        padding=ft.padding.symmetric(horizontal=12),
+        border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
+        padding=ft.Padding.symmetric(horizontal=12),
     )
 
 
@@ -78,7 +78,7 @@ def _step_chip(
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        padding=ft.padding.symmetric(horizontal=10, vertical=4),
+        padding=ft.Padding.symmetric(horizontal=10, vertical=4),
         border_radius=6,
     )
 

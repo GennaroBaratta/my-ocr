@@ -31,11 +31,10 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
                 color=badge_color,
             ),
             bgcolor=f"{badge_color}20",
-            padding=ft.padding.symmetric(horizontal=8, vertical=2),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=2),
             border_radius=4,
         )
 
-        run_id = run["run_id"]
         row = ft.Container(
             content=ft.Row(
                 [
@@ -54,10 +53,10 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 spacing=10,
             ),
-            padding=ft.padding.symmetric(horizontal=14, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
             on_click=lambda e, target_route=route: page.go(target_route),
             ink=True,
-            border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
+            border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
         )
         rows.append(row)
 
@@ -72,7 +71,7 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
             ),
             ft.Container(
                 content=ft.Column(rows, spacing=0),
-                border=ft.border.all(1, theme.BORDER),
+                border=ft.Border.all(1, theme.BORDER),
                 border_radius=8,
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             ),

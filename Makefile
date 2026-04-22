@@ -7,13 +7,13 @@ REPORT ?= data/reports/$(RUN_ID).md
 .PHONY: install test lint report dirs
 
 install:
-	$(UV) sync --group dev --extra pdf --extra glmocr
+	$(UV) sync --group dev --group dev-mcp --extra pdf --extra glmocr
 
 dirs:
 	$(PYTHON) -c "from pathlib import Path; [Path(p).mkdir(parents=True, exist_ok=True) for p in ['data/raw','data/gold','data/runs','data/reports']]"
 
 test:
-	$(UV) run pytest
+	$(UV) run --group dev-mcp pytest
 
 lint:
 	$(UV) run ruff check src tests

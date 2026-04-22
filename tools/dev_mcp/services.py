@@ -67,7 +67,7 @@ class RepoPaths:
         return resolved
 
     def rel_to_repo(self, path: str | Path) -> str:
-        return str(Path(path).resolve().relative_to(self.config.repo_root))
+        return Path(path).resolve().relative_to(self.config.repo_root).as_posix()
 
     @staticmethod
     def _require_within(root: Path, candidate: Path) -> None:
@@ -116,6 +116,7 @@ class UIProcessManager:
     def __init__(self, config: DevMcpConfig) -> None:
         self.config = config
         self.repo_paths = RepoPaths(config)
+        self._process: subprocess.Popen[Any] | None = None
 
     def start_ui(self) -> dict[str, Any]:
         self.config.ensure_runtime_dirs()
@@ -137,14 +138,24 @@ class UIProcessManager:
                 stdout_path.open("a", encoding="utf-8") as stdout_handle,
                 stderr_path.open("a", encoding="utf-8") as stderr_handle,
             ):
+                popen_kwargs: dict[str, Any] = {
+                    "cwd": self.config.repo_root,
+                    "stdout": stdout_handle,
+                    "stderr": stderr_handle,
+                    "env": env,
+                }
+                if os.name == "nt":
+                    popen_kwargs["creationflags"] = (
+                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                        | getattr(subprocess, "DETACHED_PROCESS", 0)
+                    )
+                else:
+                    popen_kwargs["start_new_session"] = True
                 process = subprocess.Popen(
                     list(self.config.ui_command),
-                    cwd=self.config.repo_root,
-                    stdout=stdout_handle,
-                    stderr=stderr_handle,
-                    env=env,
-                    start_new_session=True,
+                    **popen_kwargs,
                 )
+                self._process = process
         except OSError as exc:
             return {
                 "ok": False,
@@ -235,23 +246,68 @@ class UIProcessManager:
             return self.ui_status(summary="UI process was not running")
 
         try:
-            os.killpg(pid, signal.SIGTERM)
+            if self._process is not None and self._process.pid == pid:
+                self._process.terminate()
+                if os.name == "nt":
+                    self._process.poll()
+                    self._process = None
+                    self.config.ui_state_path.unlink(missing_ok=True)
+                    return self.ui_status(summary="Stopped local Flet UI process")
+                self._process.wait(timeout=timeout_seconds)
+                self._process = None
+                self.config.ui_state_path.unlink(missing_ok=True)
+                return self.ui_status(summary="Stopped local Flet UI process")
+            else:
+                self._terminate_process(pid)
         except ProcessLookupError:
+            self._process = None
             self.config.ui_state_path.unlink(missing_ok=True)
             return self.ui_status(summary="UI process was not running")
+        except subprocess.TimeoutExpired:
+            if self._process is not None and self._process.pid == pid:
+                self._process.kill()
+                self._process.wait(timeout=1.0)
+                self._process = None
+                self.config.ui_state_path.unlink(missing_ok=True)
+                return self.ui_status(summary="Killed unresponsive Flet UI process")
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if not _pid_running(pid):
+                self._process = None
                 self.config.ui_state_path.unlink(missing_ok=True)
                 return self.ui_status(summary="Stopped local Flet UI process")
             time.sleep(0.1)
 
         try:
-            os.killpg(pid, signal.SIGKILL)
+            if self._process is not None and self._process.pid == pid:
+                self._process.kill()
+            else:
+                self._terminate_process(pid, force=True)
         except ProcessLookupError:
             pass
+        self._process = None
         self.config.ui_state_path.unlink(missing_ok=True)
         return self.ui_status(summary="Killed unresponsive Flet UI process")
+
+    @staticmethod
+    def _terminate_process(pid: int, *, force: bool = False) -> None:
+        if os.name == "nt":
+            import ctypes
+
+            process_terminate = 0x0001
+            handle = ctypes.windll.kernel32.OpenProcess(process_terminate, False, pid)
+            if not handle:
+                raise ProcessLookupError(pid)
+            try:
+                if not ctypes.windll.kernel32.TerminateProcess(handle, 1):
+                    raise ProcessLookupError(pid)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+            return
+        if force:
+            os.killpg(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+            return
+        os.killpg(pid, signal.SIGTERM)
 
     def ui_status(self, *, summary: str | None = None) -> dict[str, Any]:
         state = self._load_state()

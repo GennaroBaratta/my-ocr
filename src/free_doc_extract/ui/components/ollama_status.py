@@ -26,8 +26,8 @@ class OllamaStatus(ft.Container):
                 spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.padding.symmetric(horizontal=12, vertical=6),
-            border=ft.border.all(1, theme.BORDER),
+            padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+            border=ft.Border.all(1, theme.BORDER),
             border_radius=6,
         )
 

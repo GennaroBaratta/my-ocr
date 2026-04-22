@@ -25,7 +25,7 @@ def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> 
                 color="white" if is_active else theme.TEXT_MUTED,
             ),
             bgcolor=theme.PRIMARY if is_active else theme.BG_ELEVATED,
-            padding=ft.padding.symmetric(horizontal=5, vertical=1),
+            padding=ft.Padding.symmetric(horizontal=5, vertical=1),
             border_radius=3,
             right=4,
             top=4,
@@ -43,7 +43,7 @@ def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> 
                     badge,
                 ],
             ),
-            border=ft.border.all(
+            border=ft.Border.all(
                 2,
                 theme.PRIMARY if is_active else theme.BG_SURFACE,
             ),
@@ -65,7 +65,7 @@ def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> 
                         color=theme.TEXT_MUTED,
                         style=ft.TextStyle(letter_spacing=1.2),
                     ),
-                    padding=ft.padding.only(left=12, top=8, bottom=4),
+                    padding=ft.Padding.only(left=12, top=8, bottom=4),
                 ),
                 ft.Column(
                     thumbnails,
@@ -79,6 +79,6 @@ def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> 
         ),
         width=240,
         bgcolor=theme.BG_SURFACE,
-        border=ft.border.only(right=ft.BorderSide(1, theme.BORDER)),
-        padding=ft.padding.only(bottom=8, left=8, right=8),
+        border=ft.Border.only(right=ft.BorderSide(1, theme.BORDER)),
+        padding=ft.Padding.only(bottom=8, left=8, right=8),
     )

@@ -114,7 +114,7 @@ def build_upload_view(
                                 content=ft.Container(
                                     content=content,
                                     width=600,
-                                    padding=ft.padding.symmetric(horizontal=24, vertical=16),
+                                    padding=ft.Padding.symmetric(horizontal=24, vertical=16),
                                 ),
                                 alignment=ft.Alignment.CENTER,
                                 top=0,

@@ -30,7 +30,7 @@ def build_drop_zone(on_browse: Callable[[], Awaitable[None] | None]) -> ft.Conta
             text_align=ft.TextAlign.CENTER,
         ),
         ft.Container(height=8),
-        ft.ElevatedButton(
+        ft.Button(
             "Browse Files",
             on_click=on_browse,
             bgcolor=theme.PRIMARY,
@@ -49,7 +49,7 @@ def build_drop_zone(on_browse: Callable[[], Awaitable[None] | None]) -> ft.Conta
             spacing=8,
         ),
         height=280,
-        border=ft.border.all(2, theme.BORDER),
+        border=ft.Border.all(2, theme.BORDER),
         border_radius=12,
         bgcolor=theme.BG_SURFACE,
         alignment=ft.Alignment.CENTER,

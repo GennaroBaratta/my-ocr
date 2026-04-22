@@ -227,8 +227,8 @@ def build_inspector(
         ),
         width=300,
         bgcolor=theme.BG_SURFACE,
-        border=ft.border.only(left=ft.BorderSide(1, theme.BORDER)),
-        padding=ft.padding.all(12),
+        border=ft.Border.only(left=ft.BorderSide(1, theme.BORDER)),
+        padding=ft.Padding.all(12),
     )
 
 
@@ -247,7 +247,7 @@ def _coord_field(
     field.focused_border_color = theme.PRIMARY
     field.on_change = on_change
     field.expand = True
-    field.content_padding = ft.padding.symmetric(horizontal=8, vertical=8)
+    field.content_padding = ft.Padding.symmetric(horizontal=8, vertical=8)
     return field
 
 

@@ -616,11 +616,11 @@ def test_results_view_uses_ocr_json_actions_without_predictions(tmp_path) -> Non
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
     copy_button = cast(ft.OutlinedButton, buttons["Copy OCR JSON"])
-    page_markdown_button = cast(ft.ElevatedButton, buttons["Download Page Markdown"])
-    markdown_button = cast(ft.ElevatedButton, buttons["Download OCR Markdown"])
-    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
-    rerun_button = cast(ft.ElevatedButton, buttons["Re-run OCR For This Page"])
-    download_button = cast(ft.ElevatedButton, buttons["Download OCR JSON"])
+    page_markdown_button = cast(ft.Button, buttons["Download Page Markdown"])
+    markdown_button = cast(ft.Button, buttons["Download OCR Markdown"])
+    layout_button = cast(ft.Button, buttons["Re-detect This Page Layout"])
+    rerun_button = cast(ft.Button, buttons["Re-run OCR For This Page"])
+    download_button = cast(ft.Button, buttons["Download OCR JSON"])
 
     assert cast(ft.Text, toolbar_row.controls[4]).value == "source.pdf — OCR Complete"
     assert cast(Any, copy_button)._values["content"] == "Copy OCR JSON"
@@ -678,7 +678,7 @@ def test_results_view_downloads_markdown_with_md_extension(tmp_path) -> None:
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    markdown_button = cast(ft.ElevatedButton, buttons["Download OCR Markdown"])
+    markdown_button = cast(ft.Button, buttons["Download OCR Markdown"])
 
     asyncio.run(cast(Callable[[], Any], markdown_button.on_click)())
 
@@ -740,7 +740,7 @@ def test_results_view_downloads_current_page_markdown(tmp_path) -> None:
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    markdown_button = cast(ft.ElevatedButton, buttons["Download Page Markdown"])
+    markdown_button = cast(ft.Button, buttons["Download Page Markdown"])
 
     asyncio.run(cast(Callable[[], Any], markdown_button.on_click)())
 
@@ -788,8 +788,8 @@ def test_results_view_disables_page_markdown_download_without_per_page_ocr_paylo
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    page_markdown_button = cast(ft.ElevatedButton, buttons["Download Page Markdown"])
-    markdown_button = cast(ft.ElevatedButton, buttons["Download OCR Markdown"])
+    page_markdown_button = cast(ft.Button, buttons["Download Page Markdown"])
+    markdown_button = cast(ft.Button, buttons["Download OCR Markdown"])
 
     assert page_markdown_button.disabled is True
     assert markdown_button.disabled is False
@@ -857,7 +857,7 @@ def test_results_view_page_layout_redetect_routes_back_to_review_same_page(tmp_p
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
+    layout_button = cast(ft.Button, buttons["Re-detect This Page Layout"])
 
     cast(Callable[..., None], layout_button.on_click)()
 
@@ -954,7 +954,7 @@ def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) ->
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    rerun_button = cast(ft.ElevatedButton, buttons["Re-run OCR For This Page"])
+    rerun_button = cast(ft.Button, buttons["Re-run OCR For This Page"])
 
     cast(Callable[..., None], rerun_button.on_click)()
 
@@ -1038,8 +1038,8 @@ def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_p
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
-    rerun_button = cast(ft.ElevatedButton, buttons["Re-run OCR For This Page"])
+    layout_button = cast(ft.Button, buttons["Re-detect This Page Layout"])
+    rerun_button = cast(ft.Button, buttons["Re-run OCR For This Page"])
 
     cast(Callable[..., None], layout_button.on_click)()
     cast(Callable[..., None], rerun_button.on_click)()
@@ -1127,7 +1127,7 @@ def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkey
     toolbar = cast(ft.Container, inner.controls[0])
     toolbar_row = cast(ft.Row, toolbar.content)
     buttons = _toolbar_buttons_by_content(toolbar_row)
-    layout_button = cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"])
+    layout_button = cast(ft.Button, buttons["Re-detect This Page Layout"])
 
     cast(Callable[..., None], layout_button.on_click)()
 
@@ -1211,9 +1211,9 @@ def test_results_view_sparse_page_number_actions_use_actual_page_number(tmp_path
     assert cast(ft.Text, toolbar_row.controls[4]).value == "demo-ui — OCR Complete"
     assert cast(ft.Text, cast(ft.Row, cast(ft.Container, toolbar_row.controls[5]).content).controls[1]).value == "Page 5 / 1"
 
-    asyncio.run(cast(Callable[[], Any], cast(ft.ElevatedButton, buttons["Download Page Markdown"]).on_click)())
-    cast(Callable[..., None], cast(ft.ElevatedButton, buttons["Re-detect This Page Layout"]).on_click)()
-    cast(Callable[..., None], cast(ft.ElevatedButton, buttons["Re-run OCR For This Page"]).on_click)()
+    asyncio.run(cast(Callable[[], Any], cast(ft.Button, buttons["Download Page Markdown"]).on_click)())
+    cast(Callable[..., None], cast(ft.Button, buttons["Re-detect This Page Layout"]).on_click)()
+    cast(Callable[..., None], cast(ft.Button, buttons["Re-run OCR For This Page"]).on_click)()
 
     assert save_call["file_name"] == "demo-ui-page-0005.md"
     assert page_calls == {"layout": 5, "ocr": 5}

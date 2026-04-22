@@ -97,9 +97,9 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         [
             ft.Container(
                 content=header,
-                padding=ft.padding.symmetric(horizontal=12, vertical=4),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=4),
                 bgcolor=theme.BG_SURFACE,
-                border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
+                border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
             ),
             ft.Container(
                 content=canvas,
@@ -135,7 +135,7 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
                 top=box.y * scale,
                 width=box.width * scale,
                 height=box.height * scale,
-                border=ft.border.all(2 if is_sel else 1, color),
+                border=ft.Border.all(2 if is_sel else 1, color),
                 bgcolor=fill,
             )
         )

@@ -13,7 +13,6 @@ from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
-from ..components.stepper import build_stepper
 from ..state import AppState
 
 
@@ -276,10 +275,10 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
                 spacing=0,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            border=ft.border.all(1, theme.BORDER),
+            border=ft.Border.all(1, theme.BORDER),
             border_radius=6,
             bgcolor=theme.BG_ELEVATED,
-            padding=ft.padding.symmetric(horizontal=2),
+            padding=ft.Padding.symmetric(horizontal=2),
         ),
         ft.Container(width=8),
         ft.Container(
@@ -288,10 +287,10 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
                 spacing=0,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            border=ft.border.all(1, theme.BORDER),
+            border=ft.Border.all(1, theme.BORDER),
             border_radius=6,
             bgcolor=theme.BG_ELEVATED,
-            padding=ft.padding.symmetric(horizontal=2),
+            padding=ft.Padding.symmetric(horizontal=2),
         ),
         ft.Container(width=8),
         ft.IconButton(
@@ -303,7 +302,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         ),
         add_box_btn,
         ft.Container(width=8),
-        ft.ElevatedButton(
+        ft.Button(
             "Run OCR",
             icon=ft.Icons.PLAY_ARROW,
             on_click=run_ocr,
@@ -323,9 +322,9 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             spacing=4,
         ),
         height=48,
-        padding=ft.padding.symmetric(horizontal=8),
+        padding=ft.Padding.symmetric(horizontal=8),
         bgcolor=theme.BG_SURFACE,
-        border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
+        border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
     def on_keyboard(e: ft.KeyboardEvent) -> None:

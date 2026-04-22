@@ -227,7 +227,7 @@ def build_results_view(
             shape=ft.RoundedRectangleBorder(radius=6),
         ),
     )
-    download_page_markdown_button = ft.ElevatedButton(
+    download_page_markdown_button = ft.Button(
         "Download Page Markdown",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR Markdown for this page",
@@ -239,7 +239,7 @@ def build_results_view(
             shape=ft.RoundedRectangleBorder(radius=6),
         ),
     )
-    download_markdown_button = ft.ElevatedButton(
+    download_markdown_button = ft.Button(
         "Download OCR Markdown",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR Markdown",
@@ -251,7 +251,7 @@ def build_results_view(
             shape=ft.RoundedRectangleBorder(radius=6),
         ),
     )
-    download_json_button = ft.ElevatedButton(
+    download_json_button = ft.Button(
         "Download OCR JSON",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR JSON",
@@ -264,7 +264,7 @@ def build_results_view(
         ),
     )
 
-    layout_rerun_button = ft.ElevatedButton(
+    layout_rerun_button = ft.Button(
         "Re-detect This Page Layout",
         icon=ft.Icons.AUTO_FIX_HIGH,
         tooltip="Re-detect layout only for the active page",
@@ -275,7 +275,7 @@ def build_results_view(
             shape=ft.RoundedRectangleBorder(radius=6),
         ),
     )
-    ocr_rerun_button = ft.ElevatedButton(
+    ocr_rerun_button = ft.Button(
         "Re-run OCR For This Page",
         icon=ft.Icons.REFRESH,
         tooltip="Re-run OCR only for the active page",
@@ -339,10 +339,10 @@ def build_results_view(
                 spacing=0,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            border=ft.border.all(1, theme.BORDER),
+            border=ft.Border.all(1, theme.BORDER),
             border_radius=6,
             bgcolor=theme.BG_ELEVATED,
-            padding=ft.padding.symmetric(horizontal=2),
+            padding=ft.Padding.symmetric(horizontal=2),
         ),
         ft.Container(width=8),
         copy_json_button,
@@ -362,9 +362,9 @@ def build_results_view(
             spacing=8,
         ),
         height=48,
-        padding=ft.padding.symmetric(horizontal=12),
+        padding=ft.Padding.symmetric(horizontal=12),
         bgcolor=theme.BG_SURFACE,
-        border=ft.border.only(bottom=ft.BorderSide(1, theme.BORDER)),
+        border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
     content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
