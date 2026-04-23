@@ -17,10 +17,10 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
 
     rows: list[ft.Control] = []
     for run in state.recent_runs[:10]:
-        filename = Path(run["input_path"]).name if run["input_path"] else run["run_id"]
-        mtime = run.get("mtime", 0)
+        filename = Path(run.input_path).name if run.input_path else run.run_id
+        mtime = run.mtime
         date_str = time.strftime("%b %d, %Y", time.localtime(mtime)) if mtime else ""
-        run_dir = Path(state.run_root) / run["run_id"]
+        run_dir = Path(state.run_root) / run.run_id
         route, badge_text, badge_color = _run_destination(run_dir)
 
         badge = ft.Container(

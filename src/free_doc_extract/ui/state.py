@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from free_doc_extract.paths import RunPaths
 from free_doc_extract.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
@@ -16,6 +15,9 @@ from .run_repository import RunRepository
 from .session import BoundingBox, PageData, UiSessionState
 
 
+_SESSION_FIELD_NAMES = frozenset(UiSessionState.__dataclass_fields__)
+
+
 class AppState:
     def __init__(self) -> None:
         self.session = UiSessionState()
@@ -25,117 +27,18 @@ class AppState:
         self.repository = RunRepository(self._run_root)
         self.layout_profile: str = "auto"
 
-    @property
-    def recent_runs(self) -> list[dict[str, Any]]:
-        return self.session.recent_runs
+    def __getattr__(self, name: str) -> Any:
+        if name in _SESSION_FIELD_NAMES:
+            session = self.__dict__.get("session")
+            if session is not None:
+                return getattr(session, name)
+        raise AttributeError(f"{type(self).__name__!s} object has no attribute {name!r}")
 
-    @recent_runs.setter
-    def recent_runs(self, value: list[dict[str, Any]]) -> None:
-        self.session.recent_runs = value
-
-    @property
-    def run_id(self) -> str | None:
-        return self.session.run_id
-
-    @run_id.setter
-    def run_id(self, value: str | None) -> None:
-        self.session.run_id = value
-
-    @property
-    def run_paths(self) -> RunPaths | None:
-        return self.session.run_paths
-
-    @run_paths.setter
-    def run_paths(self, value: RunPaths | None) -> None:
-        self.session.run_paths = value
-
-    @property
-    def pages(self) -> list[PageData]:
-        return self.session.pages
-
-    @pages.setter
-    def pages(self, value: list[PageData]) -> None:
-        self.session.pages = value
-
-    @property
-    def current_page_index(self) -> int:
-        return self.session.current_page_index
-
-    @current_page_index.setter
-    def current_page_index(self, value: int) -> None:
-        self.session.current_page_index = value
-
-    @property
-    def selected_box_id(self) -> str | None:
-        return self.session.selected_box_id
-
-    @selected_box_id.setter
-    def selected_box_id(self, value: str | None) -> None:
-        self.session.selected_box_id = value
-
-    @property
-    def zoom_level(self) -> float:
-        return self.session.zoom_level
-
-    @zoom_level.setter
-    def zoom_level(self, value: float) -> None:
-        self.session.zoom_level = value
-
-    @property
-    def is_adding_box(self) -> bool:
-        return self.session.is_adding_box
-
-    @is_adding_box.setter
-    def is_adding_box(self, value: bool) -> None:
-        self.session.is_adding_box = value
-
-    @property
-    def processing(self) -> bool:
-        return self.session.processing
-
-    @processing.setter
-    def processing(self, value: bool) -> None:
-        self.session.processing = value
-
-    @property
-    def progress_message(self) -> str:
-        return self.session.progress_message
-
-    @progress_message.setter
-    def progress_message(self, value: str) -> None:
-        self.session.progress_message = value
-
-    @property
-    def error_message(self) -> str | None:
-        return self.session.error_message
-
-    @error_message.setter
-    def error_message(self, value: str | None) -> None:
-        self.session.error_message = value
-
-    @property
-    def ocr_markdown(self) -> str:
-        return self.session.ocr_markdown
-
-    @ocr_markdown.setter
-    def ocr_markdown(self, value: str) -> None:
-        self.session.ocr_markdown = value
-
-    @property
-    def extraction_json(self) -> dict[str, Any]:
-        return self.session.extraction_json
-
-    @extraction_json.setter
-    def extraction_json(self, value: dict[str, Any]) -> None:
-        self.session.extraction_json = value
-
-    @property
-    def active_result_tab(self) -> int:
-        return self.session.active_result_tab
-
-    @active_result_tab.setter
-    def active_result_tab(self, value: int) -> None:
-        self.session.active_result_tab = value
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in _SESSION_FIELD_NAMES and "session" in self.__dict__:
+            setattr(self.session, name, value)
+            return
+        object.__setattr__(self, name, value)
 
     @property
     def run_root(self) -> str:

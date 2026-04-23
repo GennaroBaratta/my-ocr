@@ -813,6 +813,94 @@ def test_prepare_review_page_workflow_replaces_only_selected_page(tmp_path) -> N
     assert not (run_dir / "predictions" / "demo-page-review.json").exists()
 
 
+def test_prepare_review_page_workflow_resolves_sparse_renamed_page(tmp_path) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-sparse-review"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    page_path = pages_dir / "scan.png"
+    page_path.write_bytes(b"page-5")
+
+    existing_raw_dir = run_dir / "ocr_raw" / "page-0005"
+    existing_raw_dir.mkdir(parents=True)
+    (existing_raw_dir / "page-0005_model.json").write_text(
+        json.dumps({"page": 5, "status": "existing"}),
+        encoding="utf-8",
+    )
+    (run_dir / "reviewed_layout.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_number=5,
+                        page_path="different-name.png",
+                        source_sdk_json_path=str(existing_raw_dir / "page-0005_model.json"),
+                        blocks=[build_reviewed_layout_block(content="old page 5")],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "meta.json").write_text(json.dumps({"input_path": "/tmp/source.pdf"}))
+
+    def fake_prepare_review(
+        _page_paths,
+        run_dir_arg,
+        *,
+        config_path,
+        layout_device,
+        page_numbers,
+        **_kw,
+    ):
+        assert _page_paths == [str(page_path)]
+        assert page_numbers == [5]
+        raw_dir = Path(run_dir_arg) / "ocr_raw" / "page-0005"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        model_path = raw_dir / "page-0005_model.json"
+        model_path.write_text(json.dumps({"page": 5, "status": "redetected"}), encoding="utf-8")
+        reviewed_layout = {
+            "version": 1,
+            "status": "prepared",
+            "pages": [
+                build_reviewed_layout_page(
+                    page_number=5,
+                    page_path=str(page_path),
+                    source_sdk_json_path=str(model_path),
+                    blocks=[build_reviewed_layout_block(content="new page 5")],
+                )
+            ],
+            "summary": {"page_count": 1},
+        }
+        (Path(run_dir_arg) / "reviewed_layout.json").write_text(
+            json.dumps(reviewed_layout),
+            encoding="utf-8",
+        )
+        return {
+            "reviewed_layout": reviewed_layout,
+            "raw_dir": str(Path(run_dir_arg) / "ocr_raw"),
+            "config_path": config_path,
+            "layout_device": layout_device,
+        }
+
+    prepare_review_page_workflow(
+        "demo-sparse-review",
+        5,
+        run_root=str(run_root),
+        prepare_review_artifacts_fn=fake_prepare_review,
+    )
+
+    reviewed_layout = json.loads((run_dir / "reviewed_layout.json").read_text(encoding="utf-8"))
+    assert reviewed_layout["pages"][0]["page_number"] == 5
+    assert reviewed_layout["pages"][0]["blocks"][0]["content"] == "new page 5"
+    assert reviewed_layout["pages"][0]["source_sdk_json_path"] == str(
+        run_dir / "ocr_raw" / "page-0005" / "page-0005_model.json"
+    )
+
+
 def test_prepare_review_page_workflow_preserves_ocr_only_pages_when_review_missing(tmp_path) -> None:
     image_module = import_module("PIL.Image")
 
@@ -1207,6 +1295,113 @@ def test_run_reviewed_ocr_page_workflow_merges_only_selected_page_outputs(tmp_pa
     assert not (run_dir / "predictions" / "glmocr_structured.json").exists()
     assert not (run_dir / "predictions" / "glmocr_structured_meta.json").exists()
     assert not (run_dir / "predictions" / "demo-page-ocr.json").exists()
+
+
+def test_run_reviewed_ocr_page_workflow_resolves_sparse_renamed_page(tmp_path) -> None:
+    run_root = tmp_path / "runs"
+    run_dir = run_root / "demo-sparse-ocr"
+    pages_dir = run_dir / "pages"
+    pages_dir.mkdir(parents=True)
+    page_path = pages_dir / "scan.png"
+    page_path.write_bytes(b"page-5")
+
+    raw_dir = run_dir / "ocr_raw" / "page-0005"
+    raw_dir.mkdir(parents=True)
+    existing_model_path = raw_dir / "page-0005_model.json"
+    existing_model_path.write_text(json.dumps({"page": 5, "status": "existing"}), encoding="utf-8")
+    (run_dir / "ocr.md").write_text("# Old Page 5", encoding="utf-8")
+    (run_dir / "ocr.json").write_text(
+        json.dumps(
+            {
+                "pages": [
+                    build_ocr_page(
+                        page_number=5,
+                        page_path="different-name.png",
+                        markdown="# Old Page 5",
+                        sdk_json_path=str(existing_model_path),
+                    )
+                ],
+                "summary": {"page_count": 1, "sources": {"sdk_markdown": 1}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "reviewed_layout.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_number=5,
+                        page_path="different-name.png",
+                        source_sdk_json_path=str(existing_model_path),
+                        blocks=[build_reviewed_layout_block(content="old page 5")],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "meta.json").write_text(json.dumps({"input_path": "/tmp/source.pdf"}))
+
+    def fake_run_ocr(
+        _page_paths,
+        run_dir_arg,
+        *,
+        config_path,
+        layout_device,
+        reviewed_layout_path,
+        page_numbers,
+        **_kw,
+    ):
+        assert _page_paths == [str(page_path)]
+        assert reviewed_layout_path == run_dir / "reviewed_layout.json"
+        assert page_numbers == [5]
+        partial_raw_dir = Path(run_dir_arg) / "ocr_raw" / "page-0005"
+        partial_raw_dir.mkdir(parents=True, exist_ok=True)
+        model_path = partial_raw_dir / "page-0005_model.json"
+        model_path.write_text(json.dumps({"page": 5, "status": "rerun"}), encoding="utf-8")
+        (Path(run_dir_arg) / "ocr.md").write_text("# New Page 5", encoding="utf-8")
+        (Path(run_dir_arg) / "ocr.json").write_text(
+            json.dumps(
+                {
+                    "pages": [
+                        build_ocr_page(
+                            page_number=5,
+                            page_path=str(page_path),
+                            markdown="# New Page 5",
+                            sdk_json_path=str(model_path),
+                        )
+                    ],
+                    "summary": {"page_count": 1, "sources": {"sdk_markdown": 1}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "markdown": "# New Page 5",
+            "json": {"pages": []},
+            "raw_dir": str(Path(run_dir_arg) / "ocr_raw"),
+            "config_path": config_path,
+            "layout_device": layout_device,
+        }
+
+    run_reviewed_ocr_page_workflow(
+        "demo-sparse-ocr",
+        5,
+        run_root=str(run_root),
+        run_ocr_fn=fake_run_ocr,
+    )
+
+    ocr_payload = json.loads((run_dir / "ocr.json").read_text(encoding="utf-8"))
+    assert ocr_payload["pages"][0]["page_number"] == 5
+    assert ocr_payload["pages"][0]["markdown"] == "# New Page 5"
+    assert ocr_payload["pages"][0]["sdk_json_path"] == str(
+        run_dir / "ocr_raw" / "page-0005" / "page-0005_model.json"
+    )
+    assert (run_dir / "ocr.md").read_text(encoding="utf-8") == "# New Page 5"
 
 
 def test_run_pipeline_workflow_rerun_keeps_structured_outputs(tmp_path) -> None:

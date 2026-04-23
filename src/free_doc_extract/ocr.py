@@ -5,7 +5,6 @@ from contextlib import suppress
 import gc
 from importlib import import_module
 from pathlib import Path
-import re
 import sys
 from typing import Any
 
@@ -18,6 +17,7 @@ from .ocr_fallback import (
     recognize_full_page,
     run_crop_fallback_for_page,
 )
+from .page_identity import infer_page_number
 from .paths import RunPaths
 from .review_artifacts import (
     build_review_layout_payload,
@@ -47,8 +47,9 @@ def run_ocr(
     layout_device: str = "cuda",
     layout_profile: str | None = "auto",
     reviewed_layout_path: str | Path | None = None,
+    page_numbers: Sequence[int] | None = None,
 ) -> dict[str, Any]:
-    page_inputs = _normalize_page_inputs(page_paths)
+    page_inputs = _normalize_page_inputs(page_paths, page_numbers=page_numbers)
 
     layout_dotted, layout_diagnostics = _layout_profile_mod.resolve_layout_profile(
         config_path, layout_profile
@@ -137,8 +138,9 @@ def prepare_review_artifacts(
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
     layout_profile: str | None = "auto",
+    page_numbers: Sequence[int] | None = None,
 ) -> dict[str, Any]:
-    page_inputs = _normalize_page_inputs(page_paths)
+    page_inputs = _normalize_page_inputs(page_paths, page_numbers=page_numbers)
 
     layout_dotted, layout_diagnostics = _layout_profile_mod.resolve_layout_profile(
         config_path, layout_profile
@@ -203,7 +205,11 @@ def prepare_review_artifacts(
     }
 
 
-def _normalize_page_inputs(page_paths: Sequence[str | Path]) -> list[tuple[int, str]]:
+def _normalize_page_inputs(
+    page_paths: Sequence[str | Path],
+    *,
+    page_numbers: Sequence[int] | None = None,
+) -> list[tuple[int, str]]:
     if isinstance(page_paths, (str, Path)):
         candidates = [page_paths]
     else:
@@ -211,6 +217,8 @@ def _normalize_page_inputs(page_paths: Sequence[str | Path]) -> list[tuple[int, 
 
     if not candidates:
         raise ValueError("At least one normalized page image is required.")
+    if page_numbers is not None and len(page_numbers) != len(candidates):
+        raise ValueError("page_numbers must match the number of page images.")
 
     normalized: list[tuple[int, str]] = []
     for fallback_number, raw_path in enumerate(candidates, start=1):
@@ -223,15 +231,15 @@ def _normalize_page_inputs(page_paths: Sequence[str | Path]) -> list[tuple[int, 
             raise ValueError(
                 f"run_ocr expects normalized page images. Unsupported page input: {page_path.name}"
             )
-        normalized.append((_infer_page_number(page_path, fallback_number), str(page_path)))
+        page_number = (
+            page_numbers[fallback_number - 1]
+            if page_numbers is not None
+            else infer_page_number(page_path, fallback_number)
+        )
+        if page_number <= 0:
+            raise ValueError(f"Invalid page number {page_number} for {page_path}")
+        normalized.append((page_number, str(page_path)))
     return normalized
-
-
-def _infer_page_number(page_path: str | Path, fallback_number: int) -> int:
-    match = re.fullmatch(r"page-(\d+)", Path(page_path).stem)
-    if match is None:
-        return fallback_number
-    return int(match.group(1))
 
 
 def _run_page_ocr(

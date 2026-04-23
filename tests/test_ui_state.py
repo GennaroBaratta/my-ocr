@@ -171,7 +171,7 @@ def test_run_root_setter_updates_repository_and_recent_run_reads(tmp_path) -> No
     state.load_recent_runs()
 
     assert state.repository.run_root == str(second_root)
-    assert [run["run_id"] for run in state.recent_runs] == ["demo-ui"]
+    assert [run.run_id for run in state.recent_runs] == ["demo-ui"]
 
 
 def test_load_run_resets_page_index_and_selected_box(tmp_path) -> None:

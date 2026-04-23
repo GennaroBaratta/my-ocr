@@ -39,11 +39,11 @@ def test_list_recent_runs_derives_status_from_predictions(tmp_path) -> None:
 
     repository = RunRepository(str(run_root))
 
-    recent_runs = {run["run_id"]: run for run in repository.list_recent_runs()}
+    recent_runs = {run.run_id: run for run in repository.list_recent_runs()}
 
-    assert recent_runs["pending-run"]["status"] == "pending"
-    assert recent_runs["pending-run"]["input_path"] == "data/raw/pending.pdf"
-    assert recent_runs["extracted-run"]["status"] == "extracted"
+    assert recent_runs["pending-run"].status == "pending"
+    assert recent_runs["pending-run"].input_path == "data/raw/pending.pdf"
+    assert recent_runs["extracted-run"].status == "extracted"
 
 
 def test_load_run_prefers_reviewed_layout_over_ocr_payload(tmp_path) -> None:

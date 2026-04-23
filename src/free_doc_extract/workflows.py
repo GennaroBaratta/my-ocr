@@ -12,6 +12,11 @@ from .extract_rules import extract_from_markdown
 from .ingest import normalize_document
 from .ocr_fallback import detect_bbox_coord_space, extract_layout_blocks
 from .ocr import prepare_review_artifacts, run_ocr
+from .page_identity import (
+    infer_page_number,
+    page_numbers_by_index,
+    resolve_page_path_for_number as resolve_page_path_for_number_from_payloads,
+)
 from .paths import RunPaths
 from .review_artifacts import (
     REVIEW_LAYOUT_VERSION,
@@ -205,6 +210,7 @@ def prepare_review_page_workflow(
             config_path=config_path,
             layout_device=layout_device,
             layout_profile=layout_profile,
+            page_numbers=[page_number],
         )
         _merge_review_page_artifacts(paths, staged_paths, partial_paths, page_number)
         _publish_staged_review_run(
@@ -253,6 +259,7 @@ def run_reviewed_ocr_page_workflow(
             config_path=config_path,
             layout_device=layout_device,
             layout_profile=layout_profile,
+            page_numbers=[page_number],
             reviewed_layout_path=(
                 paths.reviewed_layout_path if paths.reviewed_layout_path.exists() else None
             ),
@@ -462,49 +469,24 @@ def _publish_staged_ocr_run(
     include_pages: bool = True,
     post_publish: Callable[[], None] | None = None,
 ) -> None:
-    backup_dir = Path(
-        tempfile.mkdtemp(
-            prefix=f".{target_paths.run_name}-ocr-backup-", dir=str(target_paths.run_dir.parent)
-        )
-    )
-    backup_paths = RunPaths.from_run_dir(backup_dir)
-    backed_up_pairs: list[tuple[Path, Path]] = []
-    published_pairs: list[tuple[Path, Path]] = []
-    try:
-        if target_paths.meta_path.exists():
-            _move_path(target_paths.meta_path, backup_paths.meta_path)
-            backed_up_pairs.append((target_paths.meta_path, backup_paths.meta_path))
-        _move_ocr_artifacts(
-            target_paths,
-            backup_paths,
-            moved_pairs=backed_up_pairs,
+    _publish_staged_run(
+        source_paths,
+        target_paths,
+        kind="ocr",
+        move_artifacts=lambda source, target, moved_pairs: _move_ocr_artifacts(
+            source,
+            target,
+            moved_pairs=moved_pairs,
             include_pages=include_pages,
-        )
-        _move_ocr_artifacts(
-            source_paths,
-            target_paths,
-            moved_pairs=published_pairs,
-            include_pages=include_pages,
-        )
-        _normalize_published_ocr_artifacts(
+        ),
+        normalize=lambda: _normalize_published_ocr_artifacts(
             target_paths,
             source_run_dir=source_paths.run_dir,
             target_run_dir=target_paths.run_dir,
-        )
-        if post_publish is not None:
-            post_publish()
-    except Exception:
-        try:
-            _remove_paths([target_paths.meta_path, *[target for _, target in published_pairs]])
-            _restore_moved_artifacts(backed_up_pairs)
-        except Exception as restore_exc:
-            raise RuntimeError(
-                "Failed to restore OCR artifacts after publish failure. "
-                f"Backup preserved at {backup_dir}."
-            ) from restore_exc
-        shutil.rmtree(backup_dir, ignore_errors=True)
-        raise
-    shutil.rmtree(backup_dir, ignore_errors=True)
+        ),
+        restore_error="Failed to restore OCR artifacts after publish failure.",
+        post_publish=post_publish,
+    )
 
 
 def _publish_staged_review_run(
@@ -513,9 +495,41 @@ def _publish_staged_review_run(
     *,
     post_publish: Callable[[], None] | None = None,
 ) -> None:
+    _publish_staged_run(
+        source_paths,
+        target_paths,
+        kind="review",
+        move_artifacts=lambda source, target, moved_pairs: _move_review_artifacts(
+            source,
+            target,
+            moved_pairs=moved_pairs,
+        ),
+        normalize=lambda: _normalize_published_review_json(
+            target_paths.reviewed_layout_path,
+            source_run_dir=source_paths.run_dir,
+            target_run_dir=target_paths.run_dir,
+        ),
+        restore_error="Failed to restore review artifacts after publish failure.",
+        post_publish=post_publish,
+        post_publish_cleanup=lambda: _remove_replaced_ocr_outputs(target_paths),
+    )
+
+
+def _publish_staged_run(
+    source_paths: RunPaths,
+    target_paths: RunPaths,
+    *,
+    kind: str,
+    move_artifacts: Callable[[RunPaths, RunPaths, list[tuple[Path, Path]]], None],
+    normalize: Callable[[], None],
+    restore_error: str,
+    post_publish: Callable[[], None] | None = None,
+    post_publish_cleanup: Callable[[], None] | None = None,
+) -> None:
     backup_dir = Path(
         tempfile.mkdtemp(
-            prefix=f".{target_paths.run_name}-review-backup-", dir=str(target_paths.run_dir.parent)
+            prefix=f".{target_paths.run_name}-{kind}-backup-",
+            dir=str(target_paths.run_dir.parent),
         )
     )
     backup_paths = RunPaths.from_run_dir(backup_dir)
@@ -525,25 +539,19 @@ def _publish_staged_review_run(
         if target_paths.meta_path.exists():
             _move_path(target_paths.meta_path, backup_paths.meta_path)
             backed_up_pairs.append((target_paths.meta_path, backup_paths.meta_path))
-        _move_review_artifacts(target_paths, backup_paths, moved_pairs=backed_up_pairs)
-        _move_review_artifacts(source_paths, target_paths, moved_pairs=published_pairs)
-        _normalize_published_review_json(
-            target_paths.reviewed_layout_path,
-            source_run_dir=source_paths.run_dir,
-            target_run_dir=target_paths.run_dir,
-        )
+        move_artifacts(target_paths, backup_paths, backed_up_pairs)
+        move_artifacts(source_paths, target_paths, published_pairs)
+        normalize()
         if post_publish is not None:
             post_publish()
-        _remove_replaced_ocr_outputs(target_paths)
+        if post_publish_cleanup is not None:
+            post_publish_cleanup()
     except Exception:
         try:
             _remove_paths([target_paths.meta_path, *[target for _, target in published_pairs]])
             _restore_moved_artifacts(backed_up_pairs)
         except Exception as restore_exc:
-            raise RuntimeError(
-                "Failed to restore review artifacts after publish failure. "
-                f"Backup preserved at {backup_dir}."
-            ) from restore_exc
+            raise RuntimeError(f"{restore_error} Backup preserved at {backup_dir}.") from restore_exc
         shutil.rmtree(backup_dir, ignore_errors=True)
         raise
     shutil.rmtree(backup_dir, ignore_errors=True)
@@ -788,18 +796,26 @@ def _rewrite_path_value(value: Any, source_prefix: str, target_prefix: str) -> A
     return value
 
 
-def _resolve_page_path_for_number(paths: RunPaths, page_number: int) -> str:
-    for page_path in paths.list_page_paths():
-        if _page_number_for_path(page_path) == page_number:
-            return page_path
-    raise FileNotFoundError(f"Page {page_number} not found in {paths.pages_dir}")
+def _resolve_page_path_for_number(paths: RunPaths, page_number: int, *payloads: Any) -> str:
+    payloads_to_check = [*payloads, *_load_page_identity_payloads(paths)]
+    try:
+        return resolve_page_path_for_number_from_payloads(
+            paths.run_dir,
+            paths.list_page_paths(),
+            page_number,
+            *payloads_to_check,
+        )
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Page {page_number} not found in {paths.pages_dir}") from exc
 
 
-def _page_number_for_path(page_path: str | Path) -> int:
-    match = re.fullmatch(r"page-(\d+)", Path(page_path).stem)
-    if match is None:
-        raise ValueError(f"Cannot determine page number from {page_path}")
-    return int(match.group(1))
+def _load_page_identity_payloads(paths: RunPaths) -> list[Any]:
+    payloads: list[Any] = []
+    if paths.reviewed_layout_path.exists():
+        payloads.append(load_review_layout_payload(paths.reviewed_layout_path))
+    if paths.ocr_json_path.exists():
+        payloads.append(load_json(paths.ocr_json_path))
+    return payloads
 
 
 def _copy_review_artifact_snapshot(source_paths: RunPaths, staged_paths: RunPaths) -> None:
@@ -878,8 +894,18 @@ def _seed_review_pages_for_merge(
     review_pages_by_number: dict[int, dict[str, Any]],
 ) -> dict[int, dict[str, Any]]:
     seeded_pages = dict(review_pages_by_number)
+    staged_page_paths = staged_paths.list_page_paths()
+    review_payload = {"pages": list(review_pages_by_number.values())}
+    ocr_payload = load_json(source_paths.ocr_json_path) if source_paths.ocr_json_path.exists() else None
+    page_numbers = page_numbers_by_index(
+        staged_paths.run_dir,
+        staged_page_paths,
+        review_payload,
+        ocr_payload,
+    )
     expected_page_numbers = [
-        _page_number_for_path(page_path) for page_path in staged_paths.list_page_paths()
+        page_numbers.get(page_idx, infer_page_number(page_path, page_idx + 1))
+        for page_idx, page_path in enumerate(staged_page_paths)
     ]
     missing_page_numbers = [
         page_number for page_number in expected_page_numbers if page_number not in seeded_pages
@@ -887,7 +913,6 @@ def _seed_review_pages_for_merge(
     if not missing_page_numbers:
         return seeded_pages
 
-    ocr_payload = load_json(source_paths.ocr_json_path)
     if not isinstance(ocr_payload, dict):
         raise FileNotFoundError(
             "Missing OCR payload required to preserve untouched review pages: "
@@ -907,6 +932,7 @@ def _seed_review_pages_for_merge(
             staged_paths,
             missing_page_number,
             ocr_page,
+            ocr_payload,
         )
     return seeded_pages
 
@@ -916,6 +942,7 @@ def _build_review_page_from_ocr_page(
     staged_paths: RunPaths,
     page_number: int,
     ocr_page: dict[str, Any],
+    ocr_payload: dict[str, Any],
 ) -> dict[str, Any]:
     sdk_json_path = _resolve_sdk_json_path_for_page(source_paths, page_number, ocr_page)
     if not sdk_json_path.exists():
@@ -923,7 +950,7 @@ def _build_review_page_from_ocr_page(
             f"Missing SDK JSON for untouched page {page_number}: {sdk_json_path}"
         )
 
-    page_path = _resolve_page_path_for_number(staged_paths, page_number)
+    page_path = _resolve_page_path_for_number(staged_paths, page_number, ocr_payload)
     _copy_path(sdk_json_path.parent, staged_paths.raw_page_dir(page_number))
     staged_sdk_json_path = staged_paths.raw_page_dir(page_number) / sdk_json_path.name
     layout = load_json(sdk_json_path)
@@ -1096,8 +1123,13 @@ def _ordered_page_records(
         page_number = page.get("page_number")
         if isinstance(page_number, int) and page_number > 0 and page_number not in ordered_numbers:
             ordered_numbers.append(page_number)
-    for page_path in sorted(str(path) for path in pages_dir.iterdir() if path.is_file()) if pages_dir.exists() else []:
-        page_number = _page_number_for_path(page_path)
+    page_paths = (
+        sorted(str(path) for path in pages_dir.iterdir() if path.is_file())
+        if pages_dir.exists()
+        else []
+    )
+    for page_idx, page_path in enumerate(page_paths):
+        page_number = infer_page_number(page_path, page_idx + 1)
         if page_number not in ordered_numbers:
             ordered_numbers.append(page_number)
     for page_number in sorted(pages_by_number):

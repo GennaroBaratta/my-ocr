@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from free_doc_extract.ocr_fallback import normalize_bbox
+from free_doc_extract.page_identity import (
+    infer_page_number,
+    iter_payload_pages,
+    page_numbers_by_index,
+    paths_match,
+    payload_page_index,
+    resolve_page_path,
+)
 from free_doc_extract.paths import RunPaths
 from free_doc_extract.review_artifacts import (
     build_review_layout_payload,
@@ -15,7 +22,7 @@ from free_doc_extract.review_artifacts import (
 )
 
 from .image_utils import get_image_size
-from .session import BoundingBox, PageData
+from .session import BoundingBox, PageData, RecentRunSummary
 
 
 @dataclass(frozen=True)
@@ -31,9 +38,9 @@ class RunRepository:
     def __init__(self, run_root: str) -> None:
         self.run_root = run_root
 
-    def list_recent_runs(self) -> list[dict[str, Any]]:
+    def list_recent_runs(self) -> list[RecentRunSummary]:
         runs_dir = Path(self.run_root)
-        recent_runs: list[dict[str, Any]] = []
+        recent_runs: list[RecentRunSummary] = []
         if not runs_dir.exists() or not runs_dir.is_dir():
             return recent_runs
         try:
@@ -63,12 +70,12 @@ class RunRepository:
                 has_preds = False
 
             recent_runs.append(
-                {
-                    "run_id": run_dir.name,
-                    "input_path": input_path,
-                    "mtime": run_dir.stat().st_mtime,
-                    "status": "extracted" if has_preds else "pending",
-                }
+                RecentRunSummary(
+                    run_id=run_dir.name,
+                    input_path=input_path,
+                    mtime=run_dir.stat().st_mtime,
+                    status="extracted" if has_preds else "pending",
+                )
             )
 
         return recent_runs
@@ -78,12 +85,20 @@ class RunRepository:
         page_paths = run_paths.list_page_paths()
         review_payload = self._load_review_payload(run_paths)
         ocr_payload = self._load_ocr_payload(run_paths)
-        page_numbers = self._page_numbers_by_index(run_paths, page_paths, ocr_payload, review_payload)
+        page_numbers = page_numbers_by_index(
+            run_paths.run_dir,
+            page_paths,
+            ocr_payload,
+            review_payload,
+        )
         boxes_by_page = self._load_boxes(run_paths, page_paths, review_payload, ocr_payload)
         pages = [
             PageData(
                 index=page_index,
-                page_number=page_numbers.get(page_index, _infer_page_number(page_path, page_index + 1)),
+                page_number=page_numbers.get(
+                    page_index,
+                    infer_page_number(page_path, page_index + 1),
+                ),
                 image_path=page_path,
                 boxes=boxes_by_page.get(page_index, []),
             )
@@ -178,7 +193,12 @@ class RunRepository:
         for page_idx, page_layout, coord_space, page_path in self._iter_page_layouts(
             run_paths, ocr_payload, page_paths
         ):
-            resolved_page_path = self._resolve_page_path(run_paths, page_idx, page_path, page_paths)
+            resolved_page_path = resolve_page_path(
+                run_paths.run_dir,
+                page_idx,
+                page_path,
+                page_paths,
+            )
             image_width, image_height = (
                 get_image_size(resolved_page_path) if resolved_page_path else (0, 0)
             )
@@ -224,10 +244,10 @@ class RunRepository:
             if not isinstance(page, dict):
                 continue
             page_data = cast(dict[str, Any], page)
-            page_idx = self._payload_page_index(run_paths, page_data, fallback_idx, page_paths)
+            page_idx = payload_page_index(run_paths.run_dir, page_data, fallback_idx, page_paths)
             page_path = page_data.get("page_path")
-            resolved_page_path = self._resolve_page_path(
-                run_paths,
+            resolved_page_path = resolve_page_path(
+                run_paths.run_dir,
                 page_idx,
                 page_path if isinstance(page_path, str) else None,
                 page_paths,
@@ -300,7 +320,12 @@ class RunRepository:
                         )
                         if isinstance(coord_value, str):
                             coord_space = coord_value
-                    page_idx = self._payload_page_index(run_paths, page_data, fallback_idx, page_paths)
+                    page_idx = payload_page_index(
+                        run_paths.run_dir,
+                        page_data,
+                        fallback_idx,
+                        page_paths,
+                    )
                     page_layouts.append(
                         (
                             page_idx,
@@ -339,38 +364,6 @@ class RunRepository:
             )
         except (json.JSONDecodeError, OSError):
             return {}
-
-    def _page_numbers_by_index(
-        self,
-        run_paths: RunPaths,
-        page_paths: list[str],
-        ocr_payload: Any,
-        review_payload: dict[str, Any] | None,
-    ) -> dict[int, int]:
-        page_numbers = {
-            page_idx: _infer_page_number(page_path, page_idx + 1)
-            for page_idx, page_path in enumerate(page_paths)
-        }
-        for payload in (ocr_payload, review_payload):
-            for fallback_idx, page_data in self._iter_payload_pages(payload):
-                page_number = page_data.get("page_number")
-                if not isinstance(page_number, int) or page_number <= 0:
-                    continue
-                page_idx = self._payload_page_index(run_paths, page_data, fallback_idx, page_paths)
-                page_numbers[page_idx] = page_number
-        return page_numbers
-
-    def _iter_payload_pages(self, payload: Any) -> list[tuple[int, dict[str, Any]]]:
-        if not isinstance(payload, dict):
-            return []
-        pages = payload.get("pages")
-        if not isinstance(pages, list):
-            return []
-        result: list[tuple[int, dict[str, Any]]] = []
-        for fallback_idx, page in enumerate(pages):
-            if isinstance(page, dict):
-                result.append((fallback_idx, cast(dict[str, Any], page)))
-        return result
 
     def _load_ocr_payload(self, run_paths: RunPaths) -> Any:
         if not run_paths.ocr_json_path.exists():
@@ -449,73 +442,6 @@ class RunRepository:
                 markdown_parts.append(markdown.strip())
         return "\n\n".join(markdown_parts)
 
-    def _payload_page_index(
-        self,
-        run_paths: RunPaths,
-        page_data: dict[str, Any],
-        fallback_idx: int,
-        page_paths: list[str],
-    ) -> int:
-        payload_page_path = page_data.get("page_path")
-        if isinstance(payload_page_path, str):
-            page_idx = self._find_page_index_by_path(run_paths, payload_page_path, page_paths)
-            if page_idx is not None:
-                return page_idx
-
-        page_number = page_data.get("page_number")
-        if isinstance(page_number, int) and page_number > 0:
-            page_idx = self._find_page_index_by_number(page_number, page_paths)
-            if page_idx is not None:
-                return page_idx
-
-        return fallback_idx
-
-    def _find_page_index_by_path(
-        self,
-        run_paths: RunPaths,
-        page_path: str,
-        page_paths: list[str],
-    ) -> int | None:
-        lookup_strings: set[str] = {page_path}
-        lookup_names: set[str] = {Path(page_path).name}
-
-        candidate = Path(page_path)
-        lookup_strings.add(str(candidate))
-        if not candidate.is_absolute():
-            lookup_strings.add(str(run_paths.run_dir / candidate))
-
-        for page_idx, candidate_path in enumerate(page_paths):
-            candidate_name = Path(candidate_path).name
-            if candidate_path in lookup_strings or candidate_name in lookup_names:
-                return page_idx
-
-        return None
-
-    def _find_page_index_by_number(self, page_number: int, page_paths: list[str]) -> int | None:
-        for page_idx, page_path in enumerate(page_paths):
-            if _infer_page_number(page_path, page_idx + 1) == page_number:
-                return page_idx
-        return None
-
-    def _resolve_page_path(
-        self,
-        run_paths: RunPaths,
-        page_idx: int,
-        payload_page_path: str | None,
-        page_paths: list[str],
-    ) -> str | None:
-        if 0 <= page_idx < len(page_paths):
-            return page_paths[page_idx]
-        if not payload_page_path:
-            return None
-        path = Path(payload_page_path)
-        if path.exists():
-            return str(path)
-        candidate = run_paths.run_dir / path
-        if candidate.exists():
-            return str(candidate)
-        return None
-
     def _review_source_sdk_json_path(
         self,
         run_paths: RunPaths,
@@ -545,10 +471,10 @@ class RunRepository:
         page_paths: list[str],
         payload: Any,
     ) -> dict[str, Any] | None:
-        for fallback_idx, page_data in self._iter_payload_pages(payload):
+        for fallback_idx, page_data in iter_payload_pages(payload):
             payload_page_path = page_data.get("page_path")
-            if isinstance(payload_page_path, str) and self._paths_match(
-                run_paths, target_page.image_path, payload_page_path
+            if isinstance(payload_page_path, str) and paths_match(
+                run_paths.run_dir, target_page.image_path, payload_page_path
             ):
                 return page_data
 
@@ -560,27 +486,13 @@ class RunRepository:
             ):
                 return page_data
 
-            page_idx = self._payload_page_index(run_paths, page_data, fallback_idx, page_paths)
+            page_idx = payload_page_index(
+                run_paths.run_dir,
+                page_data,
+                fallback_idx,
+                page_paths,
+            )
             if page_idx == target_page.index:
                 return page_data
 
         return None
-
-    def _paths_match(self, run_paths: RunPaths, left: str, right: str) -> bool:
-        left_candidates = self._path_candidates(run_paths, left)
-        right_candidates = self._path_candidates(run_paths, right)
-        return bool(left_candidates.intersection(right_candidates))
-
-    def _path_candidates(self, run_paths: RunPaths, raw_path: str) -> set[str]:
-        candidate = Path(raw_path)
-        candidates = {raw_path, str(candidate), candidate.name}
-        if not candidate.is_absolute():
-            candidates.add(str(run_paths.run_dir / candidate))
-        return candidates
-
-
-def _infer_page_number(page_path: str | Path, fallback_number: int) -> int:
-    match = re.fullmatch(r"page-(\d+)", Path(page_path).stem)
-    if match is None:
-        return fallback_number
-    return int(match.group(1))

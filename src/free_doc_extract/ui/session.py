@@ -6,6 +6,14 @@ from typing import Any
 from free_doc_extract.paths import RunPaths
 
 
+@dataclass(frozen=True, slots=True)
+class RecentRunSummary:
+    run_id: str
+    input_path: str
+    mtime: float
+    status: str
+
+
 @dataclass
 class BoundingBox:
     id: str
@@ -30,7 +38,7 @@ class PageData:
 
 @dataclass
 class UiSessionState:
-    recent_runs: list[dict[str, Any]] = field(default_factory=list)
+    recent_runs: list[RecentRunSummary] = field(default_factory=list)
     run_id: str | None = None
     run_paths: RunPaths | None = None
     pages: list[PageData] = field(default_factory=list)
