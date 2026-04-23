@@ -973,6 +973,33 @@ def test_run_ocr_canonicalizes_raw_dir_for_explicit_page_number(tmp_path, monkey
     assert not (tmp_path / "run" / "ocr_raw" / "scan").exists()
 
 
+def test_run_ocr_keeps_colliding_page_stems_isolated(tmp_path, monkeypatch) -> None:
+    class CollidingStemGlmOcr(FakeGlmOcr):
+        def parse(self, input_path: str):
+            return FakeResult(
+                markdown_result=f"# {Path(input_path).parent.name}",
+                json_result={"source_dir": Path(input_path).parent.name},
+                artifact_stem=Path(input_path).stem,
+            )
+
+    _patch_parser_cls(monkeypatch, CollidingStemGlmOcr)
+    first = tmp_path / "first" / "page-0001.png"
+    second = tmp_path / "second" / "page-0001.png"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    _write_test_image(first)
+    _write_test_image(second)
+
+    result = run_ocr([str(first), str(second)], tmp_path / "run", page_numbers=[1, 5])
+
+    first_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    second_model_path = tmp_path / "run" / "ocr_raw" / "page-0005" / "page-0001_model.json"
+    assert result["json"]["pages"][0]["sdk_json_path"] == str(first_model_path)
+    assert result["json"]["pages"][1]["sdk_json_path"] == str(second_model_path)
+    assert json.loads(first_model_path.read_text(encoding="utf-8")) == {"source_dir": "first"}
+    assert json.loads(second_model_path.read_text(encoding="utf-8")) == {"source_dir": "second"}
+
+
 def test_prepare_review_canonicalizes_raw_dir_for_explicit_page_number(
     tmp_path,
     monkeypatch,

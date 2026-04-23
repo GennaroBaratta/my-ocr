@@ -7,6 +7,7 @@ from importlib import import_module
 from pathlib import Path
 import shutil
 import sys
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from .ingest import IMAGE_SUFFIXES
@@ -176,12 +177,7 @@ def prepare_review_artifacts(
                     "GLM-OCR result.save() is required to load saved *_model.json for review prep."
                 )
 
-            result.save(output_dir=str(paths.raw_dir))
-            sdk_json_path = _resolve_saved_model_json_path(
-                paths.raw_dir,
-                page_path,
-                page_number,
-            )
+            sdk_json_path = _save_result_to_raw_dir(result, paths.raw_dir, page_path, page_number)
             sdk_json = load_json(sdk_json_path)
             blocks = extract_layout_blocks(sdk_json)
             coord_space = _detect_coord_space(blocks, page_path)
@@ -278,10 +274,9 @@ def _run_page_ocr(
     if not hasattr(result, "save"):
         raise RuntimeError("GLM-OCR result.save() is required to load saved *_model.json.")
 
-    result.save(output_dir=str(paths.raw_dir))
+    sdk_json_path = _save_result_to_raw_dir(result, paths.raw_dir, page_path, page_number)
 
     sdk_markdown = (getattr(result, "markdown_result", "") or "").strip()
-    sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path, page_number)
     sdk_json = load_json(sdk_json_path)
     blocks = extract_layout_blocks(sdk_json)
     coord_space = _detect_coord_space(blocks, page_path)
@@ -669,18 +664,32 @@ def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
     return detect_bbox_coord_space(blocks, width=width, height=height)
 
 
-def _resolve_saved_model_json_path(raw_dir: str | Path, page_path: str, page_number: int) -> Path:
-    page_stem = Path(page_path).stem
+def _save_result_to_raw_dir(
+    result: Any,
+    raw_dir: str | Path,
+    page_path: str,
+    page_number: int,
+) -> Path:
     raw_root = Path(raw_dir)
-    source_dir = raw_root / page_stem
+    raw_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=f".page-{page_number:04d}-", dir=raw_root) as save_root:
+        result.save(output_dir=save_root)
+        return _publish_saved_model_json_path(save_root, raw_root, page_path, page_number)
+
+
+def _publish_saved_model_json_path(
+    save_root: str | Path,
+    raw_root: str | Path,
+    page_path: str,
+    page_number: int,
+) -> Path:
+    page_stem = Path(page_path).stem
+    source_dir = Path(save_root) / page_stem
     model_path = source_dir / f"{page_stem}_model.json"
     if not model_path.exists():
         raise FileNotFoundError(f"Missing saved GLM-OCR model JSON: {model_path}")
 
-    target_dir = raw_root / f"page-{page_number:04d}"
-    if source_dir == target_dir:
-        return model_path
-
+    target_dir = Path(raw_root) / f"page-{page_number:04d}"
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.parent.mkdir(parents=True, exist_ok=True)
