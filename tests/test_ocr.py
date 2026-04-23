@@ -958,6 +958,39 @@ def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> No
     )
 
 
+def test_run_ocr_canonicalizes_raw_dir_for_explicit_page_number(tmp_path, monkeypatch) -> None:
+    _patch_parser_cls(monkeypatch, FakeGlmOcr)
+    source = tmp_path / "scan.png"
+    _write_test_image(source)
+
+    result = run_ocr([str(source)], tmp_path / "run", page_numbers=[5])
+
+    expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0005" / "scan_model.json"
+    page = result["json"]["pages"][0]
+    assert page["page_number"] == 5
+    assert page["sdk_json_path"] == str(expected_model_path)
+    assert expected_model_path.exists()
+    assert not (tmp_path / "run" / "ocr_raw" / "scan").exists()
+
+
+def test_prepare_review_canonicalizes_raw_dir_for_explicit_page_number(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _patch_parser_cls(monkeypatch, FakeGlmOcr)
+    source = tmp_path / "scan.png"
+    _write_test_image(source)
+
+    result = prepare_review_artifacts([str(source)], tmp_path / "review", page_numbers=[5])
+
+    expected_model_path = tmp_path / "review" / "ocr_raw" / "page-0005" / "scan_model.json"
+    page = result["reviewed_layout"]["pages"][0]
+    assert page["page_number"] == 5
+    assert page["source_sdk_json_path"] == str(expected_model_path)
+    assert expected_model_path.exists()
+    assert not (tmp_path / "review" / "ocr_raw" / "scan").exists()
+
+
 def test_prepare_review_artifacts_preserves_saved_block_text(tmp_path, monkeypatch) -> None:
     class ReviewPrepParser(FakeGlmOcr):
         parse_calls: list[str] = []

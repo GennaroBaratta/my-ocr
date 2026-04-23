@@ -899,6 +899,7 @@ def test_prepare_review_page_workflow_resolves_sparse_renamed_page(tmp_path) -> 
     assert reviewed_layout["pages"][0]["source_sdk_json_path"] == str(
         run_dir / "ocr_raw" / "page-0005" / "page-0005_model.json"
     )
+    assert Path(reviewed_layout["pages"][0]["source_sdk_json_path"]).exists()
 
 
 def test_prepare_review_page_workflow_preserves_ocr_only_pages_when_review_missing(tmp_path) -> None:
@@ -1401,6 +1402,7 @@ def test_run_reviewed_ocr_page_workflow_resolves_sparse_renamed_page(tmp_path) -
     assert ocr_payload["pages"][0]["sdk_json_path"] == str(
         run_dir / "ocr_raw" / "page-0005" / "page-0005_model.json"
     )
+    assert Path(ocr_payload["pages"][0]["sdk_json_path"]).exists()
     assert (run_dir / "ocr.md").read_text(encoding="utf-8") == "# New Page 5"
 
 

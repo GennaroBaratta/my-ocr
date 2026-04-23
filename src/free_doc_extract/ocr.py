@@ -5,6 +5,7 @@ from contextlib import suppress
 import gc
 from importlib import import_module
 from pathlib import Path
+import shutil
 import sys
 from typing import Any
 
@@ -176,7 +177,11 @@ def prepare_review_artifacts(
                 )
 
             result.save(output_dir=str(paths.raw_dir))
-            sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path)
+            sdk_json_path = _resolve_saved_model_json_path(
+                paths.raw_dir,
+                page_path,
+                page_number,
+            )
             sdk_json = load_json(sdk_json_path)
             blocks = extract_layout_blocks(sdk_json)
             coord_space = _detect_coord_space(blocks, page_path)
@@ -276,7 +281,7 @@ def _run_page_ocr(
     result.save(output_dir=str(paths.raw_dir))
 
     sdk_markdown = (getattr(result, "markdown_result", "") or "").strip()
-    sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path)
+    sdk_json_path = _resolve_saved_model_json_path(paths.raw_dir, page_path, page_number)
     sdk_json = load_json(sdk_json_path)
     blocks = extract_layout_blocks(sdk_json)
     coord_space = _detect_coord_space(blocks, page_path)
@@ -664,12 +669,23 @@ def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
     return detect_bbox_coord_space(blocks, width=width, height=height)
 
 
-def _resolve_saved_model_json_path(raw_dir: str | Path, page_path: str) -> Path:
+def _resolve_saved_model_json_path(raw_dir: str | Path, page_path: str, page_number: int) -> Path:
     page_stem = Path(page_path).stem
-    model_path = Path(raw_dir) / page_stem / f"{page_stem}_model.json"
+    raw_root = Path(raw_dir)
+    source_dir = raw_root / page_stem
+    model_path = source_dir / f"{page_stem}_model.json"
     if not model_path.exists():
         raise FileNotFoundError(f"Missing saved GLM-OCR model JSON: {model_path}")
-    return model_path
+
+    target_dir = raw_root / f"page-{page_number:04d}"
+    if source_dir == target_dir:
+        return model_path
+
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source_dir), str(target_dir))
+    return target_dir / model_path.name
 
 
 def _recognize_full_page_markdown(
