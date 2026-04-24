@@ -60,7 +60,6 @@ def run_ocr(
     )
     _emit_layout_profile_warning(layout_diagnostics)
 
-    parser_cls = _load_glmocr_parser()
     paths = RunPaths.from_run_dir(run_dir)
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
@@ -76,28 +75,55 @@ def run_ocr(
     fallback_pages: list[dict[str, Any]] = []
     source_counts: dict[str, int] = {}
 
-    with parser_cls(config_path=config_path, layout_device=layout_device, _dotted=layout_dotted) as parser:
+    parser_cls: type | None = None
+    parser: Any | None = None
+    try:
         for page_number, page_path in page_inputs:
-            page_result, fallback_result = _run_page_ocr(
-                parser,
-                page_path,
-                page_number,
-                paths,
-                parser_cls=parser_cls,
-                config_path=config_path,
-                layout_device=layout_device,
-                layout_dotted=layout_dotted,
-                model=model,
-                endpoint=endpoint,
-                num_ctx=num_ctx,
-                reviewed_layout_page=reviewed_layout_pages.get(page_number),
-                reviewed_layout_path=reviewed_layout_path,
-            )
+            reviewed_layout_page = reviewed_layout_pages.get(page_number)
+            if reviewed_layout_page is not None:
+                page_result, fallback_result = _run_page_ocr_from_reviewed_layout(
+                    page_path,
+                    page_number,
+                    paths,
+                    model=model,
+                    endpoint=endpoint,
+                    num_ctx=num_ctx,
+                    reviewed_layout_page=reviewed_layout_page,
+                    reviewed_layout_path=reviewed_layout_path,
+                )
+            else:
+                if parser_cls is None:
+                    parser_cls = _load_glmocr_parser()
+                if parser is None:
+                    parser = parser_cls(
+                        config_path=config_path,
+                        layout_device=layout_device,
+                        _dotted=layout_dotted,
+                    )
+                    parser.__enter__()
+                page_result, fallback_result = _run_page_ocr(
+                    parser,
+                    page_path,
+                    page_number,
+                    paths,
+                    parser_cls=parser_cls,
+                    config_path=config_path,
+                    layout_device=layout_device,
+                    layout_dotted=layout_dotted,
+                    model=model,
+                    endpoint=endpoint,
+                    num_ctx=num_ctx,
+                    reviewed_layout_page=None,
+                    reviewed_layout_path=reviewed_layout_path,
+                )
             pages.append(page_result)
             source = str(page_result["markdown_source"])
             source_counts[source] = source_counts.get(source, 0) + 1
             if fallback_result is not None:
                 fallback_pages.append(fallback_result)
+    finally:
+        if parser is not None:
+            parser.__exit__(None, None, None)
 
     markdown = "\n\n".join(page["markdown"] for page in pages if page["markdown"].strip())
     json_result = {
@@ -290,6 +316,78 @@ def _run_page_ocr(
     else:
         page_layout, page_coord_space = reviewed_layout
         layout_source = "reviewed_layout"
+
+    return _finalize_page_ocr(
+        page_path=page_path,
+        page_number=page_number,
+        paths=paths,
+        sdk_markdown=sdk_markdown,
+        sdk_json_path=sdk_json_path,
+        page_layout=page_layout,
+        page_coord_space=page_coord_space,
+        layout_source=layout_source,
+        model=model,
+        endpoint=endpoint,
+        num_ctx=num_ctx,
+        reviewed_layout_path=reviewed_layout_path,
+        include_reviewed_layout_path=reviewed_layout is not None,
+    )
+
+
+def _run_page_ocr_from_reviewed_layout(
+    page_path: str,
+    page_number: int,
+    paths: RunPaths,
+    *,
+    model: str,
+    endpoint: str,
+    num_ctx: int,
+    reviewed_layout_page: dict[str, Any],
+    reviewed_layout_path: str | Path | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    reviewed_layout = _resolve_reviewed_layout_page(reviewed_layout_page)
+    if reviewed_layout is None:
+        raise RuntimeError(f"Reviewed layout is missing page {page_number}.")
+    page_layout, page_coord_space = reviewed_layout
+    sdk_json_path = _write_page_layout_to_raw_dir(
+        page_layout,
+        paths.raw_dir,
+        page_path,
+        page_number,
+    )
+    return _finalize_page_ocr(
+        page_path=page_path,
+        page_number=page_number,
+        paths=paths,
+        sdk_markdown="",
+        sdk_json_path=sdk_json_path,
+        page_layout=page_layout,
+        page_coord_space=page_coord_space,
+        layout_source="reviewed_layout",
+        model=model,
+        endpoint=endpoint,
+        num_ctx=num_ctx,
+        reviewed_layout_path=reviewed_layout_path,
+        include_reviewed_layout_path=reviewed_layout_path is not None,
+    )
+
+
+def _finalize_page_ocr(
+    *,
+    page_path: str,
+    page_number: int,
+    paths: RunPaths,
+    sdk_markdown: str,
+    sdk_json_path: Path,
+    page_layout: dict[str, Any],
+    page_coord_space: str,
+    layout_source: str,
+    model: str,
+    endpoint: str,
+    num_ctx: int,
+    reviewed_layout_path: str | Path | None,
+    include_reviewed_layout_path: bool,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     plan = plan_page_ocr(sdk_markdown, page_layout, coord_space=page_coord_space)
 
     fallback_result: dict[str, Any] | None = None
@@ -364,7 +462,7 @@ def _run_page_ocr(
             "fallback_assessment": plan.assessment,
             **(
                 {"reviewed_layout_path": str(reviewed_layout_path)}
-                if reviewed_layout is not None and reviewed_layout_path is not None
+                if include_reviewed_layout_path and reviewed_layout_path is not None
                 else {}
             ),
         },
@@ -670,6 +768,21 @@ def _save_result_to_raw_dir(
     with TemporaryDirectory(prefix=f".page-{page_number:04d}-", dir=raw_root) as save_root:
         result.save(output_dir=save_root)
         return _publish_saved_model_json_path(save_root, raw_root, page_path, page_number)
+
+
+def _write_page_layout_to_raw_dir(
+    page_layout: dict[str, Any],
+    raw_dir: str | Path,
+    page_path: str,
+    page_number: int,
+) -> Path:
+    target_dir = Path(raw_dir) / f"page-{page_number:04d}"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    model_path = target_dir / f"{Path(page_path).stem}_model.json"
+    write_json(model_path, page_layout)
+    return model_path
 
 
 def _publish_saved_model_json_path(

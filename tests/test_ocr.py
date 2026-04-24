@@ -873,22 +873,15 @@ def test_run_ocr_persists_normalized_table_markdown(tmp_path, monkeypatch) -> No
 def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class EmptyGlmOcr(FakeGlmOcr):
-        def parse(self, input_path: str):
-            self.calls.append(input_path)
-            return FakeResult(
-                markdown_result="",
-                json_result={},
-                saved_model_json={"blocks": []},
-                artifact_stem=Path(input_path).stem,
-            )
-
     def fake_crop_fallback(**kwargs):
         captured["page_json"] = kwargs["page_json"]
         captured["coord_space"] = kwargs["coord_space"]
         return "review-driven text", []
 
-    _patch_parser_cls(monkeypatch, EmptyGlmOcr)
+    def fail_parser_load():
+        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+
+    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
     monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
@@ -930,6 +923,9 @@ def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, mo
     assert result["markdown"] == "review-driven text"
     assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
     assert result["json"]["pages"][0]["reviewed_layout_path"] == str(reviewed_layout_path)
+    assert json.loads(Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8")) == {
+        "blocks": [{"index": 0, "label": "table", "content": "", "bbox_2d": [2, 3, 9, 10]}]
+    }
     assert result["json"]["summary"]["reviewed_layout"] == {
         "path": str(reviewed_layout_path),
         "page_count": 1,

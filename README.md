@@ -129,7 +129,7 @@ ollama serve
 
 Default OCR model: `glm-ocr-8k:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
 
-The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, which defaults to `PaddlePaddle/PP-DocLayoutV3_safetensors`. Transformers may fetch that checkpoint on the first run if your Hugging Face cache is empty; after that, layout recognition reuses the local cache and keeps the loaded detector in memory across pages for the current run. To pin storage explicitly, set `pipeline.layout.model_dir` to a local checkpoint directory.
+The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, which defaults to `PaddlePaddle/PP-DocLayoutV3_safetensors`. Transformers may fetch that checkpoint on the first run if your Hugging Face cache is empty; after that, layout recognition reuses the local cache and keeps the loaded detector in memory across pages for the current run. Review-first OCR uses the saved `reviewed_layout.json` directly, so the Run OCR step does not start the layout detector again. To pin storage explicitly, set `pipeline.layout.model_dir` to a local checkpoint directory.
 
 ### Launch the UI
 
