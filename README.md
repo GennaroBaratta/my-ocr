@@ -101,6 +101,7 @@ Clean reading layout for comparing OCR markdown against the page preview before 
 - Python `3.11`, `3.12`, or `3.13`
 - [`uv`](https://docs.astral.sh/uv/)
 - [Ollama](https://ollama.com/) running locally
+- NVIDIA driver for CUDA acceleration on Windows or Linux
 
 ### Install
 
@@ -108,6 +109,14 @@ Clean reading layout for comparing OCR markdown against the page preview before 
 uv python install 3.11
 uv venv --python 3.11
 uv sync --group dev --extra pdf --extra glmocr
+```
+
+The project pins PyTorch and TorchVision through uv's `tool.uv.sources` so Windows and Linux installs use the CUDA 13.0 wheels from `https://download.pytorch.org/whl/cu130`. On macOS, uv falls back to the normal PyPI wheels because PyTorch does not publish CUDA builds for macOS.
+
+Verify the installed build:
+
+```bash
+uv run python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
 ```
 
 ### Pull the OCR model
@@ -238,7 +247,7 @@ make lint     # uv run ruff check src tests
 ## Make Targets
 
 ```bash
-make install                 # uv sync with dev + pdf + glmocr extras
+make install                 # uv sync with dev + dev-mcp + pdf + glmocr extras
 make test                    # run pytest
 make lint                    # run ruff
 make report RUN_ID=demo001   # regenerate evaluation report for a run
@@ -247,6 +256,7 @@ make report RUN_ID=demo001   # regenerate evaluation report for a run
 ## Known Limits
 
 - PDF rasterization requires the `pdf` extra.
+- CUDA acceleration requires a compatible NVIDIA driver.
 - OCR and structured extraction both assume a local Ollama setup is available.
 - The rules extractor is intentionally narrow and should be treated as a baseline.
 - Very large or visually dense pages can stress local inference latency.
