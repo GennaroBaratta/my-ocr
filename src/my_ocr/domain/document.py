@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .utils import collapse_whitespace
+from .text import collapse_whitespace
 
 
 FIELD_NAMES = (

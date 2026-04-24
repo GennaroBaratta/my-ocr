@@ -19,4 +19,4 @@ lint:
 	$(UV) run ruff check src tests
 
 report:
-	$(UV) run $(PYTHON) -m my_ocr.cli eval --gold-dir data/gold --pred-dir $(PRED_DIR) --output $(REPORT)
+	$(UV) run my-ocr eval --gold-dir data/gold --pred-dir $(PRED_DIR) --output $(REPORT)

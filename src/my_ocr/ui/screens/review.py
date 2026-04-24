@@ -390,7 +390,7 @@ def _start_reviewed_ocr(
     progress_ring: ft.ProgressRing,
     status_text: ft.Text,
 ) -> None:
-    from my_ocr.workflows import run_reviewed_ocr_workflow
+    from my_ocr.application.use_cases.ocr import run_reviewed_ocr_workflow
 
     if not state.run_id:
         return
@@ -444,7 +444,7 @@ def _start_redetect_layout(
     status_text: ft.Text,
     rebuild: Callable[[], None],
 ) -> None:
-    from my_ocr.workflows import prepare_review_workflow
+    from my_ocr.application.use_cases.ocr import prepare_review_workflow
 
     if not state.run_id or not state.run_paths:
         return

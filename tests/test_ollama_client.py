@@ -5,7 +5,7 @@ from urllib.error import URLError
 
 import pytest
 
-from my_ocr.ollama_client import post_json
+from my_ocr.adapters.outbound.llm.ollama_client import post_json
 
 
 def test_post_json_wraps_remote_disconnect() -> None:

@@ -4,8 +4,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .settings import DEFAULT_RUN_ROOT
-from .utils import ensure_dir, slugify, timestamp_id
+from my_ocr.adapters.outbound.config.settings import DEFAULT_RUN_ROOT
+
+from .json_store import ensure_dir, slugify, timestamp_id
 
 
 @dataclass(frozen=True, slots=True)

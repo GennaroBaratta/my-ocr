@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 from importlib import import_module
-import re
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from .evaluate import evaluate_directories, write_markdown_report
-from .extract_rules import extract_from_markdown
-from .ingest import normalize_document
-from .ocr_fallback import detect_bbox_coord_space, extract_layout_blocks
-from .ocr import prepare_review_artifacts, run_ocr
-from .page_identity import (
+from my_ocr.application.services.rules_extractor import extract_from_markdown
+from my_ocr.application.services.structured_validation import validate_structured_prediction
+from my_ocr.application.use_cases.evaluation import evaluate_directories, write_markdown_report
+from my_ocr.domain.layout import detect_bbox_coord_space, extract_layout_blocks
+from my_ocr.domain.page_identity import (
     infer_page_number,
     page_numbers_by_index,
     resolve_page_path_for_number as resolve_page_path_for_number_from_payloads,
 )
-from .paths import RunPaths
-from .review_artifacts import (
+from my_ocr.domain.review_layout import (
     REVIEW_LAYOUT_VERSION,
     build_review_page_from_layout,
     build_review_layout_payload,
@@ -26,12 +23,53 @@ from .review_artifacts import (
     review_layout_pages_by_number,
     save_review_layout_payload,
 )
-from .settings import (
-    DEFAULT_CONFIG_PATH,
-    DEFAULT_LAYOUT_DEVICE,
-    DEFAULT_RUN_ROOT,
-)
-from .utils import collapse_whitespace, load_json, write_json
+
+DEFAULT_RUN_ROOT = "data/runs"
+DEFAULT_CONFIG_PATH = "config/local.yaml"
+DEFAULT_LAYOUT_DEVICE = "cuda"
+
+
+class RunPaths:
+    @classmethod
+    def from_input(cls, *args: Any, **kwargs: Any) -> Any:
+        return _run_paths_cls().from_input(*args, **kwargs)
+
+    @classmethod
+    def from_named_run(cls, *args: Any, **kwargs: Any) -> Any:
+        return _run_paths_cls().from_named_run(*args, **kwargs)
+
+    @classmethod
+    def from_run_dir(cls, *args: Any, **kwargs: Any) -> Any:
+        return _run_paths_cls().from_run_dir(*args, **kwargs)
+
+
+def _run_paths_cls() -> Any:
+    return import_module("my_ocr.adapters.outbound.filesystem.run_paths").RunPaths
+
+
+def normalize_document(input_path: str, run_dir: str | Path) -> list[str]:
+    adapter = import_module("my_ocr.adapters.outbound.filesystem.ingestion")
+    return adapter.normalize_document(input_path, run_dir)
+
+
+def run_ocr(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    adapter = import_module("my_ocr.adapters.outbound.ocr.glmocr_engine")
+    return adapter.run_ocr(*args, **kwargs)
+
+
+def prepare_review_artifacts(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    adapter = import_module("my_ocr.adapters.outbound.ocr.glmocr_engine")
+    return adapter.prepare_review_artifacts(*args, **kwargs)
+
+
+def load_json(path: str | Path) -> Any:
+    adapter = import_module("my_ocr.adapters.outbound.filesystem.json_store")
+    return adapter.load_json(path)
+
+
+def write_json(path: str | Path, payload: Any) -> None:
+    adapter = import_module("my_ocr.adapters.outbound.filesystem.json_store")
+    adapter.write_json(path, payload)
 
 
 def run_ocr_workflow(
@@ -316,13 +354,11 @@ def run_structured_workflow(
     write_json_fn: Callable[[str | Path, Any], None] = write_json,
 ) -> None:
     if extract_structured_fn is None:
-        from .experimental.extract_glmocr import extract_structured
-
-        extract_structured_fn = extract_structured
+        structured_adapter = import_module("my_ocr.adapters.outbound.llm.structured_extractor")
+        extract_structured_fn = structured_adapter.extract_structured
     if save_structured_result_fn is None:
-        from .experimental.extract_glmocr import save_structured_result
-
-        save_structured_result_fn = save_structured_result
+        structured_adapter = import_module("my_ocr.adapters.outbound.llm.structured_extractor")
+        save_structured_result_fn = structured_adapter.save_structured_result
 
     paths = RunPaths.from_named_run(run, run_root=run_root)
     page_paths = paths.list_page_paths()
@@ -360,7 +396,7 @@ def run_structured_workflow(
         )
         _clear_structured_outputs(paths, keep_metadata=True)
         return
-    validation = _validate_structured_prediction(prediction, source_text=markdown_text)
+    validation = validate_structured_prediction(prediction, source_text=markdown_text)
     canonical_prediction = prediction
     canonical_source = "glmocr_structured"
     if not validation["ok"] and paths.rules_prediction_path.exists():
@@ -1213,61 +1249,3 @@ def _load_existing_input_path(paths: RunPaths) -> str:
         return str(paths.run_dir)
     input_path = payload.get("input_path")
     return str(input_path) if input_path else str(paths.run_dir)
-
-
-def _validate_structured_prediction(
-    prediction: dict[str, Any], *, source_text: str | None = None
-) -> dict[str, Any]:
-    reasons: list[str] = []
-    scalar_field_names = (
-        "document_type",
-        "title",
-        "institution",
-        "date",
-        "language",
-        "summary_line",
-    )
-    normalized_scalars = [
-        collapse_whitespace(str(prediction.get(name, ""))).lower() for name in scalar_field_names
-    ]
-    repeated_placeholder = {value for value in normalized_scalars if value}
-    if len(repeated_placeholder) == 1:
-        placeholder = next(iter(repeated_placeholder))
-        if placeholder in {"document", "unknown", "n/a", "none", "null"}:
-            reasons.append(f"all scalar fields collapsed to placeholder value {placeholder!r}")
-
-    authors = prediction.get("authors") or []
-    if not isinstance(authors, list):
-        authors = [str(authors)]
-    suspicious_author_tokens = {"[", "]", "{", "}", "[{", "}]", "```", "json"}
-    if any(collapse_whitespace(str(author)) in suspicious_author_tokens for author in authors):
-        reasons.append("authors field contains JSON fence or bracket fragments")
-
-    summary_line = collapse_whitespace(str(prediction.get("summary_line", "")))
-    if summary_line.lower().startswith("required:"):
-        reasons.append("summary_line appears to echo extraction instructions")
-
-    if source_text:
-        normalized_source_text = _normalize_validation_text(source_text)
-        for author in authors:
-            author_text = collapse_whitespace(str(author))
-            if author_text and not _text_present_in_source(author_text, normalized_source_text):
-                reasons.append(f"author {author_text!r} not found in OCR text")
-
-        for field_name in ("institution", "date"):
-            field_value = collapse_whitespace(str(prediction.get(field_name, "")))
-            if field_value and not _text_present_in_source(field_value, normalized_source_text):
-                reasons.append(f"{field_name} value {field_value!r} not found in OCR text")
-
-    return {"ok": not reasons, "reasons": reasons}
-
-
-def _normalize_validation_text(value: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value.lower())).strip()
-
-
-def _text_present_in_source(value: str, normalized_source_text: str) -> bool:
-    normalized_value = _normalize_validation_text(value)
-    if not normalized_value:
-        return True
-    return normalized_value in normalized_source_text

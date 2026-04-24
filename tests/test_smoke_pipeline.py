@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from my_ocr import cli
-from my_ocr.experimental import extract_glmocr
+from my_ocr.adapters.inbound import cli
+from my_ocr.adapters.outbound.llm import structured_extractor as extract_glmocr
 
 
 def test_smoke_pipeline_with_stubbed_ocr(tmp_path, monkeypatch) -> None:

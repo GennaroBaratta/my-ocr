@@ -10,18 +10,23 @@ import sys
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from .ingest import IMAGE_SUFFIXES
-from .ocr_fallback import (
+from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mod
+from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
+from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
+from my_ocr.adapters.outbound.filesystem.json_store import load_json, write_json, write_text
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.adapters.outbound.ocr.fallback_ocr import (
+    recognize_full_page,
+    run_crop_fallback_for_page,
+)
+from my_ocr.domain.layout import (
     detect_bbox_coord_space,
     extract_layout_blocks,
     has_meaningful_text,
     plan_page_ocr,
-    recognize_full_page,
-    run_crop_fallback_for_page,
 )
-from .page_identity import infer_page_number
-from .paths import RunPaths
-from .review_artifacts import (
+from my_ocr.domain.page_identity import infer_page_number
+from my_ocr.domain.review_layout import (
     build_review_layout_payload,
     build_review_page_from_layout,
     load_review_layout_payload,
@@ -29,9 +34,6 @@ from .review_artifacts import (
     review_page_to_layout_payload,
     save_review_layout_payload,
 )
-from .settings import resolve_ocr_api_client
-from .utils import load_json, write_json, write_text
-from . import layout_profile as _layout_profile_mod
 
 
 def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:

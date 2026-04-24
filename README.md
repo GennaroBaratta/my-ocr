@@ -126,7 +126,7 @@ ollama pull glm-ocr:latest
 ollama serve
 ```
 
-Default OCR endpoint: `http://localhost:11434/api/generate`.
+Default OCR model: `glm-ocr:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
 
 ### Launch the UI
 
@@ -154,10 +154,10 @@ End-to-end example:
 
 ```bash
 # OCR + rules extraction in one shot
-uv run python -m my_ocr.cli run docs/demo/PublicWaterMassMailing.pdf --run demo001
+uv run my-ocr run docs/demo/PublicWaterMassMailing.pdf --run demo001
 
 # Optional: evaluate predictions against hand-labeled gold data
-uv run python -m my_ocr.cli eval \
+uv run my-ocr eval \
   --gold-dir data/gold \
   --pred-dir data/runs/demo001/predictions \
   --output data/reports/demo001.md
@@ -218,14 +218,23 @@ Choices that shaped this codebase, and what they cost:
 
 ```text
 src/my_ocr/
-  cli.py
-  ingest.py
-  ocr.py
-  ocr_fallback.py
-  workflows.py
-  review_artifacts.py
-  evaluate.py
-  experimental/extract_glmocr.py
+  domain/
+    document.py
+    layout.py
+    page_identity.py
+    review_layout.py
+    text.py
+  application/
+    ports.py
+    services/
+    use_cases/
+  adapters/
+    inbound/cli.py
+    outbound/
+      config/
+      filesystem/
+      llm/
+      ocr/
   ui/
 
 data/
@@ -237,7 +246,7 @@ data/
 
 ## Testing
 
-The repo ships with a pytest suite (18 modules under `tests/`) covering CLI workflows, OCR glue code, review artifacts, evaluation, and the Flet UI components.
+The repo ships with a pytest suite covering CLI workflows, OCR glue code, review artifacts, evaluation, architecture boundaries, and the Flet UI components.
 
 ```bash
 make test     # uv run pytest

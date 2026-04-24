@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from my_ocr.paths import RunPaths
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
 
 
 @dataclass(frozen=True, slots=True)

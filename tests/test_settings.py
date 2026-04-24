@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from my_ocr.settings import (
+from my_ocr.adapters.outbound.config.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,

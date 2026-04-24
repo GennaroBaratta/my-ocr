@@ -4,6 +4,10 @@ import re
 from html.parser import HTMLParser
 
 
+def collapse_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
 class _TableHtmlToTextParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()

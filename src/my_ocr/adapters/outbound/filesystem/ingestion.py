@@ -4,7 +4,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .utils import ensure_dir
+from .json_store import ensure_dir
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 

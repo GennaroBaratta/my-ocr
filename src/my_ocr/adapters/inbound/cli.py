@@ -5,21 +5,27 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .evaluate import evaluate_directories, write_markdown_report
-from .extract_rules import extract_from_markdown
-from .ingest import normalize_document
-from .ocr import run_ocr
-from .paths import RunPaths
-from .settings import DEFAULT_CONFIG_PATH, DEFAULT_LAYOUT_DEVICE, DEFAULT_RUN_ROOT
-from .utils import write_json
-from .workflows import (
+from my_ocr.adapters.outbound.config.settings import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_LAYOUT_DEVICE,
+    DEFAULT_RUN_ROOT,
+)
+from my_ocr.adapters.outbound.filesystem.ingestion import normalize_document
+from my_ocr.adapters.outbound.filesystem.json_store import write_json
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.adapters.outbound.ocr.glmocr_engine import run_ocr
+from my_ocr.application.services.rules_extractor import extract_from_markdown
+from my_ocr.application.use_cases.evaluation import (
+    evaluate_directories,
     evaluate_workflow,
+    write_markdown_report,
+)
+from my_ocr.application.use_cases.extraction import run_rules_workflow, run_structured_workflow
+from my_ocr.application.use_cases.ocr import (
     run_ocr_workflow,
-    run_pipeline_workflow,
-    run_rules_workflow,
-    run_structured_workflow,
     write_run_metadata as workflow_write_run_metadata,
 )
+from my_ocr.application.use_cases.pipeline import run_pipeline_workflow
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,7 +99,10 @@ def cmd_extract_rules(args: argparse.Namespace) -> None:
 
 
 def cmd_extract_glmocr(args: argparse.Namespace) -> None:
-    from .experimental.extract_glmocr import extract_structured, save_structured_result
+    from my_ocr.adapters.outbound.llm.structured_extractor import (
+        extract_structured,
+        save_structured_result,
+    )
 
     run_structured_workflow(
         args.run,

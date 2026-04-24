@@ -6,18 +6,18 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from ..ollama_client import encode_image_file, post_json
-from ..paths import RunPaths
-from ..schema import JSON_SCHEMA, DocumentFields
-from ..settings import (
+from my_ocr.adapters.outbound.config.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
     resolve_ocr_api_client,
 )
-from ..text_normalization import replace_html_tables
-from ..utils import write_json
+from my_ocr.adapters.outbound.filesystem.json_store import write_json
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
+from my_ocr.domain.document import JSON_SCHEMA, DocumentFields
+from my_ocr.domain.text import replace_html_tables
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 RAW_BODY_METADATA_KEY = "_raw_body"

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
 from pathlib import Path
 from typing import Any
 
-from .ocr_fallback import extract_layout_blocks, normalize_bbox
-from .utils import load_json, write_json
+from .layout import extract_layout_blocks, normalize_bbox
 
 REVIEW_LAYOUT_VERSION = 1
 
@@ -66,7 +66,7 @@ def load_review_layout_payload(path: str | Path) -> dict[str, Any] | None:
     candidate = Path(path)
     if not candidate.exists():
         return None
-    payload = load_json(candidate)
+    payload = json.loads(candidate.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         return None
     pages = payload.get("pages")
@@ -76,7 +76,12 @@ def load_review_layout_payload(path: str | Path) -> dict[str, Any] | None:
 
 
 def save_review_layout_payload(path: str | Path, payload: dict[str, Any]) -> None:
-    write_json(path, payload)
+    candidate = Path(path)
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def review_layout_pages_by_number(payload: dict[str, Any] | None) -> dict[int, dict[str, Any]]:

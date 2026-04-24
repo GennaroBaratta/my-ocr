@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from my_ocr.ocr_fallback import normalize_bbox
-from my_ocr.page_identity import (
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.domain.layout import normalize_bbox
+from my_ocr.domain.page_identity import (
     infer_page_number,
     iter_payload_pages,
     page_numbers_by_index,
@@ -14,8 +15,7 @@ from my_ocr.page_identity import (
     payload_page_index,
     resolve_page_path,
 )
-from my_ocr.paths import RunPaths
-from my_ocr.review_artifacts import (
+from my_ocr.domain.review_layout import (
     build_review_layout_payload,
     load_review_layout_payload,
     save_review_layout_payload,

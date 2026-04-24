@@ -8,20 +8,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from my_ocr import ocr
-from my_ocr import ocr_fallback
-from my_ocr.ocr import prepare_review_artifacts, run_ocr
-from tests.support import (
-    build_reviewed_layout_block,
-    build_reviewed_layout_page,
-)
-from my_ocr.ocr_fallback import (
+from my_ocr.adapters.outbound.ocr import glmocr_engine as ocr
+from my_ocr.adapters.outbound.ocr import fallback_ocr as ocr_fallback
+from my_ocr.adapters.outbound.ocr.glmocr_engine import prepare_review_artifacts, run_ocr
+from my_ocr.adapters.outbound.ocr.fallback_ocr import run_crop_fallback_for_page
+from my_ocr.domain.layout import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
-    normalize_table_html,
-    run_crop_fallback_for_page,
+)
+from my_ocr.domain.text import normalize_table_html
+from tests.support import (
+    build_reviewed_layout_block,
+    build_reviewed_layout_page,
 )
 
 
