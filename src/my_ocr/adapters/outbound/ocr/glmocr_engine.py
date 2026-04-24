@@ -552,7 +552,6 @@ def _build_lazy_glmocr_parser(
             self._started_layout = True
 
         def _ensure_ocr_started(self) -> None:
-            self._release_layout_after_detection()
             if self._ocr_client is None:
                 self._ocr_client = ocr_client_cls(self._config_model.pipeline.ocr_api)
             ocr_client = self._ocr_client
@@ -562,12 +561,6 @@ def _build_lazy_glmocr_parser(
                 return
             ocr_client.start()
             self._started_ocr = True
-
-        def _release_layout_after_detection(self) -> None:
-            if not self._started_layout:
-                return
-            self._layout_detector.stop()
-            self._started_layout = False
 
         def close(self) -> None:
             if self._started_ocr and self._ocr_client is not None:

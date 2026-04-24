@@ -189,20 +189,18 @@ def test_lazy_parser_wrapper_defers_pipeline_start_until_first_parse() -> None:
         "load:/tmp/page-0001.png",
         "layout-start",
         "layout-process",
-        "layout-stop",
         "ocr-init",
         "ocr-start",
         "build-request:text",
         "ocr-process",
         "format",
         "load:/tmp/page-0002.png",
-        "layout-start",
         "layout-process",
-        "layout-stop",
         "build-request:text",
         "ocr-process",
         "format",
         "ocr-stop",
+        "layout-stop",
     ]
     assert first.markdown_result == "# lazy doc"
     assert second.markdown_result == "# lazy doc"
