@@ -5,6 +5,7 @@ from urllib.error import URLError
 
 import pytest
 
+from my_ocr.adapters.outbound.config.settings import DEFAULT_OLLAMA_MODEL
 from my_ocr.adapters.outbound.llm.structured_extractor import (
     _build_structured_markdown_payload,
     _clean_structured_input_text,
@@ -43,7 +44,7 @@ def test_extract_structured_parses_response_and_returns_metadata(tmp_path, monke
         def read(self):
             return json.dumps(
                 {
-                    "model": "glm-ocr:latest",
+                    "model": DEFAULT_OLLAMA_MODEL,
                     "created_at": "2026-01-01T00:00:00Z",
                     "done": True,
                     "response": '```json\n{"document_type": "report", "title": "Sample", "authors": [], "institution": "", "date": "", "language": "en", "summary_line": "Hi"}\n```',
@@ -300,7 +301,7 @@ def test_extract_structured_rejects_missing_response_field(tmp_path, monkeypatch
             return None
 
         def read(self):
-            return json.dumps({"model": "glm-ocr:latest"}).encode("utf-8")
+            return json.dumps({"model": DEFAULT_OLLAMA_MODEL}).encode("utf-8")
 
     monkeypatch.setattr(
         "my_ocr.adapters.outbound.llm.structured_extractor.urlopen",
@@ -315,7 +316,7 @@ def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
     save_structured_result(
         tmp_path,
         {"title": "Sample"},
-        {"model": "glm-ocr:latest", "_raw_body": {"response": '{"title":"Sample"}'}},
+        {"model": DEFAULT_OLLAMA_MODEL, "_raw_body": {"response": '{"title":"Sample"}'}},
     )
 
     pred_dir = tmp_path / "predictions"
@@ -323,7 +324,7 @@ def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
         "title": "Sample"
     }
     assert json.loads((pred_dir / "glmocr_structured_meta.json").read_text(encoding="utf-8")) == {
-        "model": "glm-ocr:latest"
+        "model": DEFAULT_OLLAMA_MODEL
     }
     assert json.loads((pred_dir / "glmocr_structured_raw.json").read_text(encoding="utf-8")) == {
         "response": '{"title":"Sample"}'

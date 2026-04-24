@@ -123,10 +123,11 @@ uv run python -c "import torch; print(torch.__version__); print(torch.cuda.is_av
 
 ```bash
 ollama pull glm-ocr:latest
+ollama create glm-ocr-8k:latest -f Modelfile
 ollama serve
 ```
 
-Default OCR model: `glm-ocr:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
+Default OCR model: `glm-ocr-8k:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
 
 ### Launch the UI
 

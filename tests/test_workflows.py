@@ -16,7 +16,7 @@ from my_ocr.application.use_cases.ocr import (
     run_reviewed_ocr_workflow,
     run_structured_workflow,
 )
-from my_ocr.adapters.outbound.config.settings import DEFAULT_LAYOUT_DEVICE
+from my_ocr.adapters.outbound.config.settings import DEFAULT_LAYOUT_DEVICE, DEFAULT_OLLAMA_MODEL
 from tests.support import (
     build_basic_ocr_result,
     build_fallback_chunk,
@@ -1468,7 +1468,7 @@ def test_run_structured_workflow_uses_rules_as_canonical_when_structured_output_
             "language": "document",
             "summary_line": "document",
         }, {
-            "model": model or "glm-ocr:latest",
+            "model": model or DEFAULT_OLLAMA_MODEL,
             "source": "page_images_first_page",
             "_raw_body": {"response": '{"document_type":"document"}'},
         }
@@ -1490,7 +1490,7 @@ def test_run_structured_workflow_uses_rules_as_canonical_when_structured_output_
     }
     assert json.loads((predictions_dir / "demo003.json").read_text()) == rules_prediction
     assert json.loads((predictions_dir / "glmocr_structured_meta.json").read_text()) == {
-        "model": "glm-ocr:latest",
+        "model": DEFAULT_OLLAMA_MODEL,
         "source": "page_images_first_page",
         "canonical_source": "rules",
         "validation": {
@@ -1534,7 +1534,7 @@ def test_run_structured_workflow_rejects_hallucinated_fields_not_in_ocr_text(tmp
             "language": "English",
             "summary_line": "Required: document_type, title, authors, institution, date, language, summary_line",
         }, {
-            "model": model or "glm-ocr:latest",
+            "model": model or DEFAULT_OLLAMA_MODEL,
             "source": "ocr_markdown",
             "_raw_body": {"response": '{"document_type":"report"}'},
         }
@@ -1547,7 +1547,7 @@ def test_run_structured_workflow_rejects_hallucinated_fields_not_in_ocr_text(tmp
 
     assert json.loads((predictions_dir / "demo009.json").read_text()) == rules_prediction
     assert json.loads((predictions_dir / "glmocr_structured_meta.json").read_text()) == {
-        "model": "glm-ocr:latest",
+        "model": DEFAULT_OLLAMA_MODEL,
         "source": "ocr_markdown",
         "canonical_source": "rules",
         "validation": {
@@ -1613,7 +1613,7 @@ def test_run_structured_workflow_prefers_ocr_markdown_when_available(tmp_path) -
         captured["markdown_text"] = markdown_text
         _ = (config_path, endpoint)
         return {"title": "Demo"}, {
-            "model": model or "glm-ocr:latest",
+            "model": model or DEFAULT_OLLAMA_MODEL,
             "source": "ocr_markdown",
             "_raw_body": {"response": "{}"},
         }

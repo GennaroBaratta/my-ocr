@@ -1,2 +1,5 @@
+# Create with:
+#   ollama create glm-ocr-8k:latest -f Modelfile
 FROM glm-ocr:latest
+
 PARAMETER num_ctx 8192

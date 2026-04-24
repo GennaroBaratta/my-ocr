@@ -75,5 +75,6 @@ pipeline:
     api_host: localhost
     api_port: 11434
     api_path: /api/generate
-    model: glm-ocr:latest
+    model: glm-ocr-8k:latest
+    num_ctx: 8192
     api_mode: ollama_generate
