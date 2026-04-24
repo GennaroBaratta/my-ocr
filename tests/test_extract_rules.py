@@ -1,4 +1,4 @@
-from free_doc_extract.extract_rules import extract_from_markdown
+from my_ocr.extract_rules import extract_from_markdown
 
 
 def test_extract_from_markdown_returns_expected_baseline_fields() -> None:

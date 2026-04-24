@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from free_doc_extract.paths import RunPaths
+from my_ocr.paths import RunPaths
 
 
 @dataclass(frozen=True, slots=True)

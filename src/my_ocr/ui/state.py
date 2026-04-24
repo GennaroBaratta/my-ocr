@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from free_doc_extract.settings import (
+from my_ocr.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_RUN_ROOT,

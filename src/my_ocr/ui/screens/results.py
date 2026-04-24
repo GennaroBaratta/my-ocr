@@ -144,7 +144,7 @@ def build_results_view(
             state.current_page_index = 0
 
     def rerun_page_layout() -> None:
-        from free_doc_extract.workflows import prepare_review_page_workflow
+        from my_ocr.workflows import prepare_review_page_workflow
 
         if not state.run_id or rerun_in_progress:
             return
@@ -180,7 +180,7 @@ def build_results_view(
         page.run_task(do_rerun)
 
     def rerun_page_ocr() -> None:
-        from free_doc_extract.workflows import run_reviewed_ocr_page_workflow
+        from my_ocr.workflows import run_reviewed_ocr_page_workflow
 
         if not state.run_id or rerun_in_progress:
             return

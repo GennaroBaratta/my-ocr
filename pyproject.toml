@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "free-doc-extract"
+name = "my-ocr"
 version = "0.1.0"
 description = "Local OCR and structured document extraction with GLM-OCR and Ollama"
 readme = "README.md"
@@ -52,7 +52,7 @@ ui = [
 ]
 
 [project.scripts]
-free-doc-extract-ui = "free_doc_extract.ui:main"
+my-ocr-ui = "my_ocr.ui:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -29,7 +29,7 @@ def build_mcp(config: DevMcpConfig) -> FastMCP:
     feedback_store = FeedbackBundleStore(config, ui_manager=ui_manager)
 
     mcp = FastMCP(
-        "free-doc-extract-dev-mcp",
+        "my-ocr-dev-mcp",
         json_response=True,
         stateless_http=True,
         streamable_http_path="/",
@@ -42,7 +42,7 @@ def build_mcp(config: DevMcpConfig) -> FastMCP:
         return {
             "ok": True,
             "summary": "Dev MCP sidecar is healthy",
-            "server": "free-doc-extract-dev-mcp",
+            "server": "my-ocr-dev-mcp",
             "host": config.host,
             "port": config.port,
             "ui": status,
@@ -158,7 +158,7 @@ def create_app(
             {
                 "ok": True,
                 "status": "ok",
-                "server": "free-doc-extract-dev-mcp",
+                "server": "my-ocr-dev-mcp",
                 "mcp_path": "/mcp",
                 "repo_root": str(config.repo_root),
             }

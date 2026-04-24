@@ -4,14 +4,14 @@ from typing import cast
 
 import flet as ft
 
-from free_doc_extract.ui import theme
-from free_doc_extract.ui.components.doc_viewer import build_doc_viewer
-from free_doc_extract.ui.state import AppState, BoundingBox, PageData
+from my_ocr.ui import theme
+from my_ocr.ui.components.doc_viewer import build_doc_viewer
+from my_ocr.ui.state import AppState, BoundingBox, PageData
 
 
 def test_doc_viewer_uses_review_overlay_palette_and_alpha_rules(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.doc_viewer.get_image_size",
+        "my_ocr.ui.components.doc_viewer.get_image_size",
         lambda _path: (100, 100),
     )
 

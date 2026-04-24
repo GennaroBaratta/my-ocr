@@ -4,8 +4,8 @@ import json
 from importlib import import_module
 from pathlib import Path
 
-from free_doc_extract.ui.run_repository import RunRepository
-from free_doc_extract.ui.session import BoundingBox, PageData
+from my_ocr.ui.run_repository import RunRepository
+from my_ocr.ui.session import BoundingBox, PageData
 from tests.support import (
     build_ocr_page,
     build_reviewed_layout_block,

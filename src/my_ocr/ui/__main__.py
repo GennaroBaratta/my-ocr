@@ -1,4 +1,4 @@
-"""Allow running the UI with: python -m free_doc_extract.ui"""
+"""Allow running the UI with: python -m my_ocr.ui"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from . import main
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the free-doc-extract Flet UI.")
+    parser = argparse.ArgumentParser(description="Run the my-ocr Flet UI.")
     parser.add_argument("--web", action="store_true", help="Run the UI in browser/web mode.")
     parser.add_argument("--host", default=None, help="Host for web mode.")
     parser.add_argument("--port", default=0, type=int, help="Port for web mode.")

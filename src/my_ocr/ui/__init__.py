@@ -1,4 +1,4 @@
-"""Flet desktop UI for free-doc-extract."""
+"""Flet desktop UI for my-ocr."""
 
 from __future__ import annotations
 

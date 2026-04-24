@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from free_doc_extract import cli
-from free_doc_extract.experimental import extract_glmocr
+from my_ocr import cli
+from my_ocr.experimental import extract_glmocr
 
 
 def test_smoke_pipeline_with_stubbed_ocr(tmp_path, monkeypatch) -> None:

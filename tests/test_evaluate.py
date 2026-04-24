@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from free_doc_extract.evaluate import compare_records, evaluate_directories
+from my_ocr.evaluate import compare_records, evaluate_directories
 
 
 def test_evaluate_directories_tracks_missing_predictions_and_date_normalization(tmp_path) -> None:

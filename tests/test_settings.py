@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from free_doc_extract.settings import (
+from my_ocr.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,

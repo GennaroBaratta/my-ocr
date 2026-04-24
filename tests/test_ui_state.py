@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from importlib import import_module
 
-from free_doc_extract.ui.state import AppState, BoundingBox, PageData
+from my_ocr.ui.state import AppState, BoundingBox, PageData
 from tests.support import (
     build_reviewed_layout_block,
     build_reviewed_layout_page,

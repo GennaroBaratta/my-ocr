@@ -158,7 +158,7 @@ def _start_review_prep(
     import asyncio
     import functools
 
-    from free_doc_extract.workflows import prepare_review_workflow
+    from my_ocr.workflows import prepare_review_workflow
 
     loading_overlay.visible = True
     progress_ring.visible = True

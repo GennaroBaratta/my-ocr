@@ -22,8 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import free_doc_extract.layout_profile as lp_mod
-from free_doc_extract.layout_profile import resolve_layout_profile
+import my_ocr.layout_profile as lp_mod
+from my_ocr.layout_profile import resolve_layout_profile
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@ def test_empty_id2label_raises(tmp_path: Path) -> None:
 
 
 def test_write_run_metadata_includes_layout_diagnostics(tmp_path: Path) -> None:
-    from free_doc_extract.workflows import write_run_metadata
+    from my_ocr.workflows import write_run_metadata
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -260,7 +260,7 @@ def test_write_run_metadata_includes_layout_diagnostics(tmp_path: Path) -> None:
 
 
 def test_write_run_metadata_omits_layout_diagnostics_when_absent(tmp_path: Path) -> None:
-    from free_doc_extract.workflows import write_run_metadata
+    from my_ocr.workflows import write_run_metadata
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -292,7 +292,7 @@ def test_write_run_metadata_omits_layout_diagnostics_when_absent(tmp_path: Path)
 
 
 def test_run_ocr_workflow_forwards_layout_profile(tmp_path: Path) -> None:
-    from free_doc_extract.workflows import run_ocr_workflow
+    from my_ocr.workflows import run_ocr_workflow
     from tests.support import normalize_to_single_page, write_basic_ocr_outputs
 
     run_root = tmp_path / "runs"
@@ -321,7 +321,7 @@ def test_run_ocr_workflow_forwards_layout_profile(tmp_path: Path) -> None:
 
 
 def test_prepare_review_workflow_forwards_layout_profile(tmp_path: Path) -> None:
-    from free_doc_extract.workflows import prepare_review_workflow
+    from my_ocr.workflows import prepare_review_workflow
     from tests.support import normalize_to_single_page
 
     run_root = tmp_path / "runs"
@@ -359,7 +359,7 @@ def test_prepare_review_workflow_forwards_layout_profile(tmp_path: Path) -> None
 
 
 def test_run_reviewed_ocr_workflow_forwards_layout_profile(tmp_path: Path) -> None:
-    from free_doc_extract.workflows import run_reviewed_ocr_workflow
+    from my_ocr.workflows import run_reviewed_ocr_workflow
     from tests.support import (
         normalize_to_single_page,
         write_basic_ocr_outputs,
@@ -415,7 +415,7 @@ def test_run_reviewed_ocr_workflow_forwards_layout_profile(tmp_path: Path) -> No
 
 
 def test_cli_ocr_parser_accepts_layout_profile() -> None:
-    from free_doc_extract.cli import build_parser
+    from my_ocr.cli import build_parser
 
     parser = build_parser()
     args = parser.parse_args(
@@ -425,7 +425,7 @@ def test_cli_ocr_parser_accepts_layout_profile() -> None:
 
 
 def test_cli_run_parser_accepts_layout_profile() -> None:
-    from free_doc_extract.cli import build_parser
+    from my_ocr.cli import build_parser
 
     parser = build_parser()
     args = parser.parse_args(
@@ -435,7 +435,7 @@ def test_cli_run_parser_accepts_layout_profile() -> None:
 
 
 def test_cli_layout_profile_default_is_auto() -> None:
-    from free_doc_extract.cli import build_parser
+    from my_ocr.cli import build_parser
 
     parser = build_parser()
     args = parser.parse_args(["ocr", "input.pdf"])
@@ -443,7 +443,7 @@ def test_cli_layout_profile_default_is_auto() -> None:
 
 
 def test_cli_rejects_unknown_layout_profile() -> None:
-    from free_doc_extract.cli import build_parser
+    from my_ocr.cli import build_parser
 
     parser = build_parser()
     with pytest.raises(SystemExit):
@@ -454,14 +454,14 @@ def test_cli_rejects_unknown_layout_profile() -> None:
 
 
 def test_app_state_default_layout_profile_is_auto() -> None:
-    from free_doc_extract.ui.state import AppState
+    from my_ocr.ui.state import AppState
 
     state = AppState()
     assert state.layout_profile == "auto"
 
 
 def test_app_state_layout_profile_can_be_overridden() -> None:
-    from free_doc_extract.ui.state import AppState
+    from my_ocr.ui.state import AppState
 
     state = AppState()
     state.layout_profile = "pp_doclayout_formula"

@@ -1,4 +1,4 @@
-from free_doc_extract.schema import DocumentFields, JSON_SCHEMA
+from my_ocr.schema import DocumentFields, JSON_SCHEMA
 
 
 def test_document_fields_normalizes_mapping() -> None:

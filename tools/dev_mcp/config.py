@@ -71,7 +71,7 @@ class DevMcpConfig:
             "run",
             "python",
             "-m",
-            "free_doc_extract.ui",
+            "my_ocr.ui",
             "--web",
             "--host",
             self.ui_host,

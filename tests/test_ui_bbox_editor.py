@@ -5,14 +5,14 @@ from typing import Callable, cast
 
 import flet as ft
 
-from free_doc_extract.ui import theme
-from free_doc_extract.ui.components.bbox_editor import build_bbox_editor
-from free_doc_extract.ui.state import AppState, BoundingBox, PageData
+from my_ocr.ui import theme
+from my_ocr.ui.components.bbox_editor import build_bbox_editor
+from my_ocr.ui.state import AppState, BoundingBox, PageData
 
 
 def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        "my_ocr.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 100),
     )
 
@@ -51,7 +51,7 @@ def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) 
 
 def test_move_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        "my_ocr.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 100),
     )
 
@@ -92,7 +92,7 @@ def test_move_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) ->
 
 def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        "my_ocr.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 100),
     )
 
@@ -173,7 +173,7 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
 
 def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        "my_ocr.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 100),
     )
 

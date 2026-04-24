@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from free_doc_extract import workflows
-from free_doc_extract.workflows import (
+from my_ocr import workflows
+from my_ocr.workflows import (
     prepare_review_page_workflow,
     prepare_review_workflow,
     run_ocr_workflow,
@@ -16,7 +16,7 @@ from free_doc_extract.workflows import (
     run_reviewed_ocr_workflow,
     run_structured_workflow,
 )
-from free_doc_extract.settings import DEFAULT_LAYOUT_DEVICE
+from my_ocr.settings import DEFAULT_LAYOUT_DEVICE
 from tests.support import (
     build_basic_ocr_result,
     build_fallback_chunk,

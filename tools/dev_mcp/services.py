@@ -15,7 +15,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from typing import Any
 
-from free_doc_extract.workflows import run_ocr_workflow
+from my_ocr.workflows import run_ocr_workflow
 
 from .config import DevMcpConfig
 

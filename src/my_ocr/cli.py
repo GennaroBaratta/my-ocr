@@ -23,7 +23,7 @@ from .workflows import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="free-doc-extract")
+    parser = argparse.ArgumentParser(prog="my-ocr")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ocr_parser = subparsers.add_parser("ocr", help="Normalize input and run OCR")

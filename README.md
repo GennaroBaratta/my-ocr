@@ -1,7 +1,7 @@
-# free-doc-extract
+# my-ocr
 
 <p align="center">
-  <img src="docs/screenshots/Screenshot From 2026-04-20 23-39-07.png" alt="free-doc-extract OCR results workspace" width="100%" />
+  <img src="docs/screenshots/Screenshot From 2026-04-20 23-39-07.png" alt="my-ocr OCR results workspace" width="100%" />
 </p>
 
 <p align="center">
@@ -123,10 +123,10 @@ Default OCR endpoint: `http://localhost:11434/api/generate`.
 
 ```bash
 # Desktop
-uv run free-doc-extract-ui
+uv run my-ocr-ui
 
 # Browser
-uv run python -m free_doc_extract.ui --web --host 127.0.0.1 --port 8550
+uv run python -m my_ocr.ui --web --host 127.0.0.1 --port 8550
 ```
 
 ### Run the pipeline (CLI)
@@ -145,10 +145,10 @@ End-to-end example:
 
 ```bash
 # OCR + rules extraction in one shot
-uv run python -m free_doc_extract.cli run docs/demo/PublicWaterMassMailing.pdf --run demo001
+uv run python -m my_ocr.cli run docs/demo/PublicWaterMassMailing.pdf --run demo001
 
 # Optional: evaluate predictions against hand-labeled gold data
-uv run python -m free_doc_extract.cli eval \
+uv run python -m my_ocr.cli eval \
   --gold-dir data/gold \
   --pred-dir data/runs/demo001/predictions \
   --output data/reports/demo001.md
@@ -208,7 +208,7 @@ Choices that shaped this codebase, and what they cost:
 ## Repository Layout
 
 ```text
-src/free_doc_extract/
+src/my_ocr/
   cli.py
   ingest.py
   ocr.py

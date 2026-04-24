@@ -8,14 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from free_doc_extract import ocr
-from free_doc_extract import ocr_fallback
-from free_doc_extract.ocr import prepare_review_artifacts, run_ocr
+from my_ocr import ocr
+from my_ocr import ocr_fallback
+from my_ocr.ocr import prepare_review_artifacts, run_ocr
 from tests.support import (
     build_reviewed_layout_block,
     build_reviewed_layout_page,
 )
-from free_doc_extract.ocr_fallback import (
+from my_ocr.ocr_fallback import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,

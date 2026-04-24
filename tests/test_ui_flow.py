@@ -9,18 +9,18 @@ from typing import Any, Callable, cast
 
 import flet as ft
 
-from free_doc_extract.ui.components.code_display import (
+from my_ocr.ui.components.code_display import (
     _ocr_json_text_for_state,
     _markdown_pages_for_state,
     _raw_page_text_for_state,
     build_code_display,
 )
-from free_doc_extract.ui.components.recent_runs import build_recent_runs
-from free_doc_extract.ui.screens.review import build_review_view
-from free_doc_extract.ui.screens.results import build_results_view
-from free_doc_extract.ui.screens.review import _start_reviewed_ocr
-from free_doc_extract.ui.screens.upload import _start_review_prep
-from free_doc_extract.ui.state import AppState, BoundingBox, PageData
+from my_ocr.ui.components.recent_runs import build_recent_runs
+from my_ocr.ui.screens.review import build_review_view
+from my_ocr.ui.screens.results import build_results_view
+from my_ocr.ui.screens.review import _start_reviewed_ocr
+from my_ocr.ui.screens.upload import _start_review_prep
+from my_ocr.ui.state import AppState, BoundingBox, PageData
 from tests.support import build_ocr_page, build_reviewed_layout_page, write_basic_ocr_outputs
 
 
@@ -54,7 +54,7 @@ def _toolbar_buttons_by_content(toolbar_row: ft.Row) -> dict[str, ft.Control]:
 
 
 def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -125,7 +125,7 @@ def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> N
 
 
 def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     def fake_prepare_review_workflow(_input_path: str, *, run_root: str, **kwargs) -> Path:
         raise RuntimeError(f"bad input under {run_root}")
@@ -165,7 +165,7 @@ def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch)
 
 
 def test_start_review_prep_shows_layout_profile_warning_from_metadata(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -236,7 +236,7 @@ def test_start_review_prep_shows_layout_profile_warning_from_metadata(tmp_path, 
 
 
 def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -325,7 +325,7 @@ def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) ->
 def test_start_reviewed_ocr_shows_layout_profile_warning_from_metadata(
     tmp_path, monkeypatch
 ) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -431,7 +431,7 @@ def test_start_reviewed_ocr_shows_layout_profile_warning_from_metadata(
 
 def test_review_selection_updates_in_place_without_remounting_editor(monkeypatch) -> None:
     monkeypatch.setattr(
-        "free_doc_extract.ui.components.bbox_editor.get_image_size",
+        "my_ocr.ui.components.bbox_editor.get_image_size",
         lambda _path: (100, 120),
     )
 
@@ -796,7 +796,7 @@ def test_results_view_disables_page_markdown_download_without_per_page_ocr_paylo
 
 
 def test_results_view_page_layout_redetect_routes_back_to_review_same_page(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -872,7 +872,7 @@ def test_results_view_page_layout_redetect_routes_back_to_review_same_page(tmp_p
 
 
 def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -969,7 +969,7 @@ def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) ->
 
 
 def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -1062,7 +1062,7 @@ def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_p
 
 
 def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
@@ -1145,7 +1145,7 @@ def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkey
 
 
 def test_results_view_sparse_page_number_actions_use_actual_page_number(tmp_path, monkeypatch) -> None:
-    from free_doc_extract import workflows
+    from my_ocr import workflows
 
     image_module = import_module("PIL.Image")
 
