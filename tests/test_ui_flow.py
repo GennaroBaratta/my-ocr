@@ -47,7 +47,7 @@ def _seed_ocr_run(run_root: Path, run_id: str) -> None:
         ReviewLayout(pages=[], status="prepared"),
         ProviderArtifacts.empty(),
     )
-    store.write_ocr_result(
+    store.write_ocr_result_and_invalidate_extraction(
         RunId(run_id),
         OcrRunResult(
             pages=[

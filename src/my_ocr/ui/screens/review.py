@@ -13,17 +13,14 @@ from ..components.inspector import build_inspector
 from ..components.loading_overlay import build_loading_overlay
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
-from ..image_utils import get_image_size
 from ..state import AppState
-from .review_actions import start_redetect_layout, start_reviewed_ocr
-from ..zoom import (
-    ZOOM_MODE_FIT_WIDTH,
-    effective_zoom_level,
-    set_manual_zoom,
-    set_zoom_available_width,
-    toggle_fit_width_zoom,
-    zoom_label_text,
+from .review_actions import (
+    ReviewScreenActions,
+    current_zoom_scale,
+    fit_width_icon_color,
+    review_page_label_text,
 )
+from ..zoom import set_zoom_available_width, zoom_label_text
 
 
 def build_review_view(page: ft.Page, state: AppState) -> ft.View:
@@ -54,10 +51,10 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         refresh_bbox_editor(
             bbox_editor,
             state,
-            on_box_selected,
-            on_box_changed,
-            on_box_live_change,
-            on_zoom_scale_change,
+            actions.select_box,
+            actions.box_changed,
+            actions.box_live_changed,
+            actions.zoom_scale_changed,
         )
         if update:
             try:
@@ -76,13 +73,13 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     def rebuild() -> None:
         content_row.controls = _build_panes(
             state,
-            on_page_select,
-            on_box_selected,
-            on_box_changed,
-            on_box_live_change,
-            on_zoom_scale_change,
-            on_deselect,
-            on_remove,
+            actions.select_page,
+            actions.select_box,
+            actions.box_changed,
+            actions.box_live_changed,
+            actions.zoom_scale_changed,
+            actions.deselect_box,
+            actions.remove_box,
         )
         sync_editor_available_width()
         page.update()
@@ -98,25 +95,30 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         refresh_bbox_editor(
             bbox_editor,
             state,
-            on_box_selected,
-            on_box_changed,
-            on_box_live_change,
-            on_zoom_scale_change,
+            actions.select_box,
+            actions.box_changed,
+            actions.box_live_changed,
+            actions.zoom_scale_changed,
         )
-        content_row.controls[2] = build_inspector(state, on_deselect, on_box_changed, on_remove)
+        content_row.controls[2] = build_inspector(
+            state,
+            actions.deselect_box,
+            actions.box_changed,
+            actions.remove_box,
+        )
         sync_editor_available_width()
         page.update()
 
     # ── Toolbar ─────────────────────────────────────────────────────
     page_label = ft.Text(
-        f"Page {state.current_page_number} / {len(state.session.pages)}",
+        review_page_label_text(state),
         size=13,
         color=theme.TEXT_PRIMARY,
         width=80,
         text_align=ft.TextAlign.CENTER,
     )
     zoom_label = ft.Text(
-        zoom_label_text(state, _current_zoom_scale(state)),
+        zoom_label_text(state, current_zoom_scale(state)),
         size=13,
         color=theme.TEXT_PRIMARY,
         width=64,
@@ -125,103 +127,47 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     fit_width_btn = ft.IconButton(
         icon=ft.Icons.WIDTH_FULL,
         icon_size=16,
-        icon_color=theme.PRIMARY
-        if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH
-        else theme.TEXT_MUTED,
-        on_click=lambda _e=None: fit_width(),
+        icon_color=fit_width_icon_color(state, theme.PRIMARY, theme.TEXT_MUTED),
         tooltip="Fit page width",
     )
 
     def refresh_zoom_toolbar(scale: float | None = None) -> None:
-        current_scale = scale if scale is not None else _current_zoom_scale(state)
+        current_scale = scale if scale is not None else current_zoom_scale(state)
         zoom_label.value = zoom_label_text(state, current_scale)
-        fit_width_btn.icon_color = (
-            theme.PRIMARY if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
-        )
+        fit_width_btn.icon_color = fit_width_icon_color(state, theme.PRIMARY, theme.TEXT_MUTED)
 
-    def prev_page() -> None:
-        if state.session.current_page_index > 0:
-            state.session.current_page_index -= 1
-            state.select_box(None)
-            page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
-            rebuild()
-
-    def next_page() -> None:
-        if state.session.current_page_index < len(state.session.pages) - 1:
-            state.session.current_page_index += 1
-            state.select_box(None)
-            page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
-            rebuild()
-
-    def zoom_in() -> None:
-        set_manual_zoom(state, _current_zoom_scale(state) + 0.25)
-        refresh_zoom_toolbar()
-        rebuild()
-
-    def zoom_out() -> None:
-        set_manual_zoom(state, _current_zoom_scale(state) - 0.25)
-        refresh_zoom_toolbar()
-        rebuild()
-
-    def fit_width() -> None:
-        toggle_fit_width_zoom(state, _current_page_image_width(state))
-        refresh_zoom_toolbar()
-        rebuild()
-
-    def run_ocr() -> None:
-        state.review_controller.save_review_layout()
-        start_reviewed_ocr(page, state, loading_overlay)
-
-    def on_add_box() -> None:
-        state.session.is_adding_box = not state.session.is_adding_box
-        if state.session.is_adding_box:
-            state.select_box(None)
-
-        _sync_add_box_button(state, add_box_label, add_box_btn, update=True)
-        rebuild()
-
-    def on_redetect_layout() -> None:
-        start_redetect_layout(page, state, loading_overlay, rebuild)
-
-    def on_page_select(idx: int) -> None:
-        state.session.current_page_index = idx
-        state.select_box(None)
-        page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
-        rebuild()
-
-    def on_box_selected(box_id: str | None) -> None:
-        state.select_box(box_id)
-        refresh_selection()
-
-    def on_box_changed() -> None:
-        state.review_controller.save_review_layout()
-        refresh_selection()
-
-    def on_box_live_change() -> None:
-        page.update()
-
-    def on_zoom_scale_change(scale: float) -> None:
-        refresh_zoom_toolbar(scale)
+    def update_zoom_toolbar_controls() -> None:
         for control in (zoom_label, fit_width_btn):
             try:
                 control.update()
             except RuntimeError:
                 pass
 
-    def on_deselect() -> None:
-        state.select_box(None)
-        refresh_selection()
+    def set_page_label(value: str) -> None:
+        page_label.value = value
 
-    def on_remove(box_id: str) -> None:
-        state.review_controller.remove_box(box_id)
-        refresh_selection()
+    def refresh_add_box_controls() -> None:
+        _sync_add_box_button(state, add_box_label, add_box_btn, update=True)
+
+    actions = ReviewScreenActions(
+        page,
+        state,
+        loading_overlay,
+        rebuild=rebuild,
+        refresh_selection=refresh_selection,
+        refresh_add_box_controls=refresh_add_box_controls,
+        set_page_label=set_page_label,
+        refresh_zoom_toolbar=refresh_zoom_toolbar,
+        update_zoom_toolbar_controls=update_zoom_toolbar_controls,
+    )
+    fit_width_btn.on_click = actions.toggle_fit_width
 
     pagination_controls: list[ft.Control] = [
         ft.IconButton(
             icon=ft.Icons.CHEVRON_LEFT,
             icon_size=18,
             icon_color=theme.TEXT_MUTED,
-            on_click=prev_page,
+            on_click=actions.prev_page,
             tooltip="Previous page",
         ),
         page_label,
@@ -229,7 +175,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             icon=ft.Icons.CHEVRON_RIGHT,
             icon_size=18,
             icon_color=theme.TEXT_MUTED,
-            on_click=next_page,
+            on_click=actions.next_page,
             tooltip="Next page",
         ),
     ]
@@ -240,7 +186,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             icon=ft.Icons.REMOVE,
             icon_size=16,
             icon_color=theme.TEXT_MUTED,
-            on_click=zoom_out,
+            on_click=actions.zoom_out,
             tooltip="Zoom out",
         ),
         zoom_label,
@@ -248,7 +194,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             icon=ft.Icons.ADD,
             icon_size=16,
             icon_color=theme.TEXT_MUTED,
-            on_click=zoom_in,
+            on_click=actions.zoom_in,
             tooltip="Zoom in",
         ),
     ]
@@ -257,7 +203,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     add_box_btn = ft.OutlinedButton(
         content=add_box_label,
         icon=ft.Icons.CLOSE if state.session.is_adding_box else ft.Icons.ADD_BOX_OUTLINED,
-        on_click=lambda _e=None: on_add_box(),
+        on_click=actions.toggle_add_box,
         tooltip="Cancel adding box"
         if state.session.is_adding_box
         else "Add a new layout box on this page",
@@ -318,14 +264,14 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             icon_color=theme.TEXT_MUTED,
             icon_size=20,
             tooltip="Re-detect layout",
-            on_click=lambda _e=None: on_redetect_layout(),
+            on_click=actions.redetect_layout,
         ),
         add_box_btn,
         ft.Container(width=8),
         ft.Button(
             "Run OCR",
             icon=ft.Icons.PLAY_ARROW,
-            on_click=run_ocr,
+            on_click=actions.run_ocr,
             tooltip="Run OCR using the reviewed layout boxes",
             bgcolor=theme.PRIMARY,
             color="white",
@@ -347,22 +293,18 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
-    def on_keyboard(e: ft.KeyboardEvent) -> None:
-        if e.key == "Delete" and state.session.selected_box_id:
-            on_remove(state.session.selected_box_id)
-
-    page.on_keyboard_event = on_keyboard
+    page.on_keyboard_event = actions.keyboard
 
     # Initial build
     content_row.controls = _build_panes(
         state,
-        on_page_select,
-        on_box_selected,
-        on_box_changed,
-        on_box_live_change,
-        on_zoom_scale_change,
-        on_deselect,
-        on_remove,
+        actions.select_page,
+        actions.select_box,
+        actions.box_changed,
+        actions.box_live_changed,
+        actions.zoom_scale_changed,
+        actions.deselect_box,
+        actions.remove_box,
     )
 
     return ft.View(
@@ -409,21 +351,6 @@ def _build_panes(
     inspector = build_inspector(state, on_deselect, on_box_changed, on_remove)
 
     return [page_strip, bbox_editor, inspector]
-
-
-def _current_zoom_scale(state: AppState) -> float:
-    image_width = _current_page_image_width(state)
-    if image_width is None:
-        return state.session.zoom_level
-    return effective_zoom_level(state, image_width)
-
-
-def _current_page_image_width(state: AppState) -> int | None:
-    page_data = state.current_page
-    if not page_data:
-        return None
-    image_width, _image_height = get_image_size(page_data.image_path)
-    return image_width
 
 
 def _sync_add_box_button(

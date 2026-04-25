@@ -7,20 +7,17 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from my_ocr.runs.artifacts import copy_provider_artifacts
 from my_ocr.runs.artifacts import remove_path
 from my_ocr.support.filesystem import write_json as _write_json
 from my_ocr.domain import (
     LayoutDiagnostics,
-    MissingPage,
-    OcrPageResult,
     OcrRunResult,
     PageRef,
     ProviderArtifacts,
     ReviewLayout,
-    ReviewPage,
     RunCommitFailed,
     RunDiagnostics,
     RunId,
@@ -48,86 +45,6 @@ class RunWorkspace:
     run_id: RunId
     target_dir: Path
     work_dir: Path
-
-
-class RunStorage(Protocol):
-    def start_run(
-        self, input_path: str | Path, run_id: RunId | None = None
-    ) -> RunWorkspace: ...
-
-    def publish_prepared_run(
-        self,
-        workspace: RunWorkspace,
-        pages: list[PageRef],
-        layout: ReviewLayout,
-        artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot: ...
-
-    def discard_workspace(self, workspace: RunWorkspace) -> None: ...
-
-    def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
-
-    def write_review_layout(
-        self,
-        run_id: RunId | str,
-        layout: ReviewLayout,
-        artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot: ...
-
-    def write_ocr_result(
-        self,
-        run_id: RunId | str,
-        result: OcrRunResult,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot: ...
-
-    def save_review_layout_and_invalidate_downstream(
-        self,
-        run_id: RunId | str,
-        layout: ReviewLayout,
-        artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot: ...
-
-    def write_ocr_result_and_invalidate_extraction(
-        self,
-        run_id: RunId | str,
-        result: OcrRunResult,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot: ...
-
-    def replace_page_layout(
-        self,
-        run_id: RunId | str,
-        page_number: int,
-        page: ReviewPage,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot: ...
-
-    def replace_page_ocr(
-        self,
-        run_id: RunId | str,
-        page_number: int,
-        page: OcrPageResult,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot: ...
-
-    def write_rules_extraction(
-        self, run_id: RunId | str, prediction: dict[str, Any]
-    ) -> RunSnapshot: ...
-
-    def write_structured_extraction(
-        self,
-        run_id: RunId | str,
-        prediction: dict[str, Any],
-        metadata: dict[str, Any],
-        *,
-        canonical_prediction: dict[str, Any],
-    ) -> RunSnapshot: ...
-
-    def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot: ...
 
 
 class FilesystemRunStore:
@@ -178,17 +95,6 @@ class FilesystemRunStore:
     def open_run(self, run_id: RunId | str) -> RunSnapshot:
         return _load_snapshot(self._run_dir(run_id))
 
-    def write_review_layout(
-        self,
-        run_id: RunId | str,
-        layout: ReviewLayout,
-        artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot:
-        return self.save_review_layout_and_invalidate_downstream(
-            run_id, layout, artifacts, diagnostics
-        )
-
     def save_review_layout_and_invalidate_downstream(
         self,
         run_id: RunId | str,
@@ -217,11 +123,6 @@ class FilesystemRunStore:
         write_manifest(run_dir, manifest)
         return _load_snapshot(run_dir)
 
-    def write_ocr_result(
-        self, run_id: RunId | str, result: OcrRunResult, artifacts: ProviderArtifacts
-    ) -> RunSnapshot:
-        return self.write_ocr_result_and_invalidate_extraction(run_id, result, artifacts)
-
     def write_ocr_result_and_invalidate_extraction(
         self, run_id: RunId | str, result: OcrRunResult, artifacts: ProviderArtifacts
     ) -> RunSnapshot:
@@ -245,58 +146,6 @@ class FilesystemRunStore:
             ),
         )
         return _load_snapshot(run_dir)
-
-    def replace_page_layout(
-        self,
-        run_id: RunId | str,
-        page_number: int,
-        page: ReviewPage,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot:
-        snapshot = _load_snapshot(self._existing_run_dir(run_id))
-        existing = snapshot.review_layout or ReviewLayout(pages=[], status="prepared")
-        pages_by_number = {review_page.page_number: review_page for review_page in existing.pages}
-        pages_by_number[page_number] = page
-        ordered_pages = [
-            pages_by_number[manifest_page.page_number]
-            for manifest_page in snapshot.pages
-            if manifest_page.page_number in pages_by_number
-        ]
-        return self.save_review_layout_and_invalidate_downstream(
-            run_id,
-            ReviewLayout(pages=ordered_pages, status="prepared", version=existing.version),
-            artifacts,
-        )
-
-    def replace_page_ocr(
-        self,
-        run_id: RunId | str,
-        page_number: int,
-        page: OcrPageResult,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot:
-        snapshot = _load_snapshot(self._existing_run_dir(run_id))
-        if snapshot.ocr_result is None:
-            raise MissingPage("Cannot replace a page before OCR has been run.")
-        pages_by_number = {
-            ocr_page.page_number: ocr_page for ocr_page in snapshot.ocr_result.pages
-        }
-        pages_by_number[page_number] = page
-        ordered_pages = [
-            pages_by_number[manifest_page.page_number]
-            for manifest_page in snapshot.pages
-            if manifest_page.page_number in pages_by_number
-        ]
-        markdown = "\n\n".join(page.markdown.strip() for page in ordered_pages if page.markdown.strip())
-        return self.write_ocr_result_and_invalidate_extraction(
-            run_id,
-            OcrRunResult(
-                pages=ordered_pages,
-                markdown=markdown,
-                diagnostics=snapshot.ocr_result.diagnostics,
-            ),
-            artifacts,
-        )
 
     def write_rules_extraction(
         self, run_id: RunId | str, prediction: dict[str, Any]

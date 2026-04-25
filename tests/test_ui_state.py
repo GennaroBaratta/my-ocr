@@ -6,6 +6,7 @@ from pathlib import Path
 from my_ocr.runs.store import FilesystemRunStore
 from my_ocr.domain import PageRef, ReviewLayout, RunId
 from my_ocr.domain import ProviderArtifacts
+from my_ocr.ui.controller import _ocr_options
 from my_ocr.ui.state import AppState
 
 
@@ -57,6 +58,19 @@ def test_run_root_setter_rebuilds_services_for_recent_runs(tmp_path: Path) -> No
     state.run_root = str(tmp_path / "runs-b")
     state.load_recent_runs()
     assert [run.run_id for run in state.session.recent_runs] == ["b"]
+
+
+def test_ocr_options_include_ui_ollama_settings() -> None:
+    state = AppState()
+    state.layout_profile = "pp_doclayout_formula"
+    state.ollama_model = "manual-model"
+    state.ollama_endpoint = "http://manual.example/api/generate"
+
+    options = _ocr_options(state)
+
+    assert options.layout_profile == "pp_doclayout_formula"
+    assert options.model == "manual-model"
+    assert options.endpoint == "http://manual.example/api/generate"
 
 
 def _seed_run(run_root: Path, run_id: str) -> None:

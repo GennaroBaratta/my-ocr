@@ -13,7 +13,7 @@ from ..components.split_pane import SplitPane
 from ..components.stepper import build_stepper
 from ..ocr_result_text import current_page_ocr_markdown_for_state, ocr_json_text_for_state
 from ..state import AppState
-from .results_actions import page_label_text, save_json, save_markdown, start_page_rerun
+from .results_actions import ResultsScreenActions, ResultsToolbarControls, page_label_text
 
 
 def build_results_view(
@@ -45,22 +45,6 @@ def build_results_view(
     def current_page_export_markdown_text() -> str:
         return current_page_ocr_markdown_for_state(state)
 
-    rerun_in_progress = False
-
-    def sync_toolbar_state() -> None:
-        copy_json_button.disabled = not bool(current_ocr_json_text())
-        download_json_button.disabled = copy_json_button.disabled
-        download_markdown_button.disabled = not bool(current_ocr_markdown_text().strip())
-        download_page_markdown_button.disabled = not bool(current_page_export_markdown_text().strip())
-        layout_rerun_button.disabled = rerun_in_progress
-        ocr_rerun_button.disabled = rerun_in_progress
-
-    def set_rerun_in_progress(active: bool) -> None:
-        nonlocal rerun_in_progress
-        rerun_in_progress = active
-        sync_toolbar_state()
-        page.update()
-
     def build_content_split_pane() -> SplitPane:
         nonlocal document_viewer_width
         viewer = build_doc_viewer(state, available_width=document_viewer_width)
@@ -79,116 +63,25 @@ def build_results_view(
 
     def rebuild() -> None:
         page_label.value = page_label_text(state)
-        sync_toolbar_state()
+        actions.sync_toolbar_state()
         content_host.controls = [build_content_split_pane()]
         page.update()
 
-    def prev_page() -> None:
-        if state.session.current_page_index > 0:
-            state.session.current_page_index -= 1
-            rebuild()
-
-    def next_page() -> None:
-        if state.session.current_page_index < len(state.session.pages) - 1:
-            state.session.current_page_index += 1
-            rebuild()
-
-    async def copy_clipboard() -> None:
-        ocr_json_text = current_ocr_json_text()
-        if not ocr_json_text:
-            return
-        await ft.Clipboard().set(ocr_json_text)
-        page.show_dialog(ft.SnackBar(ft.Text("Copied OCR JSON to clipboard"), duration=1500))
-
-    async def download_json() -> None:
-        ocr_json_text = current_ocr_json_text()
-        if not ocr_json_text:
-            return
-        save_path = await file_picker.save_file(
-            file_name=f"{state.session.run_id or 'result'}.json",
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["json"],
-        )
-        if save_path:
-            save_json(save_path, ocr_json_text)
-
-    async def download_markdown() -> None:
-        ocr_markdown_text = current_ocr_markdown_text()
-        if not ocr_markdown_text.strip():
-            return
-        save_path = await file_picker.save_file(
-            file_name=f"{state.session.run_id or 'result'}.md",
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["md"],
-        )
-        if save_path:
-            save_markdown(save_path, ocr_markdown_text)
-
-    async def download_page_markdown() -> None:
-        page_markdown_text = current_page_export_markdown_text()
-        if not page_markdown_text.strip():
-            return
-        current_page_number = state.current_page_number
-        save_path = await file_picker.save_file(
-            file_name=f"{state.session.run_id or 'result'}-page-{current_page_number:04d}.md",
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=["md"],
-        )
-        if save_path:
-            save_markdown(save_path, page_markdown_text)
-
-    def reload_state(page_index: int) -> None:
-        if not state.session.run_id:
-            return
-        state.load_run(state.session.run_id)
-        if state.session.pages:
-            state.session.current_page_index = min(max(page_index, 0), len(state.session.pages) - 1)
-        else:
-            state.session.current_page_index = 0
-
-    def rerun_page_layout() -> None:
-        if not state.session.run_id or rerun_in_progress:
-            return
-        run_id = state.session.run_id
-        page_index = state.session.current_page_index
-        page_number = state.current_page_number
-
-        def on_success() -> None:
-            reload_state(page_index)
-            page.go(f"/review/{run_id}")
-
-        start_page_rerun(
-            page,
-            action=lambda: state.controller.rerun_page_layout(run_id, page_number),
-            set_rerun_in_progress=set_rerun_in_progress,
-            on_success=on_success,
-            error_prefix="Page layout re-detect failed",
-        )
-
-    def rerun_page_ocr() -> None:
-        if not state.session.run_id or rerun_in_progress:
-            return
-        run_id = state.session.run_id
-        page_index = state.session.current_page_index
-        page_number = state.current_page_number
-
-        def on_success() -> None:
-            reload_state(page_index)
-            rebuild()
-
-        start_page_rerun(
-            page,
-            action=lambda: state.controller.rerun_page_ocr(run_id, page_number),
-            set_rerun_in_progress=set_rerun_in_progress,
-            on_success=on_success,
-            error_prefix="Page OCR rerun failed",
-        )
+    actions = ResultsScreenActions(
+        page,
+        state,
+        file_picker,
+        rebuild=rebuild,
+        current_ocr_json_text=current_ocr_json_text,
+        current_ocr_markdown_text=current_ocr_markdown_text,
+        current_page_export_markdown_text=current_page_export_markdown_text,
+    )
 
     copy_json_button = ft.OutlinedButton(
         "Copy OCR JSON",
         icon=ft.Icons.CONTENT_COPY,
         tooltip="Copy OCR JSON to clipboard",
-        on_click=copy_clipboard,
+        on_click=actions.copy_clipboard,
         disabled=False,
         style=ft.ButtonStyle(
             color=theme.TEXT_PRIMARY,
@@ -200,7 +93,7 @@ def build_results_view(
         "Download Page Markdown",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR Markdown for this page",
-        on_click=download_page_markdown,
+        on_click=actions.download_page_markdown,
         disabled=False,
         bgcolor=theme.BG_ELEVATED,
         color=theme.TEXT_PRIMARY,
@@ -212,7 +105,7 @@ def build_results_view(
         "Download OCR Markdown",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR Markdown",
-        on_click=download_markdown,
+        on_click=actions.download_markdown,
         disabled=False,
         bgcolor=theme.BG_ELEVATED,
         color=theme.TEXT_PRIMARY,
@@ -224,7 +117,7 @@ def build_results_view(
         "Download OCR JSON",
         icon=ft.Icons.DOWNLOAD,
         tooltip="Download OCR JSON",
-        on_click=download_json,
+        on_click=actions.download_json,
         disabled=False,
         bgcolor=theme.PRIMARY,
         color="white",
@@ -237,7 +130,7 @@ def build_results_view(
         "Re-detect This Page Layout",
         icon=ft.Icons.AUTO_FIX_HIGH,
         tooltip="Re-detect layout only for the active page",
-        on_click=lambda _e=None: rerun_page_layout(),
+        on_click=actions.rerun_page_layout,
         bgcolor=theme.BG_ELEVATED,
         color=theme.TEXT_PRIMARY,
         style=ft.ButtonStyle(
@@ -248,7 +141,7 @@ def build_results_view(
         "Re-run OCR For This Page",
         icon=ft.Icons.REFRESH,
         tooltip="Re-run OCR only for the active page",
-        on_click=lambda _e=None: rerun_page_ocr(),
+        on_click=actions.rerun_page_ocr,
         bgcolor=theme.BG_ELEVATED,
         color=theme.TEXT_PRIMARY,
         style=ft.ButtonStyle(
@@ -293,7 +186,7 @@ def build_results_view(
                         icon=ft.Icons.CHEVRON_LEFT,
                         icon_size=18,
                         icon_color=theme.TEXT_MUTED,
-                        on_click=prev_page,
+                        on_click=actions.prev_page,
                         tooltip="Previous page",
                     ),
                     page_label,
@@ -301,7 +194,7 @@ def build_results_view(
                         icon=ft.Icons.CHEVRON_RIGHT,
                         icon_size=18,
                         icon_color=theme.TEXT_MUTED,
-                        on_click=next_page,
+                        on_click=actions.next_page,
                         tooltip="Next page",
                     ),
                 ],
@@ -322,7 +215,16 @@ def build_results_view(
         download_json_button,
     ]
 
-    sync_toolbar_state()
+    actions.bind_toolbar_controls(
+        ResultsToolbarControls(
+            copy_json_button=copy_json_button,
+            download_json_button=download_json_button,
+            download_markdown_button=download_markdown_button,
+            download_page_markdown_button=download_page_markdown_button,
+            layout_rerun_button=layout_rerun_button,
+            ocr_rerun_button=ocr_rerun_button,
+        )
+    )
 
     toolbar = ft.Container(
         content=ft.Row(

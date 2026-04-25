@@ -5,7 +5,10 @@ from typing import Any, Protocol
 
 from my_ocr.domain import (
     LayoutDetectionResult,
+    LayoutDiagnostics,
+    OcrPageResult,
     OcrRecognitionResult,
+    OcrRunResult,
     ProviderArtifacts,
     WorkflowResult,
     LayoutDetectionFailed,
@@ -14,15 +17,66 @@ from my_ocr.domain import (
     StructuredExtractionFailed,
     PageRef,
     ReviewLayout,
+    ReviewPage,
     RunId,
+    RunSnapshot,
     OcrRuntimeOptions,
     StructuredExtractionOptions,
 )
-from my_ocr.extraction.rules import validate_structured_prediction
-from my_ocr.runs.store import RunStorage
+from my_ocr.extraction.validation import validate_structured_prediction
 
 
-RunStore = RunStorage
+class RunWorkspace(Protocol):
+    run_id: RunId
+    target_dir: Path
+    work_dir: Path
+
+
+class RunRepository(Protocol):
+    def start_run(
+        self, input_path: str | Path, run_id: RunId | None = None
+    ) -> RunWorkspace: ...
+
+    def publish_prepared_run(
+        self,
+        workspace: RunWorkspace,
+        pages: list[PageRef],
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot: ...
+
+    def discard_workspace(self, workspace: RunWorkspace) -> None: ...
+
+    def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
+
+    def save_review_layout_and_invalidate_downstream(
+        self,
+        run_id: RunId | str,
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot: ...
+
+    def write_ocr_result_and_invalidate_extraction(
+        self,
+        run_id: RunId | str,
+        result: OcrRunResult,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot: ...
+
+    def write_rules_extraction(
+        self, run_id: RunId | str, prediction: dict[str, Any]
+    ) -> RunSnapshot: ...
+
+    def write_structured_extraction(
+        self,
+        run_id: RunId | str,
+        prediction: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        canonical_prediction: dict[str, Any],
+    ) -> RunSnapshot: ...
 
 
 class DocumentNormalizer(Protocol):
@@ -64,7 +118,7 @@ class DocumentWorkflow:
 
     def __init__(
         self,
-        run_store: RunStorage,
+        run_store: RunRepository,
         normalizer: DocumentNormalizer,
         layout_detector: LayoutDetector,
         ocr_engine: OcrEngine,
@@ -145,8 +199,12 @@ class DocumentWorkflow:
             raise LayoutDetectionFailed(f"Layout detection failed: {exc}") from exc
         if not result.layout.pages:
             raise MissingPage(f"Layout detector returned no page {page_number}")
-        snapshot = self._run_store.replace_page_layout(
-            run_id, page_number, result.layout.pages[0], result.artifacts
+        layout = _replace_review_page(snapshot, page_number, result.layout.pages[0])
+        snapshot = self._run_store.save_review_layout_and_invalidate_downstream(
+            run_id,
+            layout,
+            result.artifacts,
+            result.diagnostics,
         )
         return WorkflowResult(snapshot=snapshot, warning=result.diagnostics.warning)
 
@@ -168,8 +226,9 @@ class DocumentWorkflow:
             raise OcrFailed(f"OCR failed: {exc}") from exc
         if not recognition.result.pages:
             raise MissingPage(f"OCR returned no page {page_number}")
-        snapshot = self._run_store.replace_page_ocr(
-            run_id, page_number, recognition.result.pages[0], recognition.artifacts
+        result = _replace_ocr_page(snapshot, page_number, recognition.result.pages[0])
+        snapshot = self._run_store.write_ocr_result_and_invalidate_extraction(
+            run_id, result, recognition.artifacts
         )
         return WorkflowResult(snapshot=snapshot)
 
@@ -229,4 +288,38 @@ class DocumentWorkflow:
         resolved_run_id = prepared.snapshot.run_id
         self.run_reviewed_ocr(resolved_run_id, options=ocr_options)
         return self.extract_rules(resolved_run_id)
+
+
+def _replace_review_page(
+    snapshot: RunSnapshot, page_number: int, page: ReviewPage
+) -> ReviewLayout:
+    existing = snapshot.review_layout or ReviewLayout(pages=[], status="prepared")
+    pages_by_number = {review_page.page_number: review_page for review_page in existing.pages}
+    pages_by_number[page_number] = page
+    ordered_pages = [
+        pages_by_number[manifest_page.page_number]
+        for manifest_page in snapshot.pages
+        if manifest_page.page_number in pages_by_number
+    ]
+    return ReviewLayout(pages=ordered_pages, status="prepared", version=existing.version)
+
+
+def _replace_ocr_page(
+    snapshot: RunSnapshot, page_number: int, page: OcrPageResult
+) -> OcrRunResult:
+    if snapshot.ocr_result is None:
+        raise MissingPage("Cannot replace a page before OCR has been run.")
+    pages_by_number = {ocr_page.page_number: ocr_page for ocr_page in snapshot.ocr_result.pages}
+    pages_by_number[page_number] = page
+    ordered_pages = [
+        pages_by_number[manifest_page.page_number]
+        for manifest_page in snapshot.pages
+        if manifest_page.page_number in pages_by_number
+    ]
+    markdown = "\n\n".join(page.markdown.strip() for page in ordered_pages if page.markdown.strip())
+    return OcrRunResult(
+        pages=ordered_pages,
+        markdown=markdown,
+        diagnostics=snapshot.ocr_result.diagnostics,
+    )
 

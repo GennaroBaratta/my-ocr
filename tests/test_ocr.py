@@ -10,6 +10,7 @@ import pytest
 
 from my_ocr.ocr import glmocr as ocr
 from my_ocr.ocr import fallback as ocr_fallback
+from my_ocr.ocr import glmocr_parser as ocr_parser
 from my_ocr.ocr.glmocr import (
     prepare_review_artifacts as _prepare_review_artifacts,
 )
@@ -84,14 +85,14 @@ class FakeGlmOcr:
 
 def _patch_parser_cls(monkeypatch: pytest.MonkeyPatch, parser_cls: type) -> None:
     if hasattr(parser_cls, "parse_layout_only"):
-        monkeypatch.setattr(ocr, "_load_glmocr_parser", lambda: parser_cls)
+        monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: parser_cls)
         return
 
     class ParserWithLayoutOnly(parser_cls):
         def parse_layout_only(self, input_path: str):
             return self.parse(input_path)
 
-    monkeypatch.setattr(ocr, "_load_glmocr_parser", lambda: ParserWithLayoutOnly)
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: ParserWithLayoutOnly)
 
 
 def _write_test_image(path: Path) -> None:
@@ -138,6 +139,9 @@ def run_ocr(
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
     layout_profile: str | None = "auto",
+    model: str | None = None,
+    endpoint: str | None = None,
+    num_ctx: int | None = None,
     review_layout: ReviewLayout | None = None,
     page_numbers=None,
 ):
@@ -149,6 +153,9 @@ def run_ocr(
             config_path=config_path,
             layout_device=layout_device,
             layout_profile=layout_profile,
+            model=model,
+            endpoint=endpoint,
+            num_ctx=num_ctx,
         ),
     )
     pages = []
@@ -300,7 +307,7 @@ def test_lazy_parser_wrapper_defers_pipeline_start_until_first_parse() -> None:
             events.append("format")
             return grouped_results, "# lazy doc", {}
 
-    parser_cls = ocr._build_lazy_glmocr_parser(
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
         load_config=lambda *_args, **_kwargs: SimpleNamespace(
             pipeline=SimpleNamespace(
                 page_loader="page-loader",
@@ -398,7 +405,7 @@ def test_lazy_parser_wrapper_returns_first_pipeline_result_only() -> None:
             _ = (grouped_results, cropped_images, image_prefix)
             return {"doc": "page-0001.png"}, "# first result", {}
 
-    parser_cls = ocr._build_lazy_glmocr_parser(
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
         load_config=lambda *_args, **_kwargs: SimpleNamespace(
             pipeline=SimpleNamespace(
                 page_loader="page-loader",
@@ -475,7 +482,7 @@ def test_lazy_parser_wrapper_layout_only_does_not_start_ocr() -> None:
             events.append("format")
             return {"doc": "page-0001.png"}, "# layout only", {}
 
-    parser_cls = ocr._build_lazy_glmocr_parser(
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
         load_config=lambda *_args, **_kwargs: SimpleNamespace(
             pipeline=SimpleNamespace(
                 page_loader="page-loader",
@@ -554,7 +561,7 @@ def test_lazy_parser_wrapper_layout_only_result_save_writes_model_json(tmp_path)
             _ = (grouped_results, cropped_images, image_prefix)
             return {"doc": "page-0001.png"}, "# layout only", {}
 
-    parser_cls = ocr._build_lazy_glmocr_parser(
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
         load_config=lambda *_args, **_kwargs: SimpleNamespace(
             pipeline=SimpleNamespace(
                 page_loader="page-loader",
@@ -810,8 +817,10 @@ def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
             )
 
     _patch_parser_cls(monkeypatch, EmptyGlmOcr)
-    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", lambda **_kwargs: ("", []))
-    monkeypatch.setattr(ocr, "recognize_full_page", lambda *_args, **_kwargs: "Full page text")
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", lambda **_kwargs: ("", []))
+    monkeypatch.setattr(
+        ocr_fallback, "recognize_full_page", lambda *_args, **_kwargs: "Full page text"
+    )
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
@@ -900,7 +909,7 @@ def test_run_ocr_always_loads_saved_model_json(tmp_path, monkeypatch) -> None:
         return "table text", []
 
     _patch_parser_cls(monkeypatch, TableModelGlmOcr)
-    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
@@ -1003,8 +1012,8 @@ def test_run_ocr_consumes_review_layout_for_planning_and_fallback(tmp_path, monk
     def fail_parser_load():
         raise AssertionError("review-layout OCR should not load the GLM-OCR parser")
 
-    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
-    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", fail_parser_load)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
@@ -1038,6 +1047,51 @@ def test_run_ocr_consumes_review_layout_for_planning_and_fallback(tmp_path, monk
     assert result["json"]["pages"][0]["markdown"] == "review-driven text"
 
 
+def test_run_ocr_runtime_options_override_config_for_fallback_client(
+    tmp_path, monkeypatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_crop_fallback(**kwargs):
+        captured["model"] = kwargs["model"]
+        captured["endpoint"] = kwargs["endpoint"]
+        captured["num_ctx"] = kwargs["num_ctx"]
+        return "manual client text", []
+
+    config = tmp_path / "local.yaml"
+    config.write_text(
+        "pipeline:\n"
+        "  ocr_api:\n"
+        "    model: config-model\n"
+        "    api_host: config.example\n"
+        "    api_port: 1234\n"
+        "    api_path: /api/generate\n"
+        "    num_ctx: 2048\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        config_path=str(config),
+        model="manual-model",
+        endpoint="http://manual.example/api/generate",
+        num_ctx=4096,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert captured == {
+        "model": "manual-model",
+        "endpoint": "http://manual.example/api/generate",
+        "num_ctx": 4096,
+    }
+    assert result["markdown"] == "manual client text"
+
+
 def test_run_ocr_uses_nonempty_review_layout_as_canonical_layout(
     tmp_path, monkeypatch
 ) -> None:
@@ -1047,8 +1101,8 @@ def test_run_ocr_uses_nonempty_review_layout_as_canonical_layout(
     def fail_crop_fallback(**_kwargs):
         raise AssertionError("non-empty review layout should not use crop fallback")
 
-    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
-    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fail_crop_fallback)
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", fail_parser_load)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fail_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
@@ -1093,7 +1147,7 @@ def test_run_ocr_uses_review_layout_without_loading_glm_parser(
     def fail_parser_load():
         raise AssertionError("review-layout OCR should not load the GLM-OCR parser")
 
-    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", fail_parser_load)
     monkeypatch.setattr(
         ocr._layout_profile_mod,
         "resolve_layout_profile",

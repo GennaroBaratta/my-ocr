@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from my_ocr.runs.store import RecentRunRecord
+from typing import Protocol
+
 from my_ocr.domain import LayoutBlock, ReviewLayout, ReviewPage, RunSnapshot
 
 from .session import BoundingBox, PageData, RecentRunSummary
 
 
-def recent_run_summary(record: RecentRunRecord) -> RecentRunSummary:
+class RecentRunRecordLike(Protocol):
+    run_id: str
+    input_path: str
+    mtime: float
+    status: str
+
+
+def recent_run_summary(record: RecentRunRecordLike) -> RecentRunSummary:
     return RecentRunSummary(
         run_id=record.run_id,
         input_path=record.input_path,

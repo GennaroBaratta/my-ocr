@@ -101,4 +101,8 @@ def _layout_options(state: object) -> OcrRuntimeOptions:
 
 
 def _ocr_options(state: object) -> OcrRuntimeOptions:
-    return OcrRuntimeOptions(layout_profile=state.layout_profile)
+    return OcrRuntimeOptions(
+        layout_profile=state.layout_profile,
+        model=state.ollama_model,
+        endpoint=state.ollama_endpoint,
+    )

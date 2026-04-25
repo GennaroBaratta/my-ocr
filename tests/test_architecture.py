@@ -153,6 +153,17 @@ def test_ui_does_not_import_filesystem_run_store_directly() -> None:
     )
 
 
+def test_ui_does_not_import_runtime_stage_implementations_directly() -> None:
+    assert not _violations(
+        "ui",
+        (
+            "my_ocr.ingest",
+            "my_ocr.ocr",
+            "my_ocr.runs.store",
+        ),
+    )
+
+
 def test_ui_state_does_not_define_magic_session_delegation() -> None:
     state_path = SRC_ROOT / "ui" / "state.py"
     defined = _defined_function_names(state_path)
@@ -185,6 +196,14 @@ def test_review_layout_saves_are_coordinated_by_workflow() -> None:
     ]
 
     assert not failures
+
+
+def test_workflow_defines_storage_boundary_without_importing_filesystem_store() -> None:
+    workflow_path = SRC_ROOT / "workflow.py"
+    modules = _imported_modules(workflow_path) | _dynamic_import_strings(workflow_path)
+
+    assert "my_ocr.runs.store" not in modules
+    assert "RunRepository" in _defined_class_names(workflow_path)
 
 
 def test_app_state_does_not_persist_review_layout_directly() -> None:
@@ -226,6 +245,14 @@ def test_structured_extraction_has_single_persistence_path() -> None:
     assert "write_structured_extraction" in _defined_function_names(storage_path)
 
 
+def test_structured_validation_is_not_part_of_rules_extractor() -> None:
+    rules_path = SRC_ROOT / "extraction" / "rules.py"
+    validation_path = SRC_ROOT / "extraction" / "validation.py"
+
+    assert "validate_structured_prediction" not in _defined_function_names(rules_path)
+    assert "validate_structured_prediction" in _defined_function_names(validation_path)
+
+
 def test_no_unsupported_old_run_path_remains() -> None:
     roots = (REPO_ROOT / "src",)
     failures: list[str] = []
@@ -251,6 +278,23 @@ def test_runtime_options_do_not_keep_old_aliases() -> None:
     assert "class OcrRuntimeOptions" in source
     assert "LayoutOptions =" not in source
     assert "OcrOptions =" not in source
+
+
+def test_run_store_does_not_keep_alias_or_page_rerun_methods() -> None:
+    storage_path = SRC_ROOT / "runs" / "store.py"
+    workflow_path = SRC_ROOT / "workflow.py"
+    store_functions = _defined_function_names(storage_path)
+    workflow_functions = _defined_function_names(workflow_path)
+    blocked = {
+        "write_review_layout",
+        "write_ocr_result",
+        "replace_page_layout",
+        "replace_page_ocr",
+    }
+
+    assert not (blocked & store_functions)
+    assert "RunStore =" not in workflow_path.read_text(encoding="utf-8")
+    assert {"rerun_page_layout", "rerun_page_ocr"} <= workflow_functions
 
 
 def test_normalization_exposes_only_page_ref_api() -> None:
