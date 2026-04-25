@@ -9,7 +9,7 @@ description = "Local OCR and structured document extraction with GLM-OCR and Oll
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 authors = [
-  { name = "OpenAI Assistant" }
+  { name = "Gennaro Baratta" }
 ]
 dependencies = [
   "Pillow>=12.2.0",
