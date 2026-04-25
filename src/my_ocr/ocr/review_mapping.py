@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from my_ocr.domain import LayoutBlock, PageRef, ReviewPage
-from my_ocr.ocr.planning import extract_layout_blocks, normalize_bbox
+from my_ocr.ocr.ocr_policy import extract_layout_blocks, normalize_bbox
 
 
 def get_image_size(page_path: str | Path) -> tuple[int, int]:

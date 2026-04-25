@@ -26,8 +26,8 @@ from my_ocr.domain import (
     RunSnapshot,
     RunStatus,
 )
-from my_ocr.runs.layout import (
-    RunLayoutPaths,
+from my_ocr.runs.artifact_io import (
+    RunArtifactPaths,
     load_extraction,
     load_ocr_result,
     load_review_layout,
@@ -105,7 +105,7 @@ class FilesystemRunStore:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
         _write_review_layout_to_dir(run_dir, layout, artifacts)
-        paths = RunLayoutPaths(run_dir)
+        paths = RunArtifactPaths(run_dir)
         remove_path(paths.ocr_dir)
         remove_path(paths.extraction_dir)
         manifest = snapshot.manifest.with_updates(
@@ -129,7 +129,7 @@ class FilesystemRunStore:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
         _write_ocr_result_to_dir(run_dir, result, artifacts)
-        remove_path(RunLayoutPaths(run_dir).extraction_dir)
+        remove_path(RunArtifactPaths(run_dir).extraction_dir)
         write_manifest(
             run_dir,
             snapshot.manifest.with_updates(
@@ -152,7 +152,7 @@ class FilesystemRunStore:
     ) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
-        paths = RunLayoutPaths(run_dir)
+        paths = RunArtifactPaths(run_dir)
         _write_json(paths.rules_extraction, prediction)
         _write_json(paths.canonical_extraction, prediction)
         write_manifest(
@@ -177,7 +177,7 @@ class FilesystemRunStore:
     ) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
-        paths = RunLayoutPaths(run_dir)
+        paths = RunArtifactPaths(run_dir)
         metadata_payload = dict(metadata)
         raw_body = metadata_payload.pop(STRUCTURED_RAW_BODY_METADATA_KEY, None)
         _write_json(paths.structured_extraction, prediction)
@@ -205,7 +205,7 @@ class FilesystemRunStore:
     def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
-        remove_path(RunLayoutPaths(run_dir).extraction_dir)
+        remove_path(RunArtifactPaths(run_dir).extraction_dir)
         if snapshot.manifest.status.extraction != "pending":
             write_manifest(
                 run_dir,
@@ -326,7 +326,7 @@ class FilesystemRunReadModel:
         ):
             if run_dir.name.startswith("."):
                 continue
-            if not RunLayoutPaths(run_dir).manifest.exists():
+            if not RunArtifactPaths(run_dir).manifest.exists():
                 continue
             try:
                 snapshot = self.store.open_run(run_dir.name)

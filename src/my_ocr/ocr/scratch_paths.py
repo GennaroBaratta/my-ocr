@@ -6,13 +6,13 @@ from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
-class RunPaths:
+class ProviderScratchPaths:
     """Temporary provider artifact paths for one GLM-OCR run."""
 
     run_dir: Path
 
     @classmethod
-    def from_run_dir(cls, run_dir: str | Path) -> "RunPaths":
+    def from_run_dir(cls, run_dir: str | Path) -> "ProviderScratchPaths":
         return cls(Path(run_dir))
 
     @property
@@ -42,4 +42,5 @@ class RunPaths:
         path = self.fallback_dir / f"page-{page_number:04d}"
         path.mkdir(parents=True, exist_ok=True)
         return path
+
 

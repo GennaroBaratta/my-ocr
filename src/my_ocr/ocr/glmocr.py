@@ -6,17 +6,17 @@ from typing import Any
 
 from my_ocr.ocr import fallback as _fallback_mod
 from my_ocr.ocr import glmocr_artifacts as _artifacts_mod
-from my_ocr.ocr import glmocr_parser as _parser_mod
+from my_ocr.ocr import glmocr_sdk as _sdk_mod
 from my_ocr.ocr import glmocr_retry as _retry_mod
-from my_ocr.ocr import glmocr_review as _review_mod
+from my_ocr.ocr import review_mapping as _review_mapping_mod
 from my_ocr.ocr import glmocr_runtime as _runtime_mod
 from my_ocr.ocr import layout_profile as _layout_profile_mod
-from my_ocr.ocr.run_paths import RunPaths
+from my_ocr.ocr.scratch_paths import ProviderScratchPaths
 from my_ocr.domain import (
     LayoutDetectionResult,
     OcrRecognitionResult,
 )
-from my_ocr.ocr.planning import (
+from my_ocr.ocr.ocr_policy import (
     extract_layout_blocks,
     has_meaningful_text,
     plan_page_ocr,
@@ -73,7 +73,7 @@ def run_ocr(
     )
     _runtime_mod.emit_layout_profile_warning(layout_diagnostics)
 
-    paths = RunPaths.from_run_dir(run_dir)
+    paths = ProviderScratchPaths.from_run_dir(run_dir)
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
     model, endpoint, num_ctx = _runtime_mod.resolve_ocr_api_client(options)
@@ -101,7 +101,7 @@ def run_ocr(
                 )
             else:
                 if parser_cls is None:
-                    parser_cls = _parser_mod.load_glmocr_parser()
+                    parser_cls = _sdk_mod.load_glmocr_parser()
                 if parser is None:
                     parser = parser_cls(
                         config_path=options.config_path,
@@ -170,8 +170,8 @@ def prepare_review_artifacts(
     )
     _runtime_mod.emit_layout_profile_warning(layout_diagnostics)
 
-    parser_cls = _parser_mod.load_glmocr_parser()
-    paths = RunPaths.from_run_dir(run_dir)
+    parser_cls = _sdk_mod.load_glmocr_parser()
+    paths = ProviderScratchPaths.from_run_dir(run_dir)
     paths.ensure_run_dir()
 
     review_pages: list[ReviewPage] = []
@@ -217,9 +217,9 @@ def prepare_review_artifacts(
             sdk_json = load_json(sdk_json_path)
             blocks = extract_layout_blocks(sdk_json)
             coord_space = _runtime_mod.detect_coord_space(blocks, page_path)
-            image_width, image_height = _review_mod.get_image_size(page_path)
+            image_width, image_height = _review_mapping_mod.get_image_size(page_path)
             review_pages.append(
-                _review_mod.review_page_from_provider_layout(
+                _review_mapping_mod.review_page_from_provider_layout(
                     page_ref=page_ref,
                     layout=sdk_json,
                     coord_space=coord_space,
@@ -249,7 +249,7 @@ def _run_page_ocr(
     parser: Any,
     page_path: str,
     page_number: int,
-    paths: RunPaths,
+    paths: ProviderScratchPaths,
     *,
     parser_cls: type,
     config_path: str,
@@ -302,14 +302,14 @@ def _run_page_ocr(
 def _run_page_ocr_from_review_layout(
     page_path: str,
     page_number: int,
-    paths: RunPaths,
+    paths: ProviderScratchPaths,
     *,
     model: str,
     endpoint: str,
     num_ctx: int,
     review_page: ReviewPage,
 ) -> dict[str, Any]:
-    review_layout = _review_mod.review_layout_payload_from_page(review_page)
+    review_layout = _review_mapping_mod.review_layout_payload_from_page(review_page)
     if review_layout is None:
         raise RuntimeError(f"Review layout is missing page {page_number}.")
     page_layout, page_coord_space = review_layout
@@ -338,7 +338,7 @@ def _finalize_page_ocr(
     *,
     page_path: str,
     page_number: int,
-    paths: RunPaths,
+    paths: ProviderScratchPaths,
     sdk_markdown: str,
     sdk_json_path: Path,
     page_layout: dict[str, Any],

@@ -7,17 +7,17 @@ from my_ocr.domain import (
     RunManifest,
     RunNotFound,
 )
-from my_ocr.runs.layout import RunLayoutPaths
+from my_ocr.runs.artifact_io import RunArtifactPaths
 
 
 def write_manifest(run_dir: Path, manifest: RunManifest) -> None:
-    write_json(RunLayoutPaths(run_dir).manifest, manifest.model_dump(mode="json"))
+    write_json(RunArtifactPaths(run_dir).manifest, manifest.model_dump(mode="json"))
 
 
 def load_manifest(run_dir: Path) -> RunManifest:
     if not run_dir.exists():
         raise RunNotFound(f"Run not found: {run_dir.name}")
-    manifest_path = RunLayoutPaths(run_dir).manifest
+    manifest_path = RunArtifactPaths(run_dir).manifest
     if not manifest_path.exists():
         raise RunNotFound(f"Run manifest not found: {run_dir.name}")
     payload = read_json(manifest_path)

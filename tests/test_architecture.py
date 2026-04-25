@@ -212,6 +212,7 @@ def test_workflow_imports_only_application_boundary_packages() -> None:
         (
             "my_ocr.domain",
             "my_ocr.extraction.validation",
+            "my_ocr.extraction.canonical",
         ),
     )
 

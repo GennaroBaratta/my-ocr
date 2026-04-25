@@ -9,8 +9,8 @@ from typing import Any
 from my_ocr.domain import ArtifactCopy, OcrPageResult, PageRef, ProviderArtifacts
 from my_ocr.domain import OcrRuntimeOptions
 from my_ocr.ingest.normalize import IMAGE_SUFFIXES
-from my_ocr.ocr.planning import detect_bbox_coord_space
-from my_ocr.ocr.run_paths import RunPaths
+from my_ocr.ocr.ocr_policy import detect_bbox_coord_space
+from my_ocr.ocr.scratch_paths import ProviderScratchPaths
 from my_ocr.settings import resolve_ocr_api_client as _resolve_configured_ocr_api_client
 
 
@@ -116,7 +116,7 @@ def with_cleanup(bundle: ProviderArtifacts, cleanup_paths: tuple[Path, ...]) -> 
     return ProviderArtifacts(bundle.copies, bundle.cleanup_paths + cleanup_paths)
 
 
-def ocr_cleanup_paths(paths: RunPaths) -> tuple[Path, ...]:
+def ocr_cleanup_paths(paths: ProviderScratchPaths) -> tuple[Path, ...]:
     return (paths.raw_dir, paths.fallback_dir)
 
 
