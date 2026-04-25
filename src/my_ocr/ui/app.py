@@ -49,13 +49,13 @@ def create_app(page: ft.Page) -> None:
 
         if route.startswith("/review/"):
             run_id = route.split("/review/", 1)[1]
-            if state.run_id != run_id:
+            if state.session.run_id != run_id:
                 state.load_run(run_id)
             page.views.append(build_review_view(page, state))
 
         elif route.startswith("/results/"):
             run_id = route.split("/results/", 1)[1]
-            if state.run_id != run_id:
+            if state.session.run_id != run_id:
                 state.load_run(run_id)
             page.views.append(build_results_view(page, state, file_picker))
 
@@ -73,3 +73,4 @@ def create_app(page: ft.Page) -> None:
     page.on_route_change = route_change
     page.on_view_pop = view_pop
     render_route()
+

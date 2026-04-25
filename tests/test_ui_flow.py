@@ -5,7 +5,8 @@ from pathlib import Path
 import flet as ft
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.dto import OcrPageResult, OcrRunResult, PageRef, ProviderArtifacts, RunId
+from my_ocr.application.artifacts import ProviderArtifacts
+from my_ocr.application.models import OcrPageResult, OcrRunResult, PageRef, RunId
 from my_ocr.ui.components.code_display import build_code_display
 from my_ocr.ui.ocr_result_text import ocr_json_text_for_state
 from my_ocr.ui.state import AppState
@@ -33,8 +34,8 @@ def test_unsupported_run_message_is_loaded_for_v1_folder(tmp_path: Path) -> None
 
     state.load_run("old")
 
-    assert state.unsupported_run_message
-    assert "created before v2" in state.unsupported_run_message
+    assert state.session.unsupported_run_message
+    assert "created before v2" in state.session.unsupported_run_message
 
 
 def _seed_ocr_run(run_root: Path, run_id: str) -> None:
@@ -54,4 +55,5 @@ def _seed_ocr_run(run_root: Path, run_id: str) -> None:
         ProviderArtifacts.empty(),
     )
     tx.commit()
+
 

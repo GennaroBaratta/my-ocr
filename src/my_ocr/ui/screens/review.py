@@ -37,9 +37,9 @@ def _show_layout_warning(page: ft.Page, state: AppState) -> None:
 
 
 def build_review_view(page: ft.Page, state: AppState) -> ft.View:
-    filename = Path(state.current_input_path).name if state.current_input_path else ""
+    filename = Path(state.session.current_input_path).name if state.session.current_input_path else ""
     if not filename:
-        filename = state.run_id or "Document"
+        filename = state.session.run_id or "Document"
 
     progress_ring = ft.ProgressRing(
         visible=False,
@@ -136,7 +136,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     # ── Toolbar ─────────────────────────────────────────────────────
     page_label = ft.Text(
-        f"Page {state.current_page_number} / {len(state.pages)}",
+        f"Page {state.current_page_number} / {len(state.session.pages)}",
         size=13,
         color=theme.TEXT_PRIMARY,
         width=80,
@@ -153,7 +153,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         icon=ft.Icons.WIDTH_FULL,
         icon_size=16,
         icon_color=theme.PRIMARY
-        if state.zoom_mode == ZOOM_MODE_FIT_WIDTH
+        if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH
         else theme.TEXT_MUTED,
         on_click=lambda _e=None: fit_width(),
         tooltip="Fit page width",
@@ -163,21 +163,21 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         current_scale = scale if scale is not None else _current_zoom_scale(state)
         zoom_label.value = zoom_label_text(state, current_scale)
         fit_width_btn.icon_color = (
-            theme.PRIMARY if state.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
+            theme.PRIMARY if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
         )
 
     def prev_page() -> None:
-        if state.current_page_index > 0:
-            state.current_page_index -= 1
+        if state.session.current_page_index > 0:
+            state.session.current_page_index -= 1
             state.select_box(None)
-            page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
+            page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
             rebuild()
 
     def next_page() -> None:
-        if state.current_page_index < len(state.pages) - 1:
-            state.current_page_index += 1
+        if state.session.current_page_index < len(state.session.pages) - 1:
+            state.session.current_page_index += 1
             state.select_box(None)
-            page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
+            page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
             rebuild()
 
     def zoom_in() -> None:
@@ -200,8 +200,8 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         _start_reviewed_ocr(page, state, loading_overlay, progress_ring, status_text)
 
     def on_add_box() -> None:
-        state.is_adding_box = not state.is_adding_box
-        if state.is_adding_box:
+        state.session.is_adding_box = not state.session.is_adding_box
+        if state.session.is_adding_box:
             state.select_box(None)
 
         _sync_add_box_button(state, add_box_label, add_box_btn, update=True)
@@ -211,9 +211,9 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         _start_redetect_layout(page, state, loading_overlay, progress_ring, status_text, rebuild)
 
     def on_page_select(idx: int) -> None:
-        state.current_page_index = idx
+        state.session.current_page_index = idx
         state.select_box(None)
-        page_label.value = f"Page {state.current_page_number} / {len(state.pages)}"
+        page_label.value = f"Page {state.current_page_number} / {len(state.session.pages)}"
         rebuild()
 
     def on_box_selected(box_id: str | None) -> None:
@@ -280,19 +280,19 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         ),
     ]
 
-    add_box_label = ft.Text(
-        "Cancel Add" if getattr(state, "is_adding_box", False) else "Add Box"
-    )
+    add_box_label = ft.Text("Cancel Add" if state.session.is_adding_box else "Add Box")
     add_box_btn = ft.OutlinedButton(
         content=add_box_label,
-        icon=ft.Icons.CLOSE if getattr(state, "is_adding_box", False) else ft.Icons.ADD_BOX_OUTLINED,
+        icon=ft.Icons.CLOSE if state.session.is_adding_box else ft.Icons.ADD_BOX_OUTLINED,
         on_click=lambda _e=None: on_add_box(),
-        tooltip="Cancel adding box" if getattr(state, "is_adding_box", False) else "Add a new layout box on this page",
+        tooltip="Cancel adding box"
+        if state.session.is_adding_box
+        else "Add a new layout box on this page",
         style=ft.ButtonStyle(
             color=theme.TEXT_PRIMARY,
             side=ft.BorderSide(1, theme.BORDER),
             shape=ft.RoundedRectangleBorder(radius=6),
-            bgcolor=f"{theme.PRIMARY}20" if getattr(state, "is_adding_box", False) else None,
+            bgcolor=f"{theme.PRIMARY}20" if state.session.is_adding_box else None,
         ),
     )
 
@@ -375,8 +375,8 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     )
 
     def on_keyboard(e: ft.KeyboardEvent) -> None:
-        if e.key == "Delete" and state.selected_box_id:
-            on_remove(state.selected_box_id)
+        if e.key == "Delete" and state.session.selected_box_id:
+            on_remove(state.session.selected_box_id)
 
     page.on_keyboard_event = on_keyboard
 
@@ -393,7 +393,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     )
 
     return ft.View(
-        route=f"/review/{state.run_id}",
+        route=f"/review/{state.session.run_id}",
         controls=[
             ft.Column(
                 [
@@ -441,7 +441,7 @@ def _build_panes(
 def _current_zoom_scale(state: AppState) -> float:
     image_width = _current_page_image_width(state)
     if image_width is None:
-        return state.zoom_level
+        return state.session.zoom_level
     return effective_zoom_level(state, image_width)
 
 
@@ -460,7 +460,7 @@ def _sync_add_box_button(
     *,
     update: bool = False,
 ) -> None:
-    is_adding = getattr(state, "is_adding_box", False)
+    is_adding = state.session.is_adding_box
     add_box_label.value = "Cancel Add" if is_adding else "Add Box"
     add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
     add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
@@ -500,7 +500,7 @@ def _start_reviewed_ocr(
     progress_ring: ft.ProgressRing,
     status_text: ft.Text,
 ) -> None:
-    if not state.run_id:
+    if not state.session.run_id:
         return
 
     _set_loading_controls(
@@ -512,7 +512,7 @@ def _start_reviewed_ocr(
     )
     page.update()
 
-    run_id = state.run_id
+    run_id = state.session.run_id
 
     async def do_ocr() -> None:
         try:
@@ -542,10 +542,10 @@ def _start_redetect_layout(
     status_text: ft.Text,
     rebuild: Callable[[], None],
 ) -> None:
-    if not state.run_id:
+    if not state.session.run_id:
         return
 
-    input_path = state.current_input_path
+    input_path = state.session.current_input_path
     if not input_path:
         page.show_dialog(
             ft.SnackBar(
@@ -556,10 +556,10 @@ def _start_redetect_layout(
         page.update()
         return
 
-    has_prior_review = bool(state.pages)
+    has_prior_review = bool(state.session.pages)
 
     def start_redetect() -> None:
-        run_id = state.run_id
+        run_id = state.session.run_id
         _set_loading_controls(
             loading_overlay,
             progress_ring,
@@ -627,3 +627,4 @@ def _start_redetect_layout(
     ]
     page.show_dialog(dialog)
     page.update()
+

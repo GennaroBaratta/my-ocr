@@ -16,26 +16,26 @@ def clamp_zoom(value: float) -> float:
 
 
 def effective_zoom_level(state: Any, image_width: int | None) -> float:
-    if getattr(state, "zoom_mode", ZOOM_MODE_MANUAL) == ZOOM_MODE_FIT_WIDTH:
-        available_width = getattr(state, "zoom_fit_width", None)
+    if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH:
+        available_width = state.session.zoom_fit_width
         if image_width and available_width:
             content_width = max(1.0, float(available_width) - VIEWER_HORIZONTAL_PADDING)
             return clamp_zoom(content_width / image_width)
-    return clamp_zoom(float(getattr(state, "zoom_level", 1.0)))
+    return clamp_zoom(float(state.session.zoom_level))
 
 
 def set_manual_zoom(state: Any, value: float) -> float:
-    state.zoom_mode = ZOOM_MODE_MANUAL
-    state.zoom_level = clamp_zoom(value)
-    return state.zoom_level
+    state.session.zoom_mode = ZOOM_MODE_MANUAL
+    state.session.zoom_level = clamp_zoom(value)
+    return state.session.zoom_level
 
 
 def set_fit_width_zoom(state: Any) -> None:
-    state.zoom_mode = ZOOM_MODE_FIT_WIDTH
+    state.session.zoom_mode = ZOOM_MODE_FIT_WIDTH
 
 
 def toggle_fit_width_zoom(state: Any, image_width: int | None) -> float:
-    if getattr(state, "zoom_mode", ZOOM_MODE_MANUAL) == ZOOM_MODE_FIT_WIDTH:
+    if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH:
         return set_manual_zoom(state, effective_zoom_level(state, image_width))
 
     set_fit_width_zoom(state)
@@ -43,11 +43,12 @@ def toggle_fit_width_zoom(state: Any, image_width: int | None) -> float:
 
 
 def set_zoom_available_width(state: Any, width: float | None) -> None:
-    state.zoom_fit_width = max(0.0, float(width or 0))
+    state.session.zoom_fit_width = max(0.0, float(width or 0))
 
 
 def zoom_label_text(state: Any, scale: float) -> str:
     percent = f"{int(scale * 100)}%"
-    if getattr(state, "zoom_mode", ZOOM_MODE_MANUAL) == ZOOM_MODE_FIT_WIDTH:
+    if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH:
         return f"Fit {percent}"
     return percent
+

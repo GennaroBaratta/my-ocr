@@ -13,9 +13,9 @@ from ..state import AppState
 def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> ft.Container:
     thumbnails: list[ft.Control] = []
 
-    for page_data in state.pages:
+    for page_data in state.session.pages:
         idx = page_data.index
-        is_active = idx == state.current_page_index
+        is_active = idx == state.session.current_page_index
 
         badge = ft.Container(
             content=ft.Text(
@@ -82,3 +82,4 @@ def build_page_strip(state: AppState, on_page_select: Callable[[int], None]) -> 
         border=ft.Border.only(right=ft.BorderSide(1, theme.BORDER)),
         padding=ft.Padding.only(bottom=8, left=8, right=8),
     )
+

@@ -12,11 +12,11 @@ from ..state import AppState
 
 
 def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
-    if not state.recent_runs:
+    if not state.session.recent_runs:
         return ft.Column()
 
     rows: list[ft.Control] = []
-    for run in state.recent_runs[:10]:
+    for run in state.session.recent_runs[:10]:
         filename = Path(run.input_path).name if run.input_path else run.run_id
         mtime = run.mtime
         date_str = time.strftime("%b %d, %Y", time.localtime(mtime)) if mtime else ""
@@ -87,3 +87,4 @@ def _run_destination(run_id: str, status: str) -> tuple[str, str, str]:
     if status == "review_ready":
         return f"/review/{run_id}", "Review Ready", theme.PRIMARY
     return f"/results/{run_id}", "Pending", theme.TEXT_MUTED
+

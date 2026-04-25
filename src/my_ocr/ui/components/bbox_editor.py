@@ -131,7 +131,7 @@ def _build_editor_stack(
     )
 
     def on_pan_start(e: ft.DragStartEvent) -> None:
-        if not getattr(state, "is_adding_box", False):
+        if not state.session.is_adding_box:
             return
         drawing_state["active"] = True
         drawing_state["start_x"] = e.local_position.x
@@ -168,7 +168,7 @@ def _build_editor_stack(
         x = float(drawing_box.left or 0) / scale
         y = float(drawing_box.top or 0) / scale
         
-        state.is_adding_box = False
+        state.session.is_adding_box = False
         
         if w > 5 and h > 5:
             new_id = state.add_box_to_current_page(label="text", x=x, y=y, width=w, height=h)
@@ -179,7 +179,9 @@ def _build_editor_stack(
         on_box_changed()
 
     background_detector = ft.GestureDetector(
-        mouse_cursor=ft.MouseCursor.PRECISE if getattr(state, "is_adding_box", False) else ft.MouseCursor.BASIC,
+        mouse_cursor=ft.MouseCursor.PRECISE
+        if state.session.is_adding_box
+        else ft.MouseCursor.BASIC,
         on_pan_start=on_pan_start,
         on_pan_update=on_pan_update,
         on_pan_end=on_pan_end,
@@ -449,3 +451,4 @@ def _clamp_box(box: BoundingBox, max_width: int, max_height: int) -> None:
 
 def _overlay_colors(box: BoundingBox) -> tuple[str, str]:
     return overlay_colors_for_label(box.label, box.selected)
+

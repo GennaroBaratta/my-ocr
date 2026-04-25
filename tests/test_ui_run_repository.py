@@ -4,10 +4,10 @@ from pathlib import Path
 
 from my_ocr.adapters.outbound.filesystem.run_read_model import FilesystemRunReadModel
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.dto import (
+from my_ocr.application.artifacts import ProviderArtifacts
+from my_ocr.application.models import (
     LayoutBlock,
     PageRef,
-    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
     RunId,
@@ -66,4 +66,3 @@ def test_ui_mappers_convert_snapshot_pages_and_boxes(tmp_path: Path) -> None:
     assert pages[0].page_number == 1
     assert pages[0].boxes[0].width == 20
     assert pages[0].boxes[0].content == "hello"
-

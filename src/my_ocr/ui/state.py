@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from my_ocr.application.errors import UnsupportedRunSchema
 from my_ocr.application.models import RunId
 from my_ocr.bootstrap import (
@@ -19,9 +17,6 @@ from .mappers import page_data_to_review_layout, pages_from_snapshot, recent_run
 from .session import BoundingBox, PageData, UiSessionState
 
 
-_SESSION_FIELD_NAMES = frozenset(UiSessionState.__dataclass_fields__)
-
-
 class AppState:
     def __init__(self, services: BackendServices | None = None) -> None:
         self.session = UiSessionState()
@@ -34,19 +29,6 @@ class AppState:
 
         self.controller = WorkflowController(self)
 
-    def __getattr__(self, name: str) -> Any:
-        if name in _SESSION_FIELD_NAMES:
-            session = self.__dict__.get("session")
-            if session is not None:
-                return getattr(session, name)
-        raise AttributeError(f"{type(self).__name__!s} object has no attribute {name!r}")
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in _SESSION_FIELD_NAMES and "session" in self.__dict__:
-            setattr(self.session, name, value)
-            return
-        object.__setattr__(self, name, value)
-
     @property
     def run_root(self) -> str:
         return self._run_root
@@ -58,7 +40,7 @@ class AppState:
         self.controller = type(self.controller)(self)
 
     def load_recent_runs(self) -> None:
-        self.recent_runs = [
+        self.session.recent_runs = [
             recent_run_summary(record) for record in self.services.read_model.list_recent_runs()
         ]
 
@@ -66,47 +48,47 @@ class AppState:
         try:
             snapshot = self.services.read_model.load_run(run_id)
         except UnsupportedRunSchema as exc:
-            self.run_id = run_id
-            self.unsupported_run_message = str(exc)
-            self.pages = []
-            self.current_input_path = ""
-            self.ocr_markdown = ""
-            self.ocr_json = {}
-            self.extraction_json = {}
+            self.session.run_id = run_id
+            self.session.unsupported_run_message = str(exc)
+            self.session.pages = []
+            self.session.current_input_path = ""
+            self.session.ocr_markdown = ""
+            self.session.ocr_json = {}
+            self.session.extraction_json = {}
             return
-        self.unsupported_run_message = None
-        self.run_id = str(snapshot.run_id)
-        self.current_input_path = snapshot.manifest.input.path
-        self.pages = pages_from_snapshot(snapshot)
-        self.ocr_markdown = snapshot.ocr_result.markdown if snapshot.ocr_result else ""
-        self.ocr_json = snapshot.ocr_result.to_dict() if snapshot.ocr_result else {}
+        self.session.unsupported_run_message = None
+        self.session.run_id = str(snapshot.run_id)
+        self.session.current_input_path = snapshot.manifest.input.path
+        self.session.pages = pages_from_snapshot(snapshot)
+        self.session.ocr_markdown = snapshot.ocr_result.markdown if snapshot.ocr_result else ""
+        self.session.ocr_json = snapshot.ocr_result.to_dict() if snapshot.ocr_result else {}
         canonical = snapshot.extraction.get("canonical")
-        self.extraction_json = canonical if isinstance(canonical, dict) else {}
-        self.layout_warning = snapshot.manifest.diagnostics.layout.warning
-        self.current_page_index = 0
-        self.selected_box_id = None
-        self.is_adding_box = False
+        self.session.extraction_json = canonical if isinstance(canonical, dict) else {}
+        self.session.layout_warning = snapshot.manifest.diagnostics.layout.warning
+        self.session.current_page_index = 0
+        self.session.selected_box_id = None
+        self.session.is_adding_box = False
 
     def layout_profile_warning(self) -> str | None:
-        return self.layout_warning
+        return self.session.layout_warning
 
     def select_box(self, box_id: str | None) -> None:
-        self.selected_box_id = box_id
-        for page in self.pages:
+        self.session.selected_box_id = box_id
+        for page in self.session.pages:
             for box in page.boxes:
                 box.selected = box.id == box_id
 
     def get_selected_box(self) -> BoundingBox | None:
-        if not self.selected_box_id:
+        if not self.session.selected_box_id:
             return None
-        for page in self.pages:
+        for page in self.session.pages:
             for box in page.boxes:
-                if box.id == self.selected_box_id:
+                if box.id == self.session.selected_box_id:
                     return box
         return None
 
     def update_box(self, box_id: str, **kwargs: object) -> None:
-        for page in self.pages:
+        for page in self.session.pages:
             for box in page.boxes:
                 if box.id == box_id:
                     for key, value in kwargs.items():
@@ -154,8 +136,8 @@ class AppState:
         return box_id
 
     def _next_box_id(self, page_index: int) -> str:
-        existing = {box.id for page in self.pages for box in page.boxes}
-        index = len(self.pages[page_index].boxes)
+        existing = {box.id for page in self.session.pages for box in page.boxes}
+        index = len(self.session.pages[page_index].boxes)
         while True:
             candidate = f"p{page_index}-u{index}"
             if candidate not in existing:
@@ -163,31 +145,32 @@ class AppState:
             index += 1
 
     def remove_box(self, box_id: str) -> None:
-        for page in self.pages:
+        for page in self.session.pages:
             page.boxes = [box for box in page.boxes if box.id != box_id]
-        if self.selected_box_id == box_id:
-            self.selected_box_id = None
+        if self.session.selected_box_id == box_id:
+            self.session.selected_box_id = None
         self.save_reviewed_layout()
 
     def save_reviewed_layout(self) -> None:
-        if not self.run_id:
+        if not self.session.run_id:
             return
         self.services.workflow.save_review_layout(
-            RunId(self.run_id),
-            page_data_to_review_layout(self.pages),
+            RunId(self.session.run_id),
+            page_data_to_review_layout(self.session.pages),
         )
 
     @property
     def current_page(self) -> PageData | None:
-        if 0 <= self.current_page_index < len(self.pages):
-            return self.pages[self.current_page_index]
+        if 0 <= self.session.current_page_index < len(self.session.pages):
+            return self.session.pages[self.session.current_page_index]
         return None
 
     def page_number_for_index(self, page_index: int) -> int:
-        if 0 <= page_index < len(self.pages):
-            return self.pages[page_index].page_number
+        if 0 <= page_index < len(self.session.pages):
+            return self.session.pages[page_index].page_number
         return page_index + 1
 
     @property
     def current_page_number(self) -> int:
-        return self.page_number_for_index(self.current_page_index)
+        return self.page_number_for_index(self.session.current_page_index)
+

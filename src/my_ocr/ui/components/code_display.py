@@ -88,7 +88,7 @@ def build_code_display(state: AppState) -> ft.Column:
     )
 
     tabs = ft.Tabs(
-        selected_index=state.active_result_tab,
+        selected_index=state.session.active_result_tab,
         on_change=lambda e: _on_tab_change(e, state),
         length=3,
         expand=True,
@@ -118,7 +118,7 @@ def build_code_display(state: AppState) -> ft.Column:
 
 
 def _on_tab_change(e: ft.Event[ft.Tabs], state: AppState) -> None:
-    state.active_result_tab = int(e.data) if e.data else 0
+    state.session.active_result_tab = int(e.data) if e.data else 0
 
 
 def _build_panel(title: str, detail: str, body: ft.Control) -> ft.Column:
@@ -161,3 +161,4 @@ def _page_detail_text(current_page_index: int, markdown_pages: list[str]) -> str
     if page_count == 0:
         return "No pages"
     return f"Page {current_page_index + 1} of {page_count}"
+

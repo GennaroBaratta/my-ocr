@@ -18,7 +18,7 @@ def test_doc_viewer_uses_review_overlay_palette_and_alpha_rules(monkeypatch) -> 
     )
 
     state = AppState()
-    state.pages = [
+    state.session.pages = [
         PageData(
             index=0,
             page_number=1,
@@ -65,7 +65,7 @@ def test_doc_viewer_uses_review_overlay_palette_and_alpha_rules(monkeypatch) -> 
             ],
         )
     ]
-    state.current_page_index = 0
+    state.session.current_page_index = 0
 
     viewer = build_doc_viewer(state)
     stack = _viewer_stack(viewer)
@@ -95,8 +95,8 @@ def test_doc_viewer_defaults_to_fit_width_and_exposes_toolbar_button(monkeypatch
     )
 
     state = AppState()
-    state.zoom_fit_width = 82
-    state.pages = [
+    state.session.zoom_fit_width = 82
+    state.session.pages = [
         PageData(
             index=0,
             page_number=1,
@@ -122,7 +122,7 @@ def test_doc_viewer_defaults_to_fit_width_and_exposes_toolbar_button(monkeypatch
     stack = _viewer_stack(viewer)
     text_box = cast(ft.Container, stack.controls[1])
 
-    assert state.zoom_mode == "fit_width"
+    assert state.session.zoom_mode == "fit_width"
     assert fit_width_button.icon == ft.Icons.WIDTH_FULL
     assert fit_width_button.icon_color == theme.PRIMARY
     assert zoom_label.value == "Fit 50%"
@@ -139,8 +139,8 @@ def test_doc_viewer_resize_refreshes_fit_width_canvas_and_header(monkeypatch) ->
     )
 
     state = AppState()
-    state.zoom_fit_width = 82
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.zoom_fit_width = 82
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
 
     viewer = build_doc_viewer(state)
     header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
@@ -151,7 +151,7 @@ def test_doc_viewer_resize_refreshes_fit_width_canvas_and_header(monkeypatch) ->
     on_size_change(SimpleNamespace(width=132, control=canvas_container))
 
     stack = _viewer_stack(viewer)
-    assert state.zoom_fit_width == 132
+    assert state.session.zoom_fit_width == 132
     assert zoom_label.value == "Fit 100%"
     assert stack.width == 100
     assert stack.height == 200
@@ -164,8 +164,8 @@ def test_doc_viewer_fit_width_button_toggles_to_manual_without_page_jump(monkeyp
     )
 
     state = AppState()
-    state.zoom_fit_width = 132
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.zoom_fit_width = 132
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
 
     viewer = build_doc_viewer(state)
     header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
@@ -175,8 +175,8 @@ def test_doc_viewer_fit_width_button_toggles_to_manual_without_page_jump(monkeyp
     zoom_label = cast(ft.Text, header_row.controls[4])
     stack = _viewer_stack(viewer)
 
-    assert state.zoom_mode == "manual"
-    assert state.zoom_level == 1.0
+    assert state.session.zoom_mode == "manual"
+    assert state.session.zoom_level == 1.0
     assert fit_width_button.icon_color == theme.TEXT_MUTED
     assert zoom_label.value == "100%"
     assert stack.width == 100
@@ -190,7 +190,7 @@ def test_doc_viewer_split_pane_width_growth_refreshes_fit_width_canvas(monkeypat
     )
 
     state = AppState()
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
     viewer = build_doc_viewer(state, available_width=82)
     pane = SplitPane(
         viewer,
@@ -205,7 +205,7 @@ def test_doc_viewer_split_pane_width_growth_refreshes_fit_width_canvas(monkeypat
     pane._on_drag(_drag_event(50))
 
     stack = _viewer_stack(viewer)
-    assert state.zoom_fit_width == 132
+    assert state.session.zoom_fit_width == 132
     assert stack.width == 100
     assert stack.height == 200
 
@@ -219,7 +219,7 @@ def test_doc_viewer_embeds_local_image_bytes_for_web_client(tmp_path, monkeypatc
     image_path.write_bytes(b"local image bytes")
 
     state = AppState()
-    state.pages = [PageData(index=0, page_number=1, image_path=str(image_path))]
+    state.session.pages = [PageData(index=0, page_number=1, image_path=str(image_path))]
 
     viewer = build_doc_viewer(state)
     stack = _viewer_stack(viewer)
@@ -235,8 +235,8 @@ def test_doc_viewer_manual_zoom_switches_out_of_fit_width(monkeypatch) -> None:
     )
 
     state = AppState()
-    state.zoom_fit_width = 132
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.zoom_fit_width = 132
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
     viewer = build_doc_viewer(state)
     header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
     zoom_in_button = cast(ft.IconButton, header_row.controls[5])
@@ -246,8 +246,8 @@ def test_doc_viewer_manual_zoom_switches_out_of_fit_width(monkeypatch) -> None:
     fit_width_button = cast(ft.IconButton, header_row.controls[2])
     stack = _viewer_stack(viewer)
 
-    assert state.zoom_mode == "manual"
-    assert state.zoom_level == 1.25
+    assert state.session.zoom_mode == "manual"
+    assert state.session.zoom_level == 1.25
     assert zoom_label.value == "125%"
     assert fit_width_button.icon_color == theme.TEXT_MUTED
     assert stack.width == 125
@@ -263,3 +263,4 @@ def _viewer_stack(viewer: ft.Column) -> ft.Stack:
 def _drag_event(dx: float) -> SimpleNamespace:
     delta = SimpleNamespace(x=dx)
     return SimpleNamespace(local_delta=delta, global_delta=None)
+

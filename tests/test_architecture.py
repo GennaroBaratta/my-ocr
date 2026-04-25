@@ -65,6 +65,15 @@ def _attribute_call_sites(roots: tuple[Path, ...], attribute: str) -> list[tuple
     return calls
 
 
+def _defined_function_names(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
 def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     failures: list[str] = []
     for path in _py_files(package):
@@ -113,11 +122,22 @@ def test_ui_does_not_import_filesystem_run_store_directly() -> None:
     )
 
 
-def test_ui_state_does_not_open_run_transactions_directly() -> None:
+def test_ui_state_does_not_define_magic_session_delegation() -> None:
     state_path = SRC_ROOT / "ui" / "state.py"
-    lines = _attribute_call_lines(state_path, "begin_update")
+    defined = _defined_function_names(state_path)
 
-    assert not lines, f"ui/state.py calls begin_update on lines {lines}"
+    assert "__getattr__" not in defined
+    assert "__setattr__" not in defined
+
+
+def test_ui_does_not_open_run_transactions_directly() -> None:
+    roots = (SRC_ROOT / "ui",)
+    failures = [
+        f"{path.relative_to(SRC_ROOT)}:{line}"
+        for path, line in _attribute_call_sites(roots, "begin_update")
+    ]
+
+    assert not failures
 
 
 def test_review_layout_saves_are_coordinated_by_workflow() -> None:
@@ -144,5 +164,17 @@ def test_source_and_tests_do_not_import_removed_command_layer() -> None:
             modules = _imported_modules(path) | _dynamic_import_strings(path)
             if "my_ocr.application.commands" in modules:
                 failures.append(f"{path.relative_to(REPO_ROOT)} imports command layer")
+
+    assert not failures
+
+
+def test_source_tests_and_tools_do_not_import_removed_application_dto() -> None:
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
+    failures: list[str] = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            modules = _imported_modules(path) | _dynamic_import_strings(path)
+            if "my_ocr.application.dto" in modules:
+                failures.append(f"{path.relative_to(REPO_ROOT)} imports application dto")
 
     assert not failures

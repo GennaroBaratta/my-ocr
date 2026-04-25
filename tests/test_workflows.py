@@ -7,20 +7,22 @@ from typing import Any
 import pytest
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.dto import (
+from my_ocr.application.artifacts import (
     ArtifactCopy,
-    LayoutBlock,
     LayoutDetectionResult,
-    OcrPageResult,
     OcrRecognitionResult,
+    ProviderArtifacts,
+)
+from my_ocr.application.models import (
+    LayoutBlock,
+    OcrPageResult,
     OcrRunResult,
     PageRef,
-    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
     RunId,
-    StructuredExtractionOptions,
 )
+from my_ocr.application.options import StructuredExtractionOptions
 from my_ocr.application.errors import UnsupportedRunSchema
 from my_ocr.application.workflow import DocumentWorkflow
 

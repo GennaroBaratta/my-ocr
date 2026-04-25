@@ -52,7 +52,7 @@ def build_doc_viewer(state: AppState, available_width: float | None = None) -> f
         icon=ft.Icons.WIDTH_FULL,
         icon_size=16,
         icon_color=theme.PRIMARY
-        if state.zoom_mode == ZOOM_MODE_FIT_WIDTH
+        if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH
         else theme.TEXT_MUTED,
         on_click=lambda e: fit_width(e.page),
         tooltip="Fit page width",
@@ -62,7 +62,7 @@ def build_doc_viewer(state: AppState, available_width: float | None = None) -> f
         scale = _rebuild_canvas(canvas_stack, page_data, state)
         zoom_text.value = zoom_label_text(state, scale)
         fit_width_button.icon_color = (
-            theme.PRIMARY if state.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
+            theme.PRIMARY if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
         )
 
     def zoom_in(event_page: ft.Page | ft.BasePage) -> None:
@@ -216,3 +216,4 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> fl
     stack.height = canvas_height
     stack.controls = [image, *overlays]
     return scale
+

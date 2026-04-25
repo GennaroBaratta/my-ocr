@@ -9,7 +9,7 @@ from .state import AppState
 def current_page_index(state: AppState, markdown_pages: list[str]) -> int:
     if not markdown_pages:
         return 0
-    return min(max(state.current_page_index, 0), len(markdown_pages) - 1)
+    return min(max(state.session.current_page_index, 0), len(markdown_pages) - 1)
 
 
 def markdown_pages_for_state(state: AppState) -> list[str]:
@@ -19,12 +19,12 @@ def markdown_pages_for_state(state: AppState) -> list[str]:
             page.get("markdown", "") if isinstance(page.get("markdown"), str) else ""
             for page in pages
         ]
-        target_count = max(len(markdown_pages), len(state.pages), 1)
+        target_count = max(len(markdown_pages), len(state.session.pages), 1)
         while len(markdown_pages) < target_count:
             markdown_pages.append("")
         return markdown_pages
-    if state.ocr_markdown.strip():
-        return [state.ocr_markdown]
+    if state.session.ocr_markdown.strip():
+        return [state.session.ocr_markdown]
     return [""]
 
 
@@ -49,7 +49,7 @@ def current_page_ocr_markdown_for_state(state: AppState) -> str:
     pages = ocr_pages_for_state(state)
     if not pages:
         return ""
-    page_index = state.current_page_index
+    page_index = state.session.current_page_index
     if not 0 <= page_index < len(pages):
         return ""
     markdown = pages[page_index].get("markdown")
@@ -57,14 +57,15 @@ def current_page_ocr_markdown_for_state(state: AppState) -> str:
 
 
 def ocr_json_text_for_state(state: AppState) -> str:
-    return json.dumps(state.ocr_json, indent=2, ensure_ascii=False) if state.ocr_json else ""
+    return json.dumps(state.session.ocr_json, indent=2, ensure_ascii=False) if state.session.ocr_json else ""
 
 
 def ocr_pages_for_state(state: AppState) -> list[dict[str, Any]]:
-    payload = state.ocr_json
+    payload = state.session.ocr_json
     if not isinstance(payload, dict):
         return []
     pages = payload.get("pages")
     if not isinstance(pages, list):
         return []
     return [cast(dict[str, Any], page) for page in pages if isinstance(page, dict)]
+

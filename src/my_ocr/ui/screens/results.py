@@ -22,9 +22,9 @@ def build_results_view(
     state: AppState,
     file_picker: ft.FilePicker,
 ) -> ft.View:
-    filename = Path(state.current_input_path).name if state.current_input_path else ""
+    filename = Path(state.session.current_input_path).name if state.session.current_input_path else ""
     if not filename:
-        filename = state.run_id or ""
+        filename = state.session.run_id or ""
 
     content_host = ft.Row(spacing=0, expand=True)
     document_viewer_width = 500.0
@@ -41,7 +41,7 @@ def build_results_view(
         return ocr_json_text_for_state(state)
 
     def current_ocr_markdown_text() -> str:
-        return state.ocr_markdown
+        return state.session.ocr_markdown
 
     def current_page_export_markdown_text() -> str:
         return current_page_ocr_markdown_for_state(state)
@@ -85,13 +85,13 @@ def build_results_view(
         page.update()
 
     def prev_page() -> None:
-        if state.current_page_index > 0:
-            state.current_page_index -= 1
+        if state.session.current_page_index > 0:
+            state.session.current_page_index -= 1
             rebuild()
 
     def next_page() -> None:
-        if state.current_page_index < len(state.pages) - 1:
-            state.current_page_index += 1
+        if state.session.current_page_index < len(state.session.pages) - 1:
+            state.session.current_page_index += 1
             rebuild()
 
     async def copy_clipboard() -> None:
@@ -106,7 +106,7 @@ def build_results_view(
         if not ocr_json_text:
             return
         save_path = await file_picker.save_file(
-            file_name=f"{state.run_id or 'result'}.json",
+            file_name=f"{state.session.run_id or 'result'}.json",
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["json"],
         )
@@ -118,7 +118,7 @@ def build_results_view(
         if not ocr_markdown_text.strip():
             return
         save_path = await file_picker.save_file(
-            file_name=f"{state.run_id or 'result'}.md",
+            file_name=f"{state.session.run_id or 'result'}.md",
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["md"],
         )
@@ -131,7 +131,7 @@ def build_results_view(
             return
         current_page_number = state.current_page_number
         save_path = await file_picker.save_file(
-            file_name=f"{state.run_id or 'result'}-page-{current_page_number:04d}.md",
+            file_name=f"{state.session.run_id or 'result'}-page-{current_page_number:04d}.md",
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=["md"],
         )
@@ -139,19 +139,19 @@ def build_results_view(
             _save_markdown(save_path, page_markdown_text)
 
     def reload_state(page_index: int) -> None:
-        if not state.run_id:
+        if not state.session.run_id:
             return
-        state.load_run(state.run_id)
-        if state.pages:
-            state.current_page_index = min(max(page_index, 0), len(state.pages) - 1)
+        state.load_run(state.session.run_id)
+        if state.session.pages:
+            state.session.current_page_index = min(max(page_index, 0), len(state.session.pages) - 1)
         else:
-            state.current_page_index = 0
+            state.session.current_page_index = 0
 
     def rerun_page_layout() -> None:
-        if not state.run_id or rerun_in_progress:
+        if not state.session.run_id or rerun_in_progress:
             return
-        run_id = state.run_id
-        page_index = state.current_page_index
+        run_id = state.session.run_id
+        page_index = state.session.current_page_index
         page_number = state.current_page_number
 
         def on_success() -> None:
@@ -167,10 +167,10 @@ def build_results_view(
         )
 
     def rerun_page_ocr() -> None:
-        if not state.run_id or rerun_in_progress:
+        if not state.session.run_id or rerun_in_progress:
             return
-        run_id = state.run_id
-        page_index = state.current_page_index
+        run_id = state.session.run_id
+        page_index = state.session.current_page_index
         page_number = state.current_page_number
 
         def on_success() -> None:
@@ -263,7 +263,7 @@ def build_results_view(
             icon_color=theme.TEXT_PRIMARY,
             icon_size=20,
             tooltip="Back to Layout Review",
-            on_click=lambda: page.go(f"/review/{state.run_id}"),
+            on_click=lambda: page.go(f"/review/{state.session.run_id}"),
         ),
         ft.VerticalDivider(width=1, color=theme.BORDER),
         ft.IconButton(
@@ -337,14 +337,14 @@ def build_results_view(
         border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
-    if state.unsupported_run_message:
+    if state.session.unsupported_run_message:
         content_host.controls = [
             ft.Container(
                 content=ft.Column(
                     [
                         ft.Icon(ft.Icons.ERROR_OUTLINE, size=42, color=theme.ERROR),
                         ft.Text(
-                            state.unsupported_run_message,
+                            state.session.unsupported_run_message,
                             color=theme.TEXT_PRIMARY,
                             size=14,
                             text_align=ft.TextAlign.CENTER,
@@ -360,7 +360,7 @@ def build_results_view(
         content_host.controls = [build_content_split_pane()]
 
     return ft.View(
-        route=f"/results/{state.run_id}",
+        route=f"/results/{state.session.run_id}",
         controls=[
             ft.Column(
                 [
@@ -413,8 +413,9 @@ def _start_page_rerun(
 
 
 def _page_label_text(state: AppState) -> str:
-    page_count = len(state.pages)
+    page_count = len(state.session.pages)
     if page_count == 0:
         return "Page 0 / 0"
     page_number = state.current_page_number
     return f"Page {page_number} / {page_count}"
+

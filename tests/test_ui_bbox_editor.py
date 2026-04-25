@@ -36,7 +36,7 @@ def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) 
 
     resize_update(_drag_event(5, 10))
 
-    box = state.pages[0].boxes[0]
+    box = state.session.pages[0].boxes[0]
     box_content = cast(ft.Container, box_detector.content)
     assert (box.x, box.y, box.width, box.height) == (15, 30, 25, 30)
     assert live_calls == ["live"]
@@ -78,7 +78,7 @@ def test_move_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) ->
 
     drag_update(_drag_event(8, -4))
 
-    box = state.pages[0].boxes[0]
+    box = state.session.pages[0].boxes[0]
     assert (box.x, box.y, box.width, box.height) == (18, 16, 30, 40)
     assert live_calls == ["live"]
     assert commit_calls == []
@@ -98,7 +98,7 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     )
 
     state = AppState()
-    state.pages = [
+    state.session.pages = [
         PageData(
             index=0,
             page_number=1,
@@ -144,7 +144,7 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
             ],
         )
     ]
-    state.current_page_index = 0
+    state.session.current_page_index = 0
 
     editor = build_bbox_editor(
         state,
@@ -179,8 +179,8 @@ def test_bbox_editor_uses_shared_fit_width_scale_for_overlays(monkeypatch) -> No
     )
 
     state = AppState()
-    state.zoom_fit_width = 82
-    state.pages = [
+    state.session.zoom_fit_width = 82
+    state.session.pages = [
         PageData(
             index=0,
             page_number=1,
@@ -198,7 +198,7 @@ def test_bbox_editor_uses_shared_fit_width_scale_for_overlays(monkeypatch) -> No
             ],
         )
     ]
-    state.current_page_index = 0
+    state.session.current_page_index = 0
 
     editor = build_bbox_editor(
         state,
@@ -226,9 +226,9 @@ def test_bbox_editor_resize_reports_fit_width_scale_once(monkeypatch) -> None:
     )
 
     state = AppState()
-    state.zoom_fit_width = 82
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
-    state.current_page_index = 0
+    state.session.zoom_fit_width = 82
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.current_page_index = 0
     scales: list[float] = []
 
     editor = build_bbox_editor(
@@ -244,7 +244,7 @@ def test_bbox_editor_resize_reports_fit_width_scale_once(monkeypatch) -> None:
     on_size_change(SimpleNamespace(width=132))
 
     stack = _editor_stack(editor)
-    assert state.zoom_fit_width == 132
+    assert state.session.zoom_fit_width == 132
     assert scales == [1.0]
     assert stack.width == 100
     assert stack.height == 200
@@ -259,9 +259,9 @@ def test_bbox_editor_fit_width_toggle_keeps_canvas_size_when_switching_to_manual
     )
 
     state = AppState()
-    state.zoom_fit_width = 132
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
-    state.current_page_index = 0
+    state.session.zoom_fit_width = 132
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.session.current_page_index = 0
     editor = build_bbox_editor(
         state,
         lambda _box_id: None,
@@ -279,8 +279,8 @@ def test_bbox_editor_fit_width_toggle_keeps_canvas_size_when_switching_to_manual
     )
 
     stack = _editor_stack(editor)
-    assert state.zoom_mode == "manual"
-    assert state.zoom_level == 1.0
+    assert state.session.zoom_mode == "manual"
+    assert state.session.zoom_level == 1.0
     assert stack.width == 100
     assert stack.height == 200
 
@@ -292,9 +292,9 @@ def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatc
     )
 
     state = AppState()
-    state.is_adding_box = True
-    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png", boxes=[])]
-    state.current_page_index = 0
+    state.session.is_adding_box = True
+    state.session.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png", boxes=[])]
+    state.session.current_page_index = 0
 
     selected_ids: list[str | None] = []
     commit_calls: list[str] = []
@@ -317,19 +317,19 @@ def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatc
     update_drag(SimpleNamespace(local_position=SimpleNamespace(x=40, y=55)))
     end_drag(SimpleNamespace())
 
-    assert state.is_adding_box is False
-    assert len(state.pages[0].boxes) == 1
-    assert state.pages[0].boxes[0].label == "text"
-    assert (state.pages[0].boxes[0].x, state.pages[0].boxes[0].y) == (10, 15)
-    assert (state.pages[0].boxes[0].width, state.pages[0].boxes[0].height) == (30, 40)
-    assert selected_ids == [state.pages[0].boxes[0].id]
+    assert state.session.is_adding_box is False
+    assert len(state.session.pages[0].boxes) == 1
+    assert state.session.pages[0].boxes[0].label == "text"
+    assert (state.session.pages[0].boxes[0].x, state.session.pages[0].boxes[0].y) == (10, 15)
+    assert (state.session.pages[0].boxes[0].width, state.session.pages[0].boxes[0].height) == (30, 40)
+    assert selected_ids == [state.session.pages[0].boxes[0].id]
     assert commit_calls == ["commit"]
     assert live_calls == ["live", "live"]
 
 
 def _build_selected_state() -> AppState:
     state = AppState()
-    state.pages = [
+    state.session.pages = [
         PageData(
             index=0,
             page_number=1,
@@ -347,7 +347,7 @@ def _build_selected_state() -> AppState:
             ],
         )
     ]
-    state.current_page_index = 0
+    state.session.current_page_index = 0
     state.select_box("p0-b0")
     return state
 
@@ -361,3 +361,4 @@ def _editor_stack(editor: ft.Container) -> ft.Stack:
     canvas = cast(ft.Column, editor.content)
     stack_row = cast(ft.Row, canvas.controls[0])
     return cast(ft.Stack, stack_row.controls[0])
+

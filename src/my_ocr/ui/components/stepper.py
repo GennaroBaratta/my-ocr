@@ -93,10 +93,11 @@ def _step_chip(
 def _step_route(key: str, state: AppState) -> str | None:
     if key == "/":
         return "/"
-    if not state.run_id:
+    if not state.session.run_id:
         return None
     if key == "review":
-        return f"/review/{state.run_id}"
+        return f"/review/{state.session.run_id}"
     if key == "results":
-        return f"/results/{state.run_id}"
+        return f"/results/{state.session.run_id}"
     return None
+

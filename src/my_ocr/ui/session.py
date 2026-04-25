@@ -14,6 +14,8 @@ class RecentRunSummary:
 
 @dataclass
 class BoundingBox:
+    """Mutable UI view model for an editable layout box."""
+
     id: str
     page_index: int
     x: float
@@ -28,6 +30,8 @@ class BoundingBox:
 
 @dataclass
 class PageData:
+    """Mutable UI view model for page review state, not a persistence model."""
+
     index: int
     page_number: int
     image_path: str
