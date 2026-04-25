@@ -15,7 +15,9 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from typing import Any
 
-from my_ocr.application.use_cases.ocr import run_ocr_workflow
+from my_ocr.application.commands import PrepareLayoutReviewCommand, RunReviewedOcrCommand
+from my_ocr.application.dto import RunId
+from my_ocr.bootstrap import build_backend_services
 
 from .config import DevMcpConfig
 
@@ -386,17 +388,17 @@ class RunStateReader:
     def read_run_state(self, run_id: str) -> dict[str, Any]:
         run_dir = self.repo_paths.require_run_id(run_id)
         pages_dir = run_dir / "pages"
-        predictions_dir = run_dir / "predictions"
+        extraction_dir = run_dir / "extraction"
 
         artifact_paths = {
             "run_dir": _safe_file_info(run_dir, self.repo_paths),
-            "meta_json": _safe_file_info(run_dir / "meta.json", self.repo_paths),
+            "run_json": _safe_file_info(run_dir / "run.json", self.repo_paths),
             "reviewed_layout_json": _safe_file_info(
-                run_dir / "reviewed_layout.json", self.repo_paths
+                run_dir / "layout" / "review.json", self.repo_paths
             ),
-            "ocr_json": _safe_file_info(run_dir / "ocr.json", self.repo_paths),
-            "ocr_markdown": _safe_file_info(run_dir / "ocr.md", self.repo_paths),
-            "predictions_dir": _safe_file_info(predictions_dir, self.repo_paths),
+            "ocr_json": _safe_file_info(run_dir / "ocr" / "pages.json", self.repo_paths),
+            "ocr_markdown": _safe_file_info(run_dir / "ocr" / "markdown.md", self.repo_paths),
+            "extraction_dir": _safe_file_info(extraction_dir, self.repo_paths),
         }
 
         result: dict[str, Any] = {
@@ -425,13 +427,18 @@ class RunStateReader:
             result["page_paths"] = page_paths
             result["page_count"] = len(page_paths)
 
-        meta_path = run_dir / "meta.json"
-        if meta_path.exists():
-            meta = _try_read_json(meta_path)
-            if isinstance(meta, dict):
-                result["meta"] = meta
+        run_json_path = run_dir / "run.json"
+        if run_json_path.exists():
+            manifest = _try_read_json(run_json_path)
+            if isinstance(manifest, dict):
+                input_payload = manifest.get("input")
+                result["meta"] = {
+                    "input_path": input_payload.get("path") if isinstance(input_payload, dict) else None,
+                    "schema_version": manifest.get("schema_version"),
+                    "status": manifest.get("status"),
+                }
 
-        reviewed_layout_path = run_dir / "reviewed_layout.json"
+        reviewed_layout_path = run_dir / "layout" / "review.json"
         if reviewed_layout_path.exists():
             reviewed_layout = _try_read_json(reviewed_layout_path)
             if isinstance(reviewed_layout, dict):
@@ -443,7 +450,7 @@ class RunStateReader:
                     "path": self.repo_paths.rel_to_repo(reviewed_layout_path),
                 }
 
-        ocr_path = run_dir / "ocr.json"
+        ocr_path = run_dir / "ocr" / "pages.json"
         if ocr_path.exists():
             ocr = _try_read_json(ocr_path)
             if isinstance(ocr, dict):
@@ -454,9 +461,9 @@ class RunStateReader:
                     "path": self.repo_paths.rel_to_repo(ocr_path),
                 }
 
-        if predictions_dir.exists():
+        if extraction_dir.exists():
             predictions = []
-            for path in sorted(predictions_dir.iterdir()):
+            for path in sorted(extraction_dir.iterdir()):
                 if not path.is_file():
                     continue
                 prediction: dict[str, Any] = {
@@ -506,12 +513,17 @@ class OCRWorkflowRunner:
                 "OCR is already running in the dev MCP. Wait for it to finish before starting another run."
             )
         try:
-            run_dir = run_ocr_workflow(
-                str(resolved_input_path),
-                run=normalized_run_id,
-                run_root=str(self.config.run_root),
-                recorded_input_path=repo_relative_input,
+            services = build_backend_services(str(self.config.run_root))
+            prepared = services.prepare_layout_review(
+                PrepareLayoutReviewCommand(
+                    input_path=str(resolved_input_path),
+                    run_id=RunId(normalized_run_id) if normalized_run_id else None,
+                )
             )
+            result = services.run_reviewed_ocr(
+                RunReviewedOcrCommand(run_id=prepared.snapshot.run_id)
+            )
+            run_dir = result.snapshot.run_dir
         finally:
             self._run_lock.release()
         run_state = self.run_state_reader.read_run_state(run_dir.name)

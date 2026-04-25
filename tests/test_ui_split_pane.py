@@ -36,6 +36,20 @@ def test_split_pane_drag_keeps_existing_left_content() -> None:
     assert left_container.content is left
 
 
+def test_split_pane_reports_left_width_after_resize_and_drag() -> None:
+    widths: list[float] = []
+    pane = SplitPane(
+        ft.Text("left"),
+        ft.Text("right"),
+        on_left_width_change=widths.append,
+    )
+
+    pane._on_size_change(SimpleNamespace(width=1000))
+    pane._on_drag(_drag_event(100))
+
+    assert widths == [500, 600]
+
+
 def _drag_event(dx: float) -> SimpleNamespace:
     delta = SimpleNamespace(x=dx)
     return SimpleNamespace(local_delta=delta, global_delta=None)

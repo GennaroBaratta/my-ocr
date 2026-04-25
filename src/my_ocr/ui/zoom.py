@@ -34,6 +34,14 @@ def set_fit_width_zoom(state: Any) -> None:
     state.zoom_mode = ZOOM_MODE_FIT_WIDTH
 
 
+def toggle_fit_width_zoom(state: Any, image_width: int | None) -> float:
+    if getattr(state, "zoom_mode", ZOOM_MODE_MANUAL) == ZOOM_MODE_FIT_WIDTH:
+        return set_manual_zoom(state, effective_zoom_level(state, image_width))
+
+    set_fit_width_zoom(state)
+    return effective_zoom_level(state, image_width)
+
+
 def set_zoom_available_width(state: Any, width: float | None) -> None:
     state.zoom_fit_width = max(0.0, float(width or 0))
 

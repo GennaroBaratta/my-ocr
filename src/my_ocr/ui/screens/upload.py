@@ -155,11 +155,6 @@ def _start_review_prep(
     progress_ring: ft.ProgressRing,
     status_text: ft.Text,
 ) -> None:
-    import asyncio
-    import functools
-
-    from my_ocr.application.use_cases.prepare_review import prepare_review_workflow
-
     loading_overlay.visible = True
     progress_ring.visible = True
     status_text.visible = True
@@ -169,20 +164,13 @@ def _start_review_prep(
 
     async def do_prepare_review() -> None:
         try:
-            run_dir = await asyncio.to_thread(
-                functools.partial(
-                    prepare_review_workflow,
-                    file_path,
-                    run_root=state.run_root,
-                    layout_profile=state.layout_profile,
-                )
-            )
+            result = await state.controller.prepare_review(file_path)
             loading_overlay.visible = False
             progress_ring.visible = False
             status_text.visible = False
-            state.load_run(Path(run_dir).name)
             _show_layout_warning(page, state)
-            page.go(f"/review/{state.run_id}")
+            if result.route:
+                page.go(result.route)
         except Exception as exc:
             loading_overlay.visible = False
             progress_ring.visible = False

@@ -11,15 +11,17 @@ from ..state import AppState, PageData
 from ..zoom import (
     ZOOM_MODE_FIT_WIDTH,
     effective_zoom_level,
-    set_fit_width_zoom,
     set_manual_zoom,
     set_zoom_available_width,
+    toggle_fit_width_zoom,
     zoom_label_text,
 )
 from .overlay_styles import overlay_colors_for_label
 
+_SET_AVAILABLE_WIDTH_ATTR = "_my_ocr_set_available_width"
 
-def build_doc_viewer(state: AppState) -> ft.Column:
+
+def build_doc_viewer(state: AppState, available_width: float | None = None) -> ft.Column:
     page_data = state.current_page
     if not page_data:
         return ft.Column(
@@ -35,6 +37,9 @@ def build_doc_viewer(state: AppState) -> ft.Column:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             expand=True,
         )
+
+    if available_width is not None:
+        set_zoom_available_width(state, available_width)
 
     zoom_text = ft.Text(
         "",
@@ -71,7 +76,8 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         event_page.update()
 
     def fit_width(event_page: ft.Page | ft.BasePage) -> None:
-        set_fit_width_zoom(state)
+        image_width, _image_height = get_image_size(page_data.image_path)
+        toggle_fit_width_zoom(state, image_width)
         refresh_canvas()
         event_page.update()
 
@@ -108,10 +114,19 @@ def build_doc_viewer(state: AppState) -> ft.Column:
     canvas_stack = ft.Stack()
     refresh_canvas()
 
-    def on_viewer_size_change(e: ft.PageResizeEvent) -> None:
-        set_zoom_available_width(state, e.width)
+    def refresh_available_width(width: float) -> None:
+        set_zoom_available_width(state, width)
         refresh_canvas()
         controls_to_update: list[ft.Control] = [zoom_text, fit_width_button]
+        for control in controls_to_update:
+            try:
+                control.update()
+            except RuntimeError:
+                pass
+
+    def on_viewer_size_change(e: ft.PageResizeEvent) -> None:
+        refresh_available_width(e.width)
+        controls_to_update: list[ft.Control] = []
         try:
             controls_to_update.append(e.control)
         except AttributeError:
@@ -135,7 +150,7 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         scroll=ft.ScrollMode.AUTO,
     )
 
-    return ft.Column(
+    viewer = ft.Column(
         [
             ft.Container(
                 content=header,
@@ -154,6 +169,14 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         spacing=0,
         expand=True,
     )
+    setattr(viewer, _SET_AVAILABLE_WIDTH_ATTR, refresh_available_width)
+    return viewer
+
+
+def refresh_doc_viewer_available_width(viewer: ft.Control, width: float) -> None:
+    refresh = getattr(viewer, _SET_AVAILABLE_WIDTH_ATTR, None)
+    if callable(refresh):
+        refresh(width)
 
 
 def _current_scale(page_data: PageData, state: AppState) -> float:

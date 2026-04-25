@@ -147,22 +147,24 @@ A sample document ships at `docs/demo/PublicWaterMassMailing.pdf`, so the comman
 
 | Command | What it does |
 | --- | --- |
-| `ocr <pdf> --run <id>` | Ingest, layout-detect, and OCR a document |
+| `prepare-review <pdf> --run <id>` | Ingest, normalize pages, and prepare editable layout review |
+| `run-reviewed-ocr --run <id>` | Run OCR using the saved reviewed layout |
+| `ocr <pdf> --run <id>` | Non-interactive automatic layout detection and OCR |
 | `extract-rules --run <id>` | Run the deterministic rules extractor |
 | `extract-glmocr --run <id>` | Run structured extraction via GLM-OCR |
-| `run <pdf> --run <id>` | End-to-end: OCR + rules extraction |
+| `run <pdf> --run <id>` | Non-interactive automatic layout, OCR, and rules extraction |
 | `eval --gold-dir ... --pred-dir ... --output ...` | Score predictions against gold labels |
 
 End-to-end example:
 
 ```bash
-# OCR + rules extraction in one shot
+# Automatic layout + OCR + rules extraction in one shot
 uv run my-ocr run docs/demo/PublicWaterMassMailing.pdf --run demo001
 
 # Optional: evaluate predictions against hand-labeled gold data
 uv run my-ocr eval \
   --gold-dir data/gold \
-  --pred-dir data/runs/demo001/predictions \
+  --pred-dir data/runs/demo001/extraction \
   --output data/reports/demo001.md
 ```
 
@@ -180,23 +182,37 @@ Each run lands in `data/runs/<run-id>/`.
 
 ```text
 data/runs/demo001/
+  run.json
   pages/
-  ocr_raw/
-  reviewed_layout.json
-  ocr.md
-  ocr.json
-  ocr_fallback.json
-  meta.json
-  predictions/
+    page-0001.png
+  layout/
+    review.json
+    provider/
+      page-0001/
+  ocr/
+    markdown.md
+    pages.json
+    provider/
+      page-0001/
+    fallback/
+      page-0001/
+  extraction/
+    rules.json
+    structured.json
+    structured_meta.json
+    canonical.json
 ```
 
 Key files:
 
-- `reviewed_layout.json` — page-by-page layout state used by the review step
-- `ocr.md` — merged markdown output for the run
-- `ocr.json` — project-owned OCR payload with page records and references to raw SDK artifacts
-- `ocr_raw/` — saved GLM-OCR model payloads per page
-- `predictions/` — rules and structured extraction outputs
+- `run.json` — v2 manifest with input metadata, immutable page identities, status, and diagnostics
+- `layout/review.json` — page-by-page layout state used by the review step
+- `ocr/markdown.md` — merged markdown output for the run
+- `ocr/pages.json` — project-owned OCR payload with page records and relative artifact references
+- `layout/provider/` and `ocr/provider/` — saved GLM-OCR provider payloads per page
+- `extraction/` — rules, structured, and canonical extraction outputs
+
+Committed run payloads use paths relative to the run folder. Runs without `run.json` are treated as unsupported v1 artifacts; re-run the source document to create a v2 run.
 
 ## Design Decisions & Trade-offs
 

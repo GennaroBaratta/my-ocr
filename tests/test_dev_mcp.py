@@ -83,7 +83,8 @@ def test_read_run_state_collects_expected_artifacts(tmp_path) -> None:
     assert result["predictions"][0]["name"] == "rules.json"
     assert result["predictions"][0]["top_level_keys"] == ["document_type"]
     assert (
-        result["artifact_paths"]["ocr_json"]["repo_relative_path"] == "data/runs/demo-ui/ocr.json"
+        result["artifact_paths"]["ocr_json"]["repo_relative_path"]
+        == "data/runs/demo-ui/ocr/pages.json"
     )
     assert run_dir.exists()
 
@@ -94,20 +95,23 @@ def test_run_ocr_returns_run_state_for_repo_local_pdf(tmp_path, monkeypatch) -> 
     run_dir = seed_run(repo_root / "data" / "runs" / "demo-run")
     captured: dict[str, object] = {}
 
-    def fake_run_ocr_workflow(
-        input_path: str,
-        *,
-        run: str | None,
-        run_root: str,
-        recorded_input_path: str | None,
-    ) -> Path:
-        captured["input_path"] = input_path
-        captured["run"] = run
-        captured["run_root"] = run_root
-        captured["recorded_input_path"] = recorded_input_path
-        return run_dir
+    def fake_prepare(command):
+        captured["input_path"] = command.input_path
+        captured["run"] = command.run_id
+        return SimpleNamespace(snapshot=SimpleNamespace(run_id=command.run_id, run_dir=run_dir))
 
-    monkeypatch.setattr(services_module, "run_ocr_workflow", fake_run_ocr_workflow)
+    def fake_ocr(command):
+        captured["ocr_run"] = command.run_id
+        return SimpleNamespace(snapshot=SimpleNamespace(run_id=command.run_id, run_dir=run_dir))
+
+    monkeypatch.setattr(
+        services_module,
+        "build_backend_services",
+        lambda run_root: SimpleNamespace(
+            prepare_layout_review=fake_prepare,
+            run_reviewed_ocr=fake_ocr,
+        ),
+    )
     runner = OCRWorkflowRunner(DevMcpConfig.from_repo_root(repo_root))
 
     result = runner.run_ocr(input_path="data/raw/demo.pdf", run_id="demo-run")
@@ -118,9 +122,8 @@ def test_run_ocr_returns_run_state_for_repo_local_pdf(tmp_path, monkeypatch) -> 
     assert result["run_state"]["run_id"] == "demo-run"
     assert captured == {
         "input_path": str((repo_root / "data" / "raw" / "demo.pdf").resolve()),
-        "run": "demo-run",
-        "run_root": str(repo_root / "data" / "runs"),
-        "recorded_input_path": "data/raw/demo.pdf",
+        "run": services_module.RunId("demo-run"),
+        "ocr_run": services_module.RunId("demo-run"),
     }
 
 
@@ -185,7 +188,7 @@ def test_save_feedback_bundle_copies_screenshot_and_lists_bundles(tmp_path) -> N
             ],
             notes="Captured after reviewing the demo run.",
             screenshot_paths=[str(screenshot)],
-            related_paths=["data/runs/demo-ui/reviewed_layout.json"],
+            related_paths=["data/runs/demo-ui/layout/review.json"],
         )
 
     saved = cast(dict[str, object], anyio.run(save_bundle))
@@ -470,32 +473,52 @@ def seed_raw_pdf(path: Path) -> Path:
 
 def seed_run(run_dir: Path) -> Path:
     pages_dir = run_dir / "pages"
-    predictions_dir = run_dir / "predictions"
+    extraction_dir = run_dir / "extraction"
     pages_dir.mkdir(parents=True, exist_ok=True)
-    predictions_dir.mkdir(parents=True, exist_ok=True)
+    extraction_dir.mkdir(parents=True, exist_ok=True)
 
     (pages_dir / "page-0001.png").write_bytes(b"page")
-    (run_dir / "meta.json").write_text(
-        json.dumps({"input_path": "data/raw/demo.pdf", "page_paths": ["page-0001.png"]}),
-        encoding="utf-8",
-    )
-    (run_dir / "reviewed_layout.json").write_text(
+    (run_dir / "run.json").write_text(
         json.dumps(
             {
-                "version": 1,
+                "schema_version": 2,
+                "run_id": run_dir.name,
+                "input": {"path": "data/raw/demo.pdf", "name": "demo.pdf", "kind": "pdf"},
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "image_path": "pages/page-0001.png",
+                        "width": 10,
+                        "height": 10,
+                    }
+                ],
+                "status": {"layout": "reviewed", "ocr": "complete", "extraction": "rules"},
+                "diagnostics": {"layout": {}, "ocr": {}, "extraction": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "layout").mkdir(exist_ok=True)
+    (run_dir / "layout" / "review.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
                 "status": "reviewed",
-                "pages": [{"page_number": 1, "blocks": []}],
+                "pages": [{"page_number": 1, "image_path": "pages/page-0001.png", "blocks": []}],
                 "summary": {"page_count": 1},
             }
         ),
         encoding="utf-8",
     )
-    (run_dir / "ocr.json").write_text(
+    (run_dir / "ocr").mkdir(exist_ok=True)
+    (run_dir / "ocr" / "pages.json").write_text(
         json.dumps({"pages": [{"page_number": 1}], "summary": {"page_count": 1}}),
         encoding="utf-8",
     )
-    (run_dir / "ocr.md").write_text("# OCR", encoding="utf-8")
-    (predictions_dir / "rules.json").write_text(
+    (run_dir / "ocr" / "markdown.md").write_text("# OCR", encoding="utf-8")
+    (extraction_dir / "rules.json").write_text(
         json.dumps({"document_type": "report"}),
         encoding="utf-8",
     )

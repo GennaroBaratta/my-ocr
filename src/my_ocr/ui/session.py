@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from my_ocr.application.artifacts.run_paths import RunPaths
-
 
 @dataclass(frozen=True, slots=True)
 class RecentRunSummary:
@@ -40,7 +38,8 @@ class PageData:
 class UiSessionState:
     recent_runs: list[RecentRunSummary] = field(default_factory=list)
     run_id: str | None = None
-    run_paths: RunPaths | None = None
+    current_input_path: str = ""
+    unsupported_run_message: str | None = None
     pages: list[PageData] = field(default_factory=list)
     current_page_index: int = 0
     selected_box_id: str | None = None
@@ -52,5 +51,7 @@ class UiSessionState:
     progress_message: str = ""
     error_message: str | None = None
     ocr_markdown: str = ""
+    ocr_json: dict[str, Any] = field(default_factory=dict)
     extraction_json: dict[str, Any] = field(default_factory=dict)
     active_result_tab: int = 0
+    layout_warning: str | None = None

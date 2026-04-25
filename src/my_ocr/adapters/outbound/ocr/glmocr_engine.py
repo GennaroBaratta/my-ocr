@@ -10,7 +10,11 @@ from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mo
 from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
 from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
 from my_ocr.adapters.outbound.filesystem.json_store import load_json, write_json, write_text
-from my_ocr.application.artifacts.run_paths import RunPaths
+from my_ocr.adapters.outbound.filesystem.review_layout_store import (
+    load_review_layout_payload,
+    save_review_layout_payload,
+)
+from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
 from my_ocr.adapters.outbound.ocr._glmocr_artifacts import (
     publish_saved_model_json_path as _publish_saved_model_json_path_impl,
     save_result_to_raw_dir as _save_result_to_raw_dir_impl,
@@ -42,10 +46,8 @@ from my_ocr.domain.review_layout import (
     REVIEWED_LAYOUT_APPLY_MODE,
     build_review_layout_payload,
     build_review_page_from_layout,
-    load_review_layout_payload,
     review_layout_pages_by_number,
     review_page_to_layout_payload,
-    save_review_layout_payload,
 )
 
 

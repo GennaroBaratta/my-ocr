@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
-import functools
-import json
 from pathlib import Path
-from typing import cast
+from typing import Awaitable, cast
 
 import flet as ft
 
 from .. import theme
 from ..components.code_display import build_code_display
-from ..components.doc_viewer import build_doc_viewer
+from ..components.doc_viewer import build_doc_viewer, refresh_doc_viewer_available_width
 from ..components.split_pane import SplitPane
 from ..components.stepper import build_stepper
 from ..ocr_result_text import current_page_ocr_markdown_for_state, ocr_json_text_for_state
@@ -25,19 +22,12 @@ def build_results_view(
     state: AppState,
     file_picker: ft.FilePicker,
 ) -> ft.View:
-    filename = ""
-    if state.run_paths:
-        meta_path = state.run_paths.meta_path
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                filename = Path(meta.get("input_path", "")).name
-            except (json.JSONDecodeError, OSError):
-                pass
-        if not filename:
-            filename = state.run_id or ""
+    filename = Path(state.current_input_path).name if state.current_input_path else ""
+    if not filename:
+        filename = state.run_id or ""
 
     content_host = ft.Row(spacing=0, expand=True)
+    document_viewer_width = 500.0
 
     page_label = ft.Text(
         _page_label_text(state),
@@ -72,10 +62,26 @@ def build_results_view(
         sync_toolbar_state()
         page.update()
 
+    def build_content_split_pane() -> SplitPane:
+        nonlocal document_viewer_width
+        viewer = build_doc_viewer(state, available_width=document_viewer_width)
+
+        def on_left_width_change(width: float) -> None:
+            nonlocal document_viewer_width
+            document_viewer_width = width
+            refresh_doc_viewer_available_width(viewer, width)
+
+        return SplitPane(
+            viewer,
+            build_code_display(state),
+            initial_left_width=document_viewer_width,
+            on_left_width_change=on_left_width_change,
+        )
+
     def rebuild() -> None:
         page_label.value = _page_label_text(state)
         sync_toolbar_state()
-        content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
+        content_host.controls = [build_content_split_pane()]
         page.update()
 
     def prev_page() -> None:
@@ -142,8 +148,6 @@ def build_results_view(
             state.current_page_index = 0
 
     def rerun_page_layout() -> None:
-        from my_ocr.application.use_cases.redetect_page_layout import prepare_review_page_workflow
-
         if not state.run_id or rerun_in_progress:
             return
         run_id = state.run_id
@@ -156,18 +160,13 @@ def build_results_view(
 
         _start_page_rerun(
             page,
-            state,
-            workflow=prepare_review_page_workflow,
-            run_id=run_id,
-            page_number=page_number,
+            action=lambda: state.controller.rerun_page_layout(run_id, page_number),
             set_rerun_in_progress=set_rerun_in_progress,
             on_success=on_success,
             error_prefix="Page layout re-detect failed",
         )
 
     def rerun_page_ocr() -> None:
-        from my_ocr.application.use_cases.rerun_page_ocr import run_reviewed_ocr_page_workflow
-
         if not state.run_id or rerun_in_progress:
             return
         run_id = state.run_id
@@ -180,10 +179,7 @@ def build_results_view(
 
         _start_page_rerun(
             page,
-            state,
-            workflow=run_reviewed_ocr_page_workflow,
-            run_id=run_id,
-            page_number=page_number,
+            action=lambda: state.controller.rerun_page_ocr(run_id, page_number),
             set_rerun_in_progress=set_rerun_in_progress,
             on_success=on_success,
             error_prefix="Page OCR rerun failed",
@@ -341,7 +337,27 @@ def build_results_view(
         border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
-    content_host.controls = [SplitPane(build_doc_viewer(state), build_code_display(state))]
+    if state.unsupported_run_message:
+        content_host.controls = [
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Icon(ft.Icons.ERROR_OUTLINE, size=42, color=theme.ERROR),
+                        ft.Text(
+                            state.unsupported_run_message,
+                            color=theme.TEXT_PRIMARY,
+                            size=14,
+                            text_align=ft.TextAlign.CENTER,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                expand=True,
+            )
+        ]
+    else:
+        content_host.controls = [build_content_split_pane()]
 
     return ft.View(
         route=f"/results/{state.run_id}",
@@ -370,11 +386,8 @@ def _save_json(path: str, content: str) -> None:
 
 def _start_page_rerun(
     page: ft.Page,
-    state: AppState,
     *,
-    workflow: Callable[..., Path],
-    run_id: str,
-    page_number: int,
+    action: Callable[[], Awaitable[object]],
     set_rerun_in_progress: Callable[[bool], None],
     on_success: Callable[[], None],
     error_prefix: str,
@@ -383,15 +396,7 @@ def _start_page_rerun(
 
     async def do_rerun() -> None:
         try:
-            await asyncio.to_thread(
-                functools.partial(
-                    workflow,
-                    run_id,
-                    page_number,
-                    run_root=state.run_root,
-                    layout_profile=state.layout_profile,
-                )
-            )
+            await action()
             on_success()
         except Exception as exc:
             page.show_dialog(

@@ -6,7 +6,8 @@ from typing import Callable, cast
 import flet as ft
 
 from my_ocr.ui import theme
-from my_ocr.ui.components.doc_viewer import build_doc_viewer
+from my_ocr.ui.components.doc_viewer import build_doc_viewer, refresh_doc_viewer_available_width
+from my_ocr.ui.components.split_pane import SplitPane
 from my_ocr.ui.state import AppState, BoundingBox, PageData
 
 
@@ -156,6 +157,59 @@ def test_doc_viewer_resize_refreshes_fit_width_canvas_and_header(monkeypatch) ->
     assert stack.height == 200
 
 
+def test_doc_viewer_fit_width_button_toggles_to_manual_without_page_jump(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 132
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+
+    viewer = build_doc_viewer(state)
+    header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
+    fit_width_button = cast(ft.IconButton, header_row.controls[2])
+    fit_width_button.on_click(SimpleNamespace(page=SimpleNamespace(update=lambda: None)))
+
+    zoom_label = cast(ft.Text, header_row.controls[4])
+    stack = _viewer_stack(viewer)
+
+    assert state.zoom_mode == "manual"
+    assert state.zoom_level == 1.0
+    assert fit_width_button.icon_color == theme.TEXT_MUTED
+    assert zoom_label.value == "100%"
+    assert stack.width == 100
+    assert stack.height == 200
+
+
+def test_doc_viewer_split_pane_width_growth_refreshes_fit_width_canvas(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    viewer = build_doc_viewer(state, available_width=82)
+    pane = SplitPane(
+        viewer,
+        ft.Text("right"),
+        initial_left_width=82,
+        min_left=50,
+        min_right=50,
+        on_left_width_change=lambda width: refresh_doc_viewer_available_width(viewer, width),
+    )
+
+    pane._on_size_change(SimpleNamespace(width=300))
+    pane._on_drag(_drag_event(50))
+
+    stack = _viewer_stack(viewer)
+    assert state.zoom_fit_width == 132
+    assert stack.width == 100
+    assert stack.height == 200
+
+
 def test_doc_viewer_embeds_local_image_bytes_for_web_client(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "my_ocr.ui.components.doc_viewer.get_image_size",
@@ -204,3 +258,8 @@ def _viewer_stack(viewer: ft.Column) -> ft.Stack:
     canvas = cast(ft.Column, canvas_container.content)
     stack_row = cast(ft.Row, canvas.controls[0])
     return cast(ft.Stack, stack_row.controls[0])
+
+
+def _drag_event(dx: float) -> SimpleNamespace:
+    delta = SimpleNamespace(x=dx)
+    return SimpleNamespace(local_delta=delta, global_delta=None)

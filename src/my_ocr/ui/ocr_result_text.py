@@ -57,22 +57,11 @@ def current_page_ocr_markdown_for_state(state: AppState) -> str:
 
 
 def ocr_json_text_for_state(state: AppState) -> str:
-    if not state.run_paths or not state.run_paths.ocr_json_path.exists():
-        return ""
-    try:
-        payload = json.loads(state.run_paths.ocr_json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ""
-    return json.dumps(payload, indent=2, ensure_ascii=False) if isinstance(payload, dict) else ""
+    return json.dumps(state.ocr_json, indent=2, ensure_ascii=False) if state.ocr_json else ""
 
 
 def ocr_pages_for_state(state: AppState) -> list[dict[str, Any]]:
-    if not state.run_paths or not state.run_paths.ocr_json_path.exists():
-        return []
-    try:
-        payload = json.loads(state.run_paths.ocr_json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
+    payload = state.ocr_json
     if not isinstance(payload, dict):
         return []
     pages = payload.get("pages")

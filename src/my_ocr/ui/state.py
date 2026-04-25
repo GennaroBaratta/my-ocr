@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from my_ocr.adapters.outbound.config.settings import (
+from my_ocr.application.dto import ProviderArtifacts
+from my_ocr.application.errors import UnsupportedRunSchema
+from my_ocr.bootstrap import (
+    BackendServices,
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_RUN_ROOT,
+    build_backend_services,
 )
 
 from .image_utils import get_image_size
-from .run_repository import RunRepository
+from .mappers import page_data_to_review_layout, pages_from_snapshot, recent_run_summary
 from .session import BoundingBox, PageData, UiSessionState
 
 
@@ -19,13 +23,16 @@ _SESSION_FIELD_NAMES = frozenset(UiSessionState.__dataclass_fields__)
 
 
 class AppState:
-    def __init__(self) -> None:
+    def __init__(self, services: BackendServices | None = None) -> None:
         self.session = UiSessionState()
         self.ollama_endpoint: str = DEFAULT_OLLAMA_ENDPOINT
         self.ollama_model: str = DEFAULT_OLLAMA_MODEL
         self._run_root: str = DEFAULT_RUN_ROOT
-        self.repository = RunRepository(self._run_root)
+        self.services = services or build_backend_services(self._run_root)
         self.layout_profile: str = "auto"
+        from .controller import WorkflowController
+
+        self.controller = WorkflowController(self)
 
     def __getattr__(self, name: str) -> Any:
         if name in _SESSION_FIELD_NAMES:
@@ -47,24 +54,41 @@ class AppState:
     @run_root.setter
     def run_root(self, value: str) -> None:
         self._run_root = value
-        self.repository.run_root = value
+        self.services = build_backend_services(value)
+        self.controller = type(self.controller)(self)
 
     def load_recent_runs(self) -> None:
-        self.recent_runs = self.repository.list_recent_runs()
+        self.recent_runs = [
+            recent_run_summary(record) for record in self.services.read_model.list_recent_runs()
+        ]
 
     def load_run(self, run_id: str) -> None:
-        loaded = self.repository.load_run(run_id)
-        self.run_id = loaded.run_id
-        self.run_paths = loaded.run_paths
-        self.pages = loaded.pages
-        self.ocr_markdown = loaded.ocr_markdown
-        self.extraction_json = loaded.extraction_json
+        try:
+            snapshot = self.services.read_model.load_run(run_id)
+        except UnsupportedRunSchema as exc:
+            self.run_id = run_id
+            self.unsupported_run_message = str(exc)
+            self.pages = []
+            self.current_input_path = ""
+            self.ocr_markdown = ""
+            self.ocr_json = {}
+            self.extraction_json = {}
+            return
+        self.unsupported_run_message = None
+        self.run_id = str(snapshot.run_id)
+        self.current_input_path = snapshot.manifest.input.path
+        self.pages = pages_from_snapshot(snapshot)
+        self.ocr_markdown = snapshot.ocr_result.markdown if snapshot.ocr_result else ""
+        self.ocr_json = snapshot.ocr_result.to_dict() if snapshot.ocr_result else {}
+        canonical = snapshot.extraction.get("canonical")
+        self.extraction_json = canonical if isinstance(canonical, dict) else {}
+        self.layout_warning = snapshot.manifest.diagnostics.layout.warning
         self.current_page_index = 0
         self.selected_box_id = None
         self.is_adding_box = False
 
     def layout_profile_warning(self) -> str | None:
-        return self.repository.layout_profile_warning(self.run_paths)
+        return self.layout_warning
 
     def select_box(self, box_id: str | None) -> None:
         self.selected_box_id = box_id
@@ -146,7 +170,15 @@ class AppState:
         self.save_reviewed_layout()
 
     def save_reviewed_layout(self) -> None:
-        self.repository.save_reviewed_layout(self.run_paths, self.pages)
+        if not self.run_id:
+            return
+        tx = self.services.run_store.begin_update(self.run_id)
+        try:
+            tx.write_review_layout(page_data_to_review_layout(self.pages), ProviderArtifacts.empty())
+            tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
 
     @property
     def current_page(self) -> PageData | None:

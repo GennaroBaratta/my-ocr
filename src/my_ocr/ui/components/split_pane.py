@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import flet as ft
 
 from .. import theme
@@ -15,12 +17,14 @@ class SplitPane(ft.Row):
         initial_left_width: float = 500,
         min_left: float = 240,
         min_right: float = 240,
+        on_left_width_change: Callable[[float], None] | None = None,
     ) -> None:
         self._left_width = initial_left_width
         self._min_left = min_left
         self._min_right = min_right
         self._divider_width = 6
         self._total_width: float | None = None
+        self._on_left_width_change = on_left_width_change
 
         self._left_container = ft.Container(
             content=left,
@@ -54,8 +58,7 @@ class SplitPane(ft.Row):
         delta = e.local_delta or e.global_delta
         if delta is None:
             return
-        self._left_width = self._clamp_left_width(self._left_width + delta.x)
-        self._left_container.width = self._left_width
+        self._set_left_width(self._left_width + delta.x)
         try:
             self.update()
         except RuntimeError:
@@ -63,12 +66,17 @@ class SplitPane(ft.Row):
 
     def _on_size_change(self, e: ft.PageResizeEvent) -> None:
         self._total_width = e.width
-        self._left_width = self._clamp_left_width(self._left_width)
-        self._left_container.width = self._left_width
+        self._set_left_width(self._left_width)
         try:
             self.update()
         except RuntimeError:
             pass
+
+    def _set_left_width(self, width: float) -> None:
+        self._left_width = self._clamp_left_width(width)
+        self._left_container.width = self._left_width
+        if self._on_left_width_change:
+            self._on_left_width_change(self._left_width)
 
     def _clamp_left_width(self, width: float) -> float:
         if self._total_width is None:

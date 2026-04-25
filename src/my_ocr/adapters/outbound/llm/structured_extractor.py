@@ -14,7 +14,7 @@ from my_ocr.adapters.outbound.config.settings import (
     resolve_ocr_api_client,
 )
 from my_ocr.adapters.outbound.filesystem.json_store import write_json
-from my_ocr.application.artifacts.run_paths import RunPaths
+from my_ocr.application.dto import PageRef, StructuredExtractionOptions
 from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
 from my_ocr.domain.document import JSON_SCHEMA, DocumentFields
 from my_ocr.domain.text import replace_html_tables
@@ -113,13 +113,30 @@ def extract_structured(
 def save_structured_result(
     run_dir: str | Path, prediction: dict[str, Any], metadata: dict[str, Any]
 ) -> None:
-    paths = RunPaths.from_run_dir(run_dir)
+    run_dir = Path(run_dir)
     metadata_payload = dict(metadata)
     raw_body = metadata_payload.pop(RAW_BODY_METADATA_KEY, None)
-    write_json(paths.structured_prediction_path, prediction)
-    write_json(paths.structured_metadata_path, metadata_payload)
+    write_json(run_dir / "extraction" / "structured.json", prediction)
+    write_json(run_dir / "extraction" / "structured_meta.json", metadata_payload)
     if raw_body is not None:
-        write_json(paths.structured_raw_path, raw_body)
+        write_json(run_dir / "extraction" / "structured_raw.json", raw_body)
+
+
+class OllamaStructuredExtractor:
+    def extract(
+        self,
+        pages: list[PageRef],
+        *,
+        markdown_text: str | None,
+        options: StructuredExtractionOptions,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        return extract_structured(
+            [str(page.path_for_io) for page in pages],
+            markdown_text=markdown_text,
+            config_path=options.config_path,
+            model=options.model,
+            endpoint=options.endpoint,
+        )
 
 
 def build_structured_prompt() -> str:

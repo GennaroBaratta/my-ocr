@@ -20,8 +20,7 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
         filename = Path(run.input_path).name if run.input_path else run.run_id
         mtime = run.mtime
         date_str = time.strftime("%b %d, %Y", time.localtime(mtime)) if mtime else ""
-        run_dir = Path(state.run_root) / run.run_id
-        route, badge_text, badge_color = _run_destination(run_dir)
+        route, badge_text, badge_color = _run_destination(run.run_id, run.status)
 
         badge = ft.Container(
             content=ft.Text(
@@ -80,13 +79,11 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
     )
 
 
-def _run_destination(run_dir: Path) -> tuple[str, str, str]:
-    run_id = run_dir.name
-    has_review = (run_dir / "reviewed_layout.json").exists()
-    has_ocr = (run_dir / "ocr.json").exists()
-
-    if has_ocr:
+def _run_destination(run_id: str, status: str) -> tuple[str, str, str]:
+    if status == "unsupported":
+        return f"/results/{run_id}", "Unsupported", theme.ERROR
+    if status in {"ocr_complete", "extracted"}:
         return f"/results/{run_id}", "OCR Complete", theme.SUCCESS
-    if has_review:
+    if status == "review_ready":
         return f"/review/{run_id}", "Review Ready", theme.PRIMARY
     return f"/results/{run_id}", "Pending", theme.TEXT_MUTED

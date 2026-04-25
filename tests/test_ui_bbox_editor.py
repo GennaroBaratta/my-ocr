@@ -6,8 +6,9 @@ from typing import Callable, cast
 import flet as ft
 
 from my_ocr.ui import theme
-from my_ocr.ui.components.bbox_editor import build_bbox_editor
+from my_ocr.ui.components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from my_ocr.ui.state import AppState, BoundingBox, PageData
+from my_ocr.ui.zoom import toggle_fit_width_zoom
 
 
 def test_resize_handle_updates_overlay_live_and_commits_on_pan_end(monkeypatch) -> None:
@@ -245,6 +246,41 @@ def test_bbox_editor_resize_reports_fit_width_scale_once(monkeypatch) -> None:
     stack = _editor_stack(editor)
     assert state.zoom_fit_width == 132
     assert scales == [1.0]
+    assert stack.width == 100
+    assert stack.height == 200
+
+
+def test_bbox_editor_fit_width_toggle_keeps_canvas_size_when_switching_to_manual(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.bbox_editor.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 132
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.current_page_index = 0
+    editor = build_bbox_editor(
+        state,
+        lambda _box_id: None,
+        lambda: None,
+        lambda: None,
+    )
+
+    toggle_fit_width_zoom(state, 100)
+    refresh_bbox_editor(
+        editor,
+        state,
+        lambda _box_id: None,
+        lambda: None,
+        lambda: None,
+    )
+
+    stack = _editor_stack(editor)
+    assert state.zoom_mode == "manual"
+    assert state.zoom_level == 1.0
     assert stack.width == 100
     assert stack.height == 200
 

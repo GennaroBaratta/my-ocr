@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Callable, cast
 
@@ -18,8 +17,9 @@ from ..state import AppState
 from ..zoom import (
     ZOOM_MODE_FIT_WIDTH,
     effective_zoom_level,
-    set_fit_width_zoom,
     set_manual_zoom,
+    set_zoom_available_width,
+    toggle_fit_width_zoom,
     zoom_label_text,
 )
 
@@ -37,13 +37,7 @@ def _show_layout_warning(page: ft.Page, state: AppState) -> None:
 
 
 def build_review_view(page: ft.Page, state: AppState) -> ft.View:
-    filename = ""
-    if state.run_paths and state.run_paths.meta_path.exists():
-        try:
-            meta = json.loads(state.run_paths.meta_path.read_text(encoding="utf-8"))
-            filename = Path(meta.get("input_path", "")).name
-        except (json.JSONDecodeError, OSError):
-            pass
+    filename = Path(state.current_input_path).name if state.current_input_path else ""
     if not filename:
         filename = state.run_id or "Document"
 
@@ -68,6 +62,43 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     # ── Mutable content containers ──────────────────────────────────
     content_row = ft.Row(spacing=0, expand=True)
+    review_content_width: float | None = None
+
+    def sync_editor_available_width(*, update: bool = False) -> bool:
+        if review_content_width is None or len(content_row.controls) < 2:
+            return False
+
+        page_strip_width = float(getattr(content_row.controls[0], "width", 0) or 0)
+        inspector_width = 0.0
+        if len(content_row.controls) > 2:
+            inspector_width = float(getattr(content_row.controls[2], "width", 0) or 0)
+
+        set_zoom_available_width(
+            state,
+            max(0.0, review_content_width - page_strip_width - inspector_width),
+        )
+        bbox_editor = cast(ft.Container, content_row.controls[1])
+        refresh_bbox_editor(
+            bbox_editor,
+            state,
+            on_box_selected,
+            on_box_changed,
+            on_box_live_change,
+            on_zoom_scale_change,
+        )
+        if update:
+            try:
+                bbox_editor.update()
+            except RuntimeError:
+                pass
+        return True
+
+    def on_content_row_size_change(e: ft.PageResizeEvent) -> None:
+        nonlocal review_content_width
+        review_content_width = e.width
+        sync_editor_available_width(update=True)
+
+    content_row.on_size_change = on_content_row_size_change
 
     def rebuild() -> None:
         content_row.controls = _build_panes(
@@ -80,6 +111,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             on_deselect,
             on_remove,
         )
+        sync_editor_available_width()
         page.update()
 
     def refresh_selection() -> None:
@@ -99,6 +131,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             on_zoom_scale_change,
         )
         content_row.controls[2] = build_inspector(state, on_deselect, on_box_changed, on_remove)
+        sync_editor_available_width()
         page.update()
 
     # ── Toolbar ─────────────────────────────────────────────────────
@@ -158,7 +191,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         rebuild()
 
     def fit_width() -> None:
-        set_fit_width_zoom(state)
+        toggle_fit_width_zoom(state, _current_page_image_width(state))
         refresh_zoom_toolbar()
         rebuild()
 
@@ -406,11 +439,18 @@ def _build_panes(
 
 
 def _current_zoom_scale(state: AppState) -> float:
+    image_width = _current_page_image_width(state)
+    if image_width is None:
+        return state.zoom_level
+    return effective_zoom_level(state, image_width)
+
+
+def _current_page_image_width(state: AppState) -> int | None:
     page_data = state.current_page
     if not page_data:
-        return state.zoom_level
+        return None
     image_width, _image_height = get_image_size(page_data.image_path)
-    return effective_zoom_level(state, image_width)
+    return image_width
 
 
 def _sync_add_box_button(
@@ -460,8 +500,6 @@ def _start_reviewed_ocr(
     progress_ring: ft.ProgressRing,
     status_text: ft.Text,
 ) -> None:
-    from my_ocr.application.use_cases.run_ocr_from_review import run_reviewed_ocr_workflow
-
     if not state.run_id:
         return
 
@@ -474,25 +512,15 @@ def _start_reviewed_ocr(
     )
     page.update()
 
-    import asyncio
-    import functools
-
     run_id = state.run_id
 
     async def do_ocr() -> None:
         try:
-            await asyncio.to_thread(
-                functools.partial(
-                    run_reviewed_ocr_workflow,
-                    run_id,
-                    run_root=state.run_root,
-                    layout_profile=state.layout_profile,
-                )
-            )
+            result = await state.controller.run_reviewed_ocr(run_id)
             _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
-            state.load_run(run_id)
             _show_layout_warning(page, state)
-            page.go(f"/results/{run_id}")
+            if result.route:
+                page.go(result.route)
         except Exception as exc:
             _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
             page.show_dialog(
@@ -514,16 +542,10 @@ def _start_redetect_layout(
     status_text: ft.Text,
     rebuild: Callable[[], None],
 ) -> None:
-    from my_ocr.application.use_cases.prepare_review import prepare_review_workflow
-
-    if not state.run_id or not state.run_paths:
+    if not state.run_id:
         return
 
-    try:
-        meta = json.loads(state.run_paths.meta_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        meta = {}
-    input_path = meta.get("input_path")
+    input_path = state.current_input_path
     if not input_path:
         page.show_dialog(
             ft.SnackBar(
@@ -534,14 +556,10 @@ def _start_redetect_layout(
         page.update()
         return
 
-    has_prior_review = state.run_paths.reviewed_layout_path.exists()
+    has_prior_review = bool(state.pages)
 
     def start_redetect() -> None:
-        import asyncio
-        import functools
-
         run_id = state.run_id
-        run_root = state.run_root
         _set_loading_controls(
             loading_overlay,
             progress_ring,
@@ -553,15 +571,9 @@ def _start_redetect_layout(
 
         async def do_redetect() -> None:
             try:
-                await asyncio.to_thread(
-                    functools.partial(
-                        prepare_review_workflow,
-                        input_path,
-                        run=run_id,
-                        run_root=run_root,
-                        layout_profile=state.layout_profile,
-                    )
-                )
+                if run_id is None:
+                    return
+                await state.controller.redetect_review(input_path, run_id)
                 _set_loading_controls(
                     loading_overlay,
                     progress_ring,

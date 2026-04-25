@@ -319,13 +319,13 @@ def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
         {"model": DEFAULT_OLLAMA_MODEL, "_raw_body": {"response": '{"title":"Sample"}'}},
     )
 
-    pred_dir = tmp_path / "predictions"
-    assert json.loads((pred_dir / "glmocr_structured.json").read_text(encoding="utf-8")) == {
+    pred_dir = tmp_path / "extraction"
+    assert json.loads((pred_dir / "structured.json").read_text(encoding="utf-8")) == {
         "title": "Sample"
     }
-    assert json.loads((pred_dir / "glmocr_structured_meta.json").read_text(encoding="utf-8")) == {
+    assert json.loads((pred_dir / "structured_meta.json").read_text(encoding="utf-8")) == {
         "model": DEFAULT_OLLAMA_MODEL
     }
-    assert json.loads((pred_dir / "glmocr_structured_raw.json").read_text(encoding="utf-8")) == {
+    assert json.loads((pred_dir / "structured_raw.json").read_text(encoding="utf-8")) == {
         "response": '{"title":"Sample"}'
     }
