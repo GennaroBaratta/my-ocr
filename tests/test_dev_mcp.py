@@ -95,21 +95,23 @@ def test_run_ocr_returns_run_state_for_repo_local_pdf(tmp_path, monkeypatch) -> 
     run_dir = seed_run(repo_root / "data" / "runs" / "demo-run")
     captured: dict[str, object] = {}
 
-    def fake_prepare(command):
-        captured["input_path"] = command.input_path
-        captured["run"] = command.run_id
-        return SimpleNamespace(snapshot=SimpleNamespace(run_id=command.run_id, run_dir=run_dir))
+    def fake_prepare_review(*, input_path, run_id):
+        captured["input_path"] = input_path
+        captured["run"] = run_id
+        return SimpleNamespace(snapshot=SimpleNamespace(run_id=run_id, run_dir=run_dir))
 
-    def fake_ocr(command):
-        captured["ocr_run"] = command.run_id
-        return SimpleNamespace(snapshot=SimpleNamespace(run_id=command.run_id, run_dir=run_dir))
+    def fake_run_reviewed_ocr(run_id):
+        captured["ocr_run"] = run_id
+        return SimpleNamespace(snapshot=SimpleNamespace(run_id=run_id, run_dir=run_dir))
 
     monkeypatch.setattr(
         services_module,
         "build_backend_services",
         lambda run_root: SimpleNamespace(
-            prepare_layout_review=fake_prepare,
-            run_reviewed_ocr=fake_ocr,
+            workflow=SimpleNamespace(
+                prepare_review=fake_prepare_review,
+                run_reviewed_ocr=fake_run_reviewed_ocr,
+            ),
         ),
     )
     runner = OCRWorkflowRunner(DevMcpConfig.from_repo_root(repo_root))

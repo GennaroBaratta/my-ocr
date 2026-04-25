@@ -16,16 +16,8 @@ from my_ocr.adapters.outbound.filesystem.run_read_model import FilesystemRunRead
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
 from my_ocr.adapters.outbound.glmocr import GlmOcrEngine, GlmOcrLayoutDetector
 from my_ocr.adapters.outbound.llm.structured_extractor import OllamaStructuredExtractor
-from my_ocr.application.commands import (
-    ExtractRules,
-    ExtractStructured,
-    PrepareLayoutReview,
-    RerunPageLayout,
-    RerunPageOcr,
-    RunPipeline,
-    RunReviewedOcr,
-)
 from my_ocr.application.services.rules_extractor import extract_from_markdown
+from my_ocr.application.workflow import DocumentWorkflow
 
 
 class RulesExtractorAdapter:
@@ -37,13 +29,7 @@ class RulesExtractorAdapter:
 class BackendServices:
     run_store: FilesystemRunStore
     read_model: FilesystemRunReadModel
-    prepare_layout_review: PrepareLayoutReview
-    run_reviewed_ocr: RunReviewedOcr
-    rerun_page_layout: RerunPageLayout
-    rerun_page_ocr: RerunPageOcr
-    extract_rules: ExtractRules
-    extract_structured: ExtractStructured
-    run_pipeline: RunPipeline
+    workflow: DocumentWorkflow
 
 
 def build_backend_services(run_root: str = DEFAULT_RUN_ROOT) -> BackendServices:
@@ -57,18 +43,13 @@ def build_backend_services(run_root: str = DEFAULT_RUN_ROOT) -> BackendServices:
     return BackendServices(
         run_store=run_store,
         read_model=read_model,
-        prepare_layout_review=PrepareLayoutReview(run_store, normalizer, layout_detector),
-        run_reviewed_ocr=RunReviewedOcr(run_store, ocr_engine),
-        rerun_page_layout=RerunPageLayout(run_store, layout_detector),
-        rerun_page_ocr=RerunPageOcr(run_store, ocr_engine),
-        extract_rules=ExtractRules(run_store, rules_extractor),
-        extract_structured=ExtractStructured(run_store, structured_extractor),
-        run_pipeline=RunPipeline(
+        workflow=DocumentWorkflow(
             run_store,
             normalizer,
             layout_detector,
             ocr_engine,
             rules_extractor,
+            structured_extractor,
         ),
     )
 
@@ -82,4 +63,3 @@ __all__ = [
     "DEFAULT_RUN_ROOT",
     "build_backend_services",
 ]
-

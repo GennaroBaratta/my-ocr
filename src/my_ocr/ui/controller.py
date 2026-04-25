@@ -4,12 +4,6 @@ import asyncio
 from dataclasses import dataclass
 import functools
 
-from my_ocr.application.commands import (
-    PrepareLayoutReviewCommand,
-    RerunPageLayoutCommand,
-    RerunPageOcrCommand,
-    RunReviewedOcrCommand,
-)
 from my_ocr.application.dto import LayoutOptions, OcrOptions, RunId
 
 
@@ -28,11 +22,9 @@ class WorkflowController:
         state = self._state
         result = await asyncio.to_thread(
             functools.partial(
-                state.services.prepare_layout_review,
-                PrepareLayoutReviewCommand(
-                    input_path=input_path,
-                    options=_layout_options(state),
-                ),
+                state.services.workflow.prepare_review,
+                input_path=input_path,
+                options=_layout_options(state),
             )
         )
         run_id = str(result.snapshot.run_id)
@@ -43,8 +35,9 @@ class WorkflowController:
         state = self._state
         result = await asyncio.to_thread(
             functools.partial(
-                state.services.run_reviewed_ocr,
-                RunReviewedOcrCommand(run_id=RunId(run_id), options=_ocr_options(state)),
+                state.services.workflow.run_reviewed_ocr,
+                RunId(run_id),
+                options=_ocr_options(state),
             )
         )
         state.load_run(str(result.snapshot.run_id))
@@ -58,12 +51,10 @@ class WorkflowController:
         state = self._state
         result = await asyncio.to_thread(
             functools.partial(
-                state.services.prepare_layout_review,
-                PrepareLayoutReviewCommand(
-                    input_path=input_path,
-                    run_id=RunId(run_id),
-                    options=_layout_options(state),
-                ),
+                state.services.workflow.prepare_review,
+                input_path=input_path,
+                run_id=RunId(run_id),
+                options=_layout_options(state),
             )
         )
         state.load_run(str(result.snapshot.run_id))
@@ -77,12 +68,10 @@ class WorkflowController:
         state = self._state
         result = await asyncio.to_thread(
             functools.partial(
-                state.services.rerun_page_layout,
-                RerunPageLayoutCommand(
-                    run_id=RunId(run_id),
-                    page_number=page_number,
-                    options=_layout_options(state),
-                ),
+                state.services.workflow.rerun_page_layout,
+                RunId(run_id),
+                page_number=page_number,
+                options=_layout_options(state),
             )
         )
         state.load_run(str(result.snapshot.run_id))
@@ -96,12 +85,10 @@ class WorkflowController:
         state = self._state
         result = await asyncio.to_thread(
             functools.partial(
-                state.services.rerun_page_ocr,
-                RerunPageOcrCommand(
-                    run_id=RunId(run_id),
-                    page_number=page_number,
-                    options=_ocr_options(state),
-                ),
+                state.services.workflow.rerun_page_ocr,
+                RunId(run_id),
+                page_number=page_number,
+                options=_ocr_options(state),
             )
         )
         state.load_run(str(result.snapshot.run_id))
@@ -114,4 +101,3 @@ def _layout_options(state: object) -> LayoutOptions:
 
 def _ocr_options(state: object) -> OcrOptions:
     return OcrOptions(layout_profile=state.layout_profile)
-

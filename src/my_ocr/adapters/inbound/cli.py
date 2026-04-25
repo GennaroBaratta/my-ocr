@@ -4,13 +4,6 @@ import argparse
 import json
 from pathlib import Path
 
-from my_ocr.application.commands import (
-    ExtractRulesCommand,
-    ExtractStructuredCommand,
-    PrepareLayoutReviewCommand,
-    RunPipelineCommand,
-    RunReviewedOcrCommand,
-)
 from my_ocr.application.dto import (
     LayoutOptions,
     OcrOptions,
@@ -91,55 +84,48 @@ def main(argv: list[str] | None = None) -> int:
 
 def cmd_prepare_review(args: argparse.Namespace) -> Path:
     services = build_backend_services(args.run_root)
-    result = services.prepare_layout_review(
-        PrepareLayoutReviewCommand(
-            input_path=args.input_path,
-            run_id=_optional_run_id(args.run),
-            options=_layout_options(args),
-        )
+    result = services.workflow.prepare_review(
+        input_path=args.input_path,
+        run_id=_optional_run_id(args.run),
+        options=_layout_options(args),
     )
     return result.snapshot.run_dir
 
 
 def cmd_run_reviewed_ocr(args: argparse.Namespace) -> Path:
     services = build_backend_services(args.run_root)
-    result = services.run_reviewed_ocr(
-        RunReviewedOcrCommand(run_id=RunId(args.run), options=_ocr_options(args))
-    )
+    result = services.workflow.run_reviewed_ocr(RunId(args.run), options=_ocr_options(args))
     return result.snapshot.run_dir
 
 
 def cmd_ocr(args: argparse.Namespace) -> Path:
     services = build_backend_services(args.run_root)
-    prepared = services.prepare_layout_review(
-        PrepareLayoutReviewCommand(
-            input_path=args.input_path,
-            run_id=_optional_run_id(args.run),
-            options=_layout_options(args),
-        )
+    prepared = services.workflow.prepare_review(
+        input_path=args.input_path,
+        run_id=_optional_run_id(args.run),
+        options=_layout_options(args),
     )
-    result = services.run_reviewed_ocr(
-        RunReviewedOcrCommand(run_id=prepared.snapshot.run_id, options=_ocr_options(args))
+    result = services.workflow.run_reviewed_ocr(
+        prepared.snapshot.run_id,
+        options=_ocr_options(args),
     )
     return result.snapshot.run_dir
 
 
 def cmd_extract_rules(args: argparse.Namespace) -> None:
     services = build_backend_services(args.run_root)
-    services.extract_rules(ExtractRulesCommand(run_id=RunId(args.run)))
+    services.workflow.extract_rules(RunId(args.run))
 
 
 def cmd_extract_glmocr(args: argparse.Namespace) -> None:
     services = build_backend_services(args.run_root)
-    services.extract_structured(
-        ExtractStructuredCommand(
-            run_id=RunId(args.run),
-            options=StructuredExtractionOptions(
-                config_path=args.config,
-                model=args.model,
-                endpoint=args.endpoint,
-            ),
-        )
+    services.workflow.extract_structured(
+        RunId(args.run),
+        options=StructuredExtractionOptions(
+            config_path=args.config,
+            model=args.model,
+            endpoint=args.endpoint,
+        ),
     )
 
 
@@ -156,13 +142,11 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 def cmd_run(args: argparse.Namespace) -> Path:
     services = build_backend_services(args.run_root)
-    result = services.run_pipeline(
-        RunPipelineCommand(
-            input_path=args.input_path,
-            run_id=_optional_run_id(args.run),
-            layout_options=_layout_options(args),
-            ocr_options=_ocr_options(args),
-        )
+    result = services.workflow.run_automatic(
+        input_path=args.input_path,
+        run_id=_optional_run_id(args.run),
+        layout_options=_layout_options(args),
+        ocr_options=_ocr_options(args),
     )
     return result.snapshot.run_dir
 
@@ -219,4 +203,3 @@ def _add_layout_args(parser: argparse.ArgumentParser) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

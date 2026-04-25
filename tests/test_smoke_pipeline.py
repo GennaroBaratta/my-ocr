@@ -7,17 +7,19 @@ from my_ocr.adapters.inbound import cli
 from my_ocr.application.dto import RunId, RunInput, RunManifest, RunSnapshot
 
 
-def test_cli_run_uses_v2_pipeline_service(tmp_path: Path, monkeypatch) -> None:
+def test_cli_run_uses_v2_workflow_service(tmp_path: Path, monkeypatch) -> None:
     captured: dict[str, object] = {}
     run_dir = tmp_path / "runs" / "demo001"
     run_dir.mkdir(parents=True)
 
-    def fake_run_pipeline(command):
-        captured["input_path"] = command.input_path
-        captured["run_id"] = command.run_id
+    def fake_run_automatic(*, input_path, run_id, layout_options, ocr_options):
+        captured["input_path"] = input_path
+        captured["run_id"] = run_id
+        captured["layout_options"] = layout_options
+        captured["ocr_options"] = ocr_options
         manifest = RunManifest(
             run_id=RunId("demo001"),
-            input=RunInput.from_path(command.input_path),
+            input=RunInput.from_path(input_path),
             pages=[],
             created_at="2026-01-01T00:00:00Z",
             updated_at="2026-01-01T00:00:00Z",
@@ -27,7 +29,9 @@ def test_cli_run_uses_v2_pipeline_service(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         cli,
         "build_backend_services",
-        lambda run_root: SimpleNamespace(run_pipeline=fake_run_pipeline),
+        lambda run_root: SimpleNamespace(
+            workflow=SimpleNamespace(run_automatic=fake_run_automatic)
+        ),
     )
 
     cli.main(["run", "input.pdf", "--run", "demo001", "--run-root", str(tmp_path / "runs")])
@@ -43,4 +47,3 @@ def test_cli_prepare_review_command_is_available() -> None:
 
     assert args.command == "prepare-review"
     assert args.run == "demo"
-

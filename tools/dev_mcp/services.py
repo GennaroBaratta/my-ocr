@@ -15,7 +15,6 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from typing import Any
 
-from my_ocr.application.commands import PrepareLayoutReviewCommand, RunReviewedOcrCommand
 from my_ocr.application.dto import RunId
 from my_ocr.bootstrap import build_backend_services
 
@@ -514,15 +513,11 @@ class OCRWorkflowRunner:
             )
         try:
             services = build_backend_services(str(self.config.run_root))
-            prepared = services.prepare_layout_review(
-                PrepareLayoutReviewCommand(
-                    input_path=str(resolved_input_path),
-                    run_id=RunId(normalized_run_id) if normalized_run_id else None,
-                )
+            prepared = services.workflow.prepare_review(
+                input_path=str(resolved_input_path),
+                run_id=RunId(normalized_run_id) if normalized_run_id else None,
             )
-            result = services.run_reviewed_ocr(
-                RunReviewedOcrCommand(run_id=prepared.snapshot.run_id)
-            )
+            result = services.workflow.run_reviewed_ocr(prepared.snapshot.run_id)
             run_dir = result.snapshot.run_dir
         finally:
             self._run_lock.release()

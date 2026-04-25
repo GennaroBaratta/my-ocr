@@ -7,20 +7,6 @@ from typing import Any
 import pytest
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.commands import (
-    ExtractRules,
-    ExtractRulesCommand,
-    ExtractStructured,
-    ExtractStructuredCommand,
-    PrepareLayoutReview,
-    PrepareLayoutReviewCommand,
-    RerunPageLayout,
-    RerunPageLayoutCommand,
-    RerunPageOcr,
-    RerunPageOcrCommand,
-    RunReviewedOcr,
-    RunReviewedOcrCommand,
-)
 from my_ocr.application.dto import (
     ArtifactCopy,
     LayoutBlock,
@@ -36,14 +22,14 @@ from my_ocr.application.dto import (
     StructuredExtractionOptions,
 )
 from my_ocr.application.errors import UnsupportedRunSchema
+from my_ocr.application.workflow import DocumentWorkflow
 
 
 def test_prepare_layout_review_writes_v2_manifest_and_relative_payloads(tmp_path: Path) -> None:
     input_path = _image(tmp_path / "input.png")
     store = FilesystemRunStore(tmp_path / "runs")
-    command = PrepareLayoutReview(store, FakeNormalizer(), FakeLayoutDetector())
 
-    result = command(PrepareLayoutReviewCommand(str(input_path), run_id=RunId("demo")))
+    result = _workflow(store).prepare_review(str(input_path), run_id=RunId("demo"))
 
     run_dir = result.snapshot.run_dir
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
@@ -63,7 +49,7 @@ def test_run_reviewed_ocr_writes_ocr_and_clears_extraction(tmp_path: Path) -> No
     tx.write_rules_extraction({"stale": True})
     tx.commit()
 
-    result = RunReviewedOcr(store, FakeOcrEngine())(RunReviewedOcrCommand(RunId(run_id)))
+    result = _workflow(store).run_reviewed_ocr(RunId(run_id))
 
     run_dir = result.snapshot.run_dir
     assert (run_dir / "ocr" / "markdown.md").read_text(encoding="utf-8") == "# Page 1"
@@ -75,10 +61,11 @@ def test_run_reviewed_ocr_writes_ocr_and_clears_extraction(tmp_path: Path) -> No
 
 def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
     store, run_id = _prepared_run(tmp_path, page_count=2)
-    RunReviewedOcr(store, FakeOcrEngine())(RunReviewedOcrCommand(RunId(run_id)))
+    workflow = _workflow(store)
+    workflow.run_reviewed_ocr(RunId(run_id))
 
-    RerunPageLayout(store, FakeLayoutDetector(label="table"))(
-        RerunPageLayoutCommand(RunId(run_id), page_number=2)
+    _workflow(store, layout_detector=FakeLayoutDetector(label="table")).rerun_page_layout(
+        RunId(run_id), page_number=2
     )
     snapshot = store.open_run(run_id)
     assert snapshot.review_layout is not None
@@ -89,9 +76,9 @@ def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
     assert not (snapshot.run_dir / "ocr").exists()
 
     store, run_id = _prepared_run(tmp_path / "ocr-rerun", page_count=2)
-    RunReviewedOcr(store, FakeOcrEngine())(RunReviewedOcrCommand(RunId(run_id)))
-    RerunPageOcr(store, FakeOcrEngine(prefix="Updated"))(
-        RerunPageOcrCommand(RunId(run_id), page_number=2)
+    _workflow(store).run_reviewed_ocr(RunId(run_id))
+    _workflow(store, ocr_engine=FakeOcrEngine(prefix="Updated")).rerun_page_ocr(
+        RunId(run_id), page_number=2
     )
     run_dir = tmp_path / "ocr-rerun" / "runs" / run_id
     ocr_payload = json.loads((run_dir / "ocr" / "pages.json").read_text(encoding="utf-8"))
@@ -103,14 +90,13 @@ def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
 
 def test_extract_rules_and_structured_write_v2_extraction_outputs(tmp_path: Path) -> None:
     store, run_id = _prepared_run(tmp_path)
-    RunReviewedOcr(store, FakeOcrEngine())(RunReviewedOcrCommand(RunId(run_id)))
+    workflow = _workflow(store)
+    workflow.run_reviewed_ocr(RunId(run_id))
 
-    ExtractRules(store, FakeRulesExtractor())(ExtractRulesCommand(RunId(run_id)))
-    ExtractStructured(store, FakeStructuredExtractor())(
-        ExtractStructuredCommand(
-            RunId(run_id),
-            options=StructuredExtractionOptions(model="demo-model"),
-        )
+    workflow.extract_rules(RunId(run_id))
+    workflow.extract_structured(
+        RunId(run_id),
+        options=StructuredExtractionOptions(model="demo-model"),
     )
 
     run_dir = tmp_path / "runs" / run_id
@@ -122,6 +108,21 @@ def test_extract_rules_and_structured_write_v2_extraction_outputs(tmp_path: Path
     }
     assert json.loads((run_dir / "extraction" / "canonical.json").read_text()) == {
         "document_type": "structured"
+    }
+
+
+def test_run_automatic_prepares_ocr_and_extracts_rules(tmp_path: Path) -> None:
+    input_path = _image(tmp_path / "input.png")
+    store = FilesystemRunStore(tmp_path / "runs")
+
+    result = _workflow(store).run_automatic(str(input_path), run_id=RunId("demo"))
+
+    run_dir = result.snapshot.run_dir
+    assert result.snapshot.run_id == RunId("demo")
+    assert (run_dir / "layout" / "review.json").exists()
+    assert (run_dir / "ocr" / "markdown.md").read_text(encoding="utf-8") == "# Page 1"
+    assert json.loads((run_dir / "extraction" / "rules.json").read_text()) == {
+        "document_type": "rules"
     }
 
 
@@ -253,10 +254,24 @@ class FakeStructuredExtractor:
 def _prepared_run(tmp_path: Path, *, page_count: int = 1) -> tuple[FilesystemRunStore, str]:
     input_path = _image(tmp_path / f"input-{page_count}.png")
     store = FilesystemRunStore(tmp_path / "runs")
-    PrepareLayoutReview(store, FakeNormalizer(), FakeLayoutDetector())(
-        PrepareLayoutReviewCommand(str(input_path), run_id=RunId("demo"))
-    )
+    _workflow(store).prepare_review(str(input_path), run_id=RunId("demo"))
     return store, "demo"
+
+
+def _workflow(
+    store: FilesystemRunStore,
+    *,
+    layout_detector: FakeLayoutDetector | None = None,
+    ocr_engine: FakeOcrEngine | None = None,
+) -> DocumentWorkflow:
+    return DocumentWorkflow(
+        store,
+        FakeNormalizer(),
+        layout_detector or FakeLayoutDetector(),
+        ocr_engine or FakeOcrEngine(),
+        FakeRulesExtractor(),
+        FakeStructuredExtractor(),
+    )
 
 
 def _image(path: Path) -> Path:

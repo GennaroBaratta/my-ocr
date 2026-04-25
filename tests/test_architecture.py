@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "my_ocr"
+REPO_ROOT = SRC_ROOT.parents[1]
 
 
 def _py_files(package: str) -> list[Path]:
@@ -83,3 +84,14 @@ def test_ui_does_not_import_removed_application_artifacts_or_use_cases() -> None
         ),
     )
 
+
+def test_source_and_tests_do_not_import_removed_command_layer() -> None:
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
+    failures: list[str] = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            modules = _imported_modules(path) | _dynamic_import_strings(path)
+            if "my_ocr.application.commands" in modules:
+                failures.append(f"{path.relative_to(REPO_ROOT)} imports command layer")
+
+    assert not failures
