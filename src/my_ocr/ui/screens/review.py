@@ -13,7 +13,15 @@ from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
+from ..image_utils import get_image_size
 from ..state import AppState
+from ..zoom import (
+    ZOOM_MODE_FIT_WIDTH,
+    effective_zoom_level,
+    set_fit_width_zoom,
+    set_manual_zoom,
+    zoom_label_text,
+)
 
 
 def _show_layout_warning(page: ft.Page, state: AppState) -> None:
@@ -68,6 +76,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             on_box_selected,
             on_box_changed,
             on_box_live_change,
+            on_zoom_scale_change,
             on_deselect,
             on_remove,
         )
@@ -78,20 +87,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             rebuild()
             return
 
-        is_adding = getattr(state, "is_adding_box", False)
-        add_box_label.value = "Cancel Add" if is_adding else "Add Box"
-        add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
-        add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
-        add_box_btn.style = ft.ButtonStyle(
-            color=theme.TEXT_PRIMARY,
-            side=ft.BorderSide(1, theme.BORDER),
-            shape=ft.RoundedRectangleBorder(radius=6),
-            bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
-        )
-        try:
-            add_box_btn.update()
-        except RuntimeError:
-            pass
+        _sync_add_box_button(state, add_box_label, add_box_btn, update=True)
 
         bbox_editor = cast(ft.Container, content_row.controls[1])
         refresh_bbox_editor(
@@ -100,6 +96,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             on_box_selected,
             on_box_changed,
             on_box_live_change,
+            on_zoom_scale_change,
         )
         content_row.controls[2] = build_inspector(state, on_deselect, on_box_changed, on_remove)
         page.update()
@@ -113,12 +110,28 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         text_align=ft.TextAlign.CENTER,
     )
     zoom_label = ft.Text(
-        f"{int(state.zoom_level * 100)}%",
+        zoom_label_text(state, _current_zoom_scale(state)),
         size=13,
         color=theme.TEXT_PRIMARY,
-        width=44,
+        width=64,
         text_align=ft.TextAlign.CENTER,
     )
+    fit_width_btn = ft.IconButton(
+        icon=ft.Icons.WIDTH_FULL,
+        icon_size=16,
+        icon_color=theme.PRIMARY
+        if state.zoom_mode == ZOOM_MODE_FIT_WIDTH
+        else theme.TEXT_MUTED,
+        on_click=lambda _e=None: fit_width(),
+        tooltip="Fit page width",
+    )
+
+    def refresh_zoom_toolbar(scale: float | None = None) -> None:
+        current_scale = scale if scale is not None else _current_zoom_scale(state)
+        zoom_label.value = zoom_label_text(state, current_scale)
+        fit_width_btn.icon_color = (
+            theme.PRIMARY if state.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
+        )
 
     def prev_page() -> None:
         if state.current_page_index > 0:
@@ -135,13 +148,18 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
             rebuild()
 
     def zoom_in() -> None:
-        state.zoom_level = min(3.0, state.zoom_level + 0.25)
-        zoom_label.value = f"{int(state.zoom_level * 100)}%"
+        set_manual_zoom(state, _current_zoom_scale(state) + 0.25)
+        refresh_zoom_toolbar()
         rebuild()
 
     def zoom_out() -> None:
-        state.zoom_level = max(0.25, state.zoom_level - 0.25)
-        zoom_label.value = f"{int(state.zoom_level * 100)}%"
+        set_manual_zoom(state, _current_zoom_scale(state) - 0.25)
+        refresh_zoom_toolbar()
+        rebuild()
+
+    def fit_width() -> None:
+        set_fit_width_zoom(state)
+        refresh_zoom_toolbar()
         rebuild()
 
     def run_ocr() -> None:
@@ -152,21 +170,8 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         state.is_adding_box = not state.is_adding_box
         if state.is_adding_box:
             state.select_box(None)
-            
-        is_adding = getattr(state, "is_adding_box", False)
-        add_box_label.value = "Cancel Add" if is_adding else "Add Box"
-        add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
-        add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
-        add_box_btn.style = ft.ButtonStyle(
-            color=theme.TEXT_PRIMARY,
-            side=ft.BorderSide(1, theme.BORDER),
-            shape=ft.RoundedRectangleBorder(radius=6),
-            bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
-        )
-        try:
-            add_box_btn.update()
-        except RuntimeError:
-            pass
+
+        _sync_add_box_button(state, add_box_label, add_box_btn, update=True)
         rebuild()
 
     def on_redetect_layout() -> None:
@@ -188,6 +193,14 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def on_box_live_change() -> None:
         page.update()
+
+    def on_zoom_scale_change(scale: float) -> None:
+        refresh_zoom_toolbar(scale)
+        for control in (zoom_label, fit_width_btn):
+            try:
+                control.update()
+            except RuntimeError:
+                pass
 
     def on_deselect() -> None:
         state.select_box(None)
@@ -216,6 +229,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     ]
 
     zoom_controls: list[ft.Control] = [
+        fit_width_btn,
         ft.IconButton(
             icon=ft.Icons.REMOVE,
             icon_size=16,
@@ -340,6 +354,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         on_box_selected,
         on_box_changed,
         on_box_live_change,
+        on_zoom_scale_change,
         on_deselect,
         on_remove,
     )
@@ -373,14 +388,69 @@ def _build_panes(
     on_box_selected: Callable[[str | None], None],
     on_box_changed: Callable[[], None],
     on_box_live_change: Callable[[], None],
+    on_zoom_scale_change: Callable[[float], None] | None,
     on_deselect: Callable[[], None],
     on_remove: Callable[[str], None],
 ) -> list[ft.Control]:
     page_strip = build_page_strip(state, on_page_select)
-    bbox_editor = build_bbox_editor(state, on_box_selected, on_box_changed, on_box_live_change)
+    bbox_editor = build_bbox_editor(
+        state,
+        on_box_selected,
+        on_box_changed,
+        on_box_live_change,
+        on_zoom_scale_change,
+    )
     inspector = build_inspector(state, on_deselect, on_box_changed, on_remove)
 
     return [page_strip, bbox_editor, inspector]
+
+
+def _current_zoom_scale(state: AppState) -> float:
+    page_data = state.current_page
+    if not page_data:
+        return state.zoom_level
+    image_width, _image_height = get_image_size(page_data.image_path)
+    return effective_zoom_level(state, image_width)
+
+
+def _sync_add_box_button(
+    state: AppState,
+    add_box_label: ft.Text,
+    add_box_btn: ft.OutlinedButton,
+    *,
+    update: bool = False,
+) -> None:
+    is_adding = getattr(state, "is_adding_box", False)
+    add_box_label.value = "Cancel Add" if is_adding else "Add Box"
+    add_box_btn.icon = ft.Icons.CLOSE if is_adding else ft.Icons.ADD_BOX_OUTLINED
+    add_box_btn.tooltip = "Cancel adding box" if is_adding else "Add a new layout box on this page"
+    add_box_btn.style = ft.ButtonStyle(
+        color=theme.TEXT_PRIMARY,
+        side=ft.BorderSide(1, theme.BORDER),
+        shape=ft.RoundedRectangleBorder(radius=6),
+        bgcolor=f"{theme.PRIMARY}20" if is_adding else None,
+    )
+    if not update:
+        return
+    try:
+        add_box_btn.update()
+    except RuntimeError:
+        pass
+
+
+def _set_loading_controls(
+    loading_overlay: ft.Container,
+    progress_ring: ft.ProgressRing,
+    status_text: ft.Text,
+    *,
+    active: bool,
+    message: str | None = None,
+) -> None:
+    if message is not None:
+        status_text.value = message
+    loading_overlay.visible = active
+    progress_ring.visible = active
+    status_text.visible = active
 
 
 def _start_reviewed_ocr(
@@ -395,9 +465,13 @@ def _start_reviewed_ocr(
     if not state.run_id:
         return
 
-    loading_overlay.visible = True
-    progress_ring.visible = True
-    status_text.visible = True
+    _set_loading_controls(
+        loading_overlay,
+        progress_ring,
+        status_text,
+        active=True,
+        message="Running OCR...",
+    )
     page.update()
 
     import asyncio
@@ -415,16 +489,12 @@ def _start_reviewed_ocr(
                     layout_profile=state.layout_profile,
                 )
             )
-            loading_overlay.visible = False
-            progress_ring.visible = False
-            status_text.visible = False
+            _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
             state.load_run(run_id)
             _show_layout_warning(page, state)
             page.go(f"/results/{run_id}")
         except Exception as exc:
-            loading_overlay.visible = False
-            progress_ring.visible = False
-            status_text.visible = False
+            _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
             page.show_dialog(
                 ft.SnackBar(
                     ft.Text(f"OCR failed: {exc}"),
@@ -472,10 +542,13 @@ def _start_redetect_layout(
 
         run_id = state.run_id
         run_root = state.run_root
-        loading_overlay.visible = True
-        progress_ring.visible = True
-        status_text.value = "Re-detecting layout…"
-        status_text.visible = True
+        _set_loading_controls(
+            loading_overlay,
+            progress_ring,
+            status_text,
+            active=True,
+            message="Re-detecting layout…",
+        )
         page.update()
 
         async def do_redetect() -> None:
@@ -489,19 +562,25 @@ def _start_redetect_layout(
                         layout_profile=state.layout_profile,
                     )
                 )
-                loading_overlay.visible = False
-                progress_ring.visible = False
-                status_text.visible = False
-                status_text.value = "Running OCR..."
+                _set_loading_controls(
+                    loading_overlay,
+                    progress_ring,
+                    status_text,
+                    active=False,
+                    message="Running OCR...",
+                )
                 if run_id:
                     state.load_run(run_id)
                 _show_layout_warning(page, state)
                 rebuild()
             except Exception as exc:
-                loading_overlay.visible = False
-                progress_ring.visible = False
-                status_text.visible = False
-                status_text.value = "Running OCR..."
+                _set_loading_controls(
+                    loading_overlay,
+                    progress_ring,
+                    status_text,
+                    active=False,
+                    message="Running OCR...",
+                )
                 page.show_dialog(
                     ft.SnackBar(
                         ft.Text(f"Re-detect failed: {exc}"),

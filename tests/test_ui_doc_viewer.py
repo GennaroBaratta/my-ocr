@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import cast
+from types import SimpleNamespace
+from typing import Callable, cast
 
 import flet as ft
 
@@ -84,6 +85,118 @@ def test_doc_viewer_uses_review_overlay_palette_and_alpha_rules(monkeypatch) -> 
 
     assert header_box.border == ft.Border.all(2, theme.BOX_HEADER)
     assert header_box.bgcolor == f"{theme.BOX_HEADER}12"
+
+
+def test_doc_viewer_defaults_to_fit_width_and_exposes_toolbar_button(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 82
+    state.pages = [
+        PageData(
+            index=0,
+            page_number=1,
+            image_path="/tmp/page-0001.png",
+            boxes=[
+                BoundingBox(
+                    id="text-box",
+                    page_index=0,
+                    x=10,
+                    y=20,
+                    width=30,
+                    height=40,
+                    label="text",
+                )
+            ],
+        )
+    ]
+
+    viewer = build_doc_viewer(state)
+    header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
+    fit_width_button = cast(ft.IconButton, header_row.controls[2])
+    zoom_label = cast(ft.Text, header_row.controls[4])
+    stack = _viewer_stack(viewer)
+    text_box = cast(ft.Container, stack.controls[1])
+
+    assert state.zoom_mode == "fit_width"
+    assert fit_width_button.icon == ft.Icons.WIDTH_FULL
+    assert fit_width_button.icon_color == theme.PRIMARY
+    assert zoom_label.value == "Fit 50%"
+    assert stack.width == 50
+    assert stack.height == 100
+    assert text_box.left == 5
+    assert text_box.width == 15
+
+
+def test_doc_viewer_resize_refreshes_fit_width_canvas_and_header(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 82
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+
+    viewer = build_doc_viewer(state)
+    header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
+    zoom_label = cast(ft.Text, header_row.controls[4])
+    canvas_container = cast(ft.Container, viewer.controls[1])
+    on_size_change = cast(Callable[[object], None], canvas_container.on_size_change)
+
+    on_size_change(SimpleNamespace(width=132, control=canvas_container))
+
+    stack = _viewer_stack(viewer)
+    assert state.zoom_fit_width == 132
+    assert zoom_label.value == "Fit 100%"
+    assert stack.width == 100
+    assert stack.height == 200
+
+
+def test_doc_viewer_embeds_local_image_bytes_for_web_client(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+    image_path = tmp_path / "page-0001.png"
+    image_path.write_bytes(b"local image bytes")
+
+    state = AppState()
+    state.pages = [PageData(index=0, page_number=1, image_path=str(image_path))]
+
+    viewer = build_doc_viewer(state)
+    stack = _viewer_stack(viewer)
+    image = cast(ft.Image, stack.controls[0])
+
+    assert image.src == b"local image bytes"
+
+
+def test_doc_viewer_manual_zoom_switches_out_of_fit_width(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.doc_viewer.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 132
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    viewer = build_doc_viewer(state)
+    header_row = cast(ft.Row, cast(ft.Container, viewer.controls[0]).content)
+    zoom_in_button = cast(ft.IconButton, header_row.controls[5])
+    zoom_in_button.on_click(SimpleNamespace(page=SimpleNamespace(update=lambda: None)))
+
+    zoom_label = cast(ft.Text, header_row.controls[4])
+    fit_width_button = cast(ft.IconButton, header_row.controls[2])
+    stack = _viewer_stack(viewer)
+
+    assert state.zoom_mode == "manual"
+    assert state.zoom_level == 1.25
+    assert zoom_label.value == "125%"
+    assert fit_width_button.icon_color == theme.TEXT_MUTED
+    assert stack.width == 125
 
 
 def _viewer_stack(viewer: ft.Column) -> ft.Stack:

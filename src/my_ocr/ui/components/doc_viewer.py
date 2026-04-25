@@ -6,8 +6,16 @@ import flet as ft
 from flet import BoxFit
 
 from .. import theme
-from ..image_utils import get_image_size
+from ..image_utils import get_image_size, get_image_source
 from ..state import AppState, PageData
+from ..zoom import (
+    ZOOM_MODE_FIT_WIDTH,
+    effective_zoom_level,
+    set_fit_width_zoom,
+    set_manual_zoom,
+    set_zoom_available_width,
+    zoom_label_text,
+)
 from .overlay_styles import overlay_colors_for_label
 
 
@@ -29,23 +37,42 @@ def build_doc_viewer(state: AppState) -> ft.Column:
         )
 
     zoom_text = ft.Text(
-        f"{int(state.zoom_level * 100)}%",
+        "",
         size=12,
         color=theme.TEXT_PRIMARY,
-        width=40,
+        width=64,
         text_align=ft.TextAlign.CENTER,
     )
+    fit_width_button = ft.IconButton(
+        icon=ft.Icons.WIDTH_FULL,
+        icon_size=16,
+        icon_color=theme.PRIMARY
+        if state.zoom_mode == ZOOM_MODE_FIT_WIDTH
+        else theme.TEXT_MUTED,
+        on_click=lambda e: fit_width(e.page),
+        tooltip="Fit page width",
+    )
+
+    def refresh_canvas() -> None:
+        scale = _rebuild_canvas(canvas_stack, page_data, state)
+        zoom_text.value = zoom_label_text(state, scale)
+        fit_width_button.icon_color = (
+            theme.PRIMARY if state.zoom_mode == ZOOM_MODE_FIT_WIDTH else theme.TEXT_MUTED
+        )
 
     def zoom_in(event_page: ft.Page | ft.BasePage) -> None:
-        state.zoom_level = min(3.0, state.zoom_level + 0.25)
-        zoom_text.value = f"{int(state.zoom_level * 100)}%"
-        _rebuild_canvas(canvas_stack, page_data, state)
+        set_manual_zoom(state, _current_scale(page_data, state) + 0.25)
+        refresh_canvas()
         event_page.update()
 
     def zoom_out(event_page: ft.Page | ft.BasePage) -> None:
-        state.zoom_level = max(0.25, state.zoom_level - 0.25)
-        zoom_text.value = f"{int(state.zoom_level * 100)}%"
-        _rebuild_canvas(canvas_stack, page_data, state)
+        set_manual_zoom(state, _current_scale(page_data, state) - 0.25)
+        refresh_canvas()
+        event_page.update()
+
+    def fit_width(event_page: ft.Page | ft.BasePage) -> None:
+        set_fit_width_zoom(state)
+        refresh_canvas()
         event_page.update()
 
     header = ft.Row(
@@ -57,6 +84,7 @@ def build_doc_viewer(state: AppState) -> ft.Column:
                 color=theme.TEXT_MUTED,
             ),
             ft.Container(expand=True),
+            fit_width_button,
             ft.IconButton(
                 icon=ft.Icons.REMOVE,
                 icon_size=16,
@@ -78,7 +106,21 @@ def build_doc_viewer(state: AppState) -> ft.Column:
     )
 
     canvas_stack = ft.Stack()
-    _rebuild_canvas(canvas_stack, page_data, state)
+    refresh_canvas()
+
+    def on_viewer_size_change(e: ft.PageResizeEvent) -> None:
+        set_zoom_available_width(state, e.width)
+        refresh_canvas()
+        controls_to_update: list[ft.Control] = [zoom_text, fit_width_button]
+        try:
+            controls_to_update.append(e.control)
+        except AttributeError:
+            pass
+        for control in controls_to_update:
+            try:
+                control.update()
+            except RuntimeError:
+                pass
 
     canvas = ft.Column(
         [
@@ -106,6 +148,7 @@ def build_doc_viewer(state: AppState) -> ft.Column:
                 expand=True,
                 bgcolor=theme.BG_PAGE,
                 padding=16,
+                on_size_change=on_viewer_size_change,
             ),
         ],
         spacing=0,
@@ -113,13 +156,19 @@ def build_doc_viewer(state: AppState) -> ft.Column:
     )
 
 
-def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> None:
-    scale = state.zoom_level
+def _current_scale(page_data: PageData, state: AppState) -> float:
     image_width, image_height = get_image_size(page_data.image_path)
+    _ = image_height
+    return effective_zoom_level(state, image_width)
+
+
+def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> float:
+    image_width, image_height = get_image_size(page_data.image_path)
+    scale = effective_zoom_level(state, image_width)
     canvas_width = max(1, int(image_width * scale)) if image_width else None
     canvas_height = max(1, int(image_height * scale)) if image_height else None
     image = ft.Image(
-        src=page_data.image_path,
+        src=get_image_source(page_data.image_path),
         width=canvas_width,
         height=canvas_height,
         fit=BoxFit.FILL if canvas_width and canvas_height else BoxFit.CONTAIN,
@@ -143,3 +192,4 @@ def _rebuild_canvas(stack: ft.Stack, page_data: PageData, state: AppState) -> No
     stack.width = canvas_width
     stack.height = canvas_height
     stack.controls = [image, *overlays]
+    return scale

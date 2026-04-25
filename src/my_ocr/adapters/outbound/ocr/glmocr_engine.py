@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from contextlib import suppress
-import gc
 from importlib import import_module
 from pathlib import Path
-import shutil
 import sys
-from tempfile import TemporaryDirectory
 from typing import Any
 
 from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mod
@@ -15,6 +11,22 @@ from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
 from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
 from my_ocr.adapters.outbound.filesystem.json_store import load_json, write_json, write_text
 from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.adapters.outbound.ocr._glmocr_artifacts import (
+    publish_saved_model_json_path as _publish_saved_model_json_path_impl,
+    save_result_to_raw_dir as _save_result_to_raw_dir_impl,
+    write_page_layout_to_raw_dir as _write_page_layout_to_raw_dir_impl,
+)
+from my_ocr.adapters.outbound.ocr._glmocr_parser import (
+    build_lazy_glmocr_parser as _build_lazy_glmocr_parser_impl,
+    build_raw_json as _build_raw_json_impl,
+    load_glmocr_parser as _load_glmocr_parser_impl,
+)
+from my_ocr.adapters.outbound.ocr._glmocr_retry import (
+    cleanup_after_cuda_oom as _cleanup_after_cuda_oom_impl,
+    is_cuda_oom_error as _is_cuda_oom_error_impl,
+    parse_page_with_cpu_fallback as _parse_page_with_cpu_fallback_impl,
+    should_retry_parse_on_cpu as _should_retry_parse_on_cpu_impl,
+)
 from my_ocr.adapters.outbound.ocr.fallback_ocr import (
     recognize_full_page,
     run_crop_fallback_for_page,
@@ -471,27 +483,7 @@ def _finalize_page_ocr(
 
 
 def _load_glmocr_parser() -> type:
-    try:
-        config_module = import_module("glmocr.config")
-        dataloader_module = import_module("glmocr.dataloader.page_loader")
-        layout_module = import_module("glmocr.layout.layout_detector")
-        ocr_client_module = import_module("glmocr.ocr_client")
-        result_module = import_module("glmocr.parser_result.pipeline_result")
-        formatter_module = import_module("glmocr.postprocess.result_formatter")
-        image_utils_module = import_module("glmocr.utils.image_utils")
-    except ImportError as exc:
-        raise RuntimeError(
-            "GLM-OCR is not installed. Install with `pip install -e .[glmocr]`."
-        ) from exc
-    return _build_lazy_glmocr_parser(
-        load_config=config_module.load_config,
-        page_loader_cls=dataloader_module.PageLoader,
-        layout_detector_cls=layout_module.PPDocLayoutDetector,
-        ocr_client_cls=ocr_client_module.OCRClient,
-        pipeline_result_cls=result_module.PipelineResult,
-        result_formatter_cls=formatter_module.ResultFormatter,
-        crop_image_region=image_utils_module.crop_image_region,
-    )
+    return _load_glmocr_parser_impl()
 
 
 def _build_lazy_glmocr_parser(
@@ -504,171 +496,15 @@ def _build_lazy_glmocr_parser(
     result_formatter_cls: type,
     crop_image_region: Any,
 ) -> type:
-    class LazyGlmOcrParser:
-        def __init__(
-            self,
-            *,
-            config_path: str,
-            layout_device: str,
-            **kwargs: Any,
-        ) -> None:
-            self._config_path = config_path
-            self._config_model = load_config(
-                config_path,
-                mode="selfhosted",
-                layout_device=layout_device,
-                **kwargs,
-            )
-            self._page_loader = page_loader_cls(self._config_model.pipeline.page_loader)
-            self._layout_detector = layout_detector_cls(self._config_model.pipeline.layout)
-            self._ocr_client: Any | None = None
-            self._result_formatter = result_formatter_cls(self._config_model.pipeline.result_formatter)
-            self._pipeline_result_cls = pipeline_result_cls
-            self._crop_image_region = crop_image_region
-            self._started_layout = False
-            self._started_ocr = False
-
-        def __enter__(self) -> "LazyGlmOcrParser":
-            return self
-
-        def __exit__(self, _exc_type: object, _exc: object, _tb: object) -> None:
-            self.close()
-
-        def parse(self, image: str | bytes | Path) -> Any:
-            pages, original_images, layout_results, vis_images = self._collect_layout_stage(image)
-
-            grouped_results: list[list[dict[str, Any]]] = []
-            cropped_images: dict[tuple[Any, ...], Any] = {}
-
-            for page_idx, (page_image, _unit_idx) in enumerate(pages):
-                page_regions = layout_results[page_idx] if page_idx < len(layout_results) else []
-                processed_regions: list[dict[str, Any]] = []
-                for region in page_regions:
-                    processed_region = dict(region)
-                    try:
-                        polygon = (
-                            processed_region.get("polygon")
-                            if self._config_model.pipeline.layout.use_polygon
-                            else None
-                        )
-                        cropped = self._crop_image_region(
-                            page_image,
-                            processed_region["bbox_2d"],
-                            polygon,
-                        )
-                    except Exception:
-                        processed_region["content"] = ""
-                        processed_regions.append(processed_region)
-                        continue
-
-                    if processed_region.get("task_type") == "skip":
-                        processed_region["content"] = None
-                        bbox = processed_region.get("bbox_2d")
-                        if bbox:
-                            cropped_images[(page_idx, *bbox)] = cropped
-                        processed_regions.append(processed_region)
-                        continue
-
-                    self._ensure_ocr_started()
-                    request_data = self._page_loader.build_request_from_image(
-                        cropped,
-                        processed_region.get("task_type", "text"),
-                    )
-                    ocr_client = self._ocr_client
-                    if ocr_client is None:
-                        raise RuntimeError("OCR client failed to initialize")
-                    response, status_code = ocr_client.process(request_data)
-                    if status_code == 200:
-                        content = response["choices"][0]["message"]["content"]
-                        processed_region["content"] = content.strip() if content else ""
-                    else:
-                        processed_region["content"] = None
-                    processed_regions.append(processed_region)
-
-                grouped_results.append(processed_regions)
-
-            json_result, markdown_result, image_files = self._result_formatter.process(
-                grouped_results,
-                cropped_images=cropped_images or None,
-            )
-            raw_json_result = _build_raw_json(grouped_results)
-            return self._pipeline_result_cls(
-                json_result=json_result,
-                markdown_result=markdown_result,
-                original_images=original_images,
-                image_files=image_files or None,
-                raw_json_result=raw_json_result,
-                layout_vis_images=vis_images or None,
-            )
-
-        def parse_layout_only(self, image: str | bytes | Path) -> Any:
-            pages, original_images, layout_results, vis_images = self._collect_layout_stage(image)
-            grouped_results = [
-                [
-                    {
-                        **dict(region),
-                        "content": str(region.get("content", "")),
-                    }
-                    for region in (layout_results[page_idx] if page_idx < len(layout_results) else [])
-                ]
-                for page_idx in range(len(pages))
-            ]
-            json_result, markdown_result, image_files = self._result_formatter.process(grouped_results)
-            raw_json_result = _build_raw_json(grouped_results)
-            return self._pipeline_result_cls(
-                json_result=json_result,
-                markdown_result=markdown_result,
-                original_images=original_images,
-                image_files=image_files or None,
-                raw_json_result=raw_json_result,
-                layout_vis_images=vis_images or None,
-            )
-
-        def _collect_layout_stage(
-            self, image: str | bytes | Path
-        ) -> tuple[list[tuple[Any, int]], list[str], list[list[dict[str, Any]]], dict[int, Any]]:
-            sources = image if isinstance(image, bytes) else str(image)
-            pages = list(self._page_loader.iter_pages_with_unit_indices(sources))
-            if not pages:
-                raise RuntimeError(f"GLM-OCR returned no results for {image!r}")
-            original_images = [str(image)] if isinstance(image, (str, Path)) else []
-
-            self._ensure_layout_started()
-            page_images = [page for page, _unit_idx in pages]
-            layout_results, vis_images = self._layout_detector.process(
-                page_images,
-                save_visualization=True,
-                global_start_idx=0,
-                use_polygon=self._config_model.pipeline.layout.use_polygon,
-            )
-            return pages, original_images, layout_results, vis_images
-
-        def _ensure_layout_started(self) -> None:
-            if self._started_layout:
-                return
-            self._layout_detector.start()
-            self._started_layout = True
-
-        def _ensure_ocr_started(self) -> None:
-            if self._ocr_client is None:
-                self._ocr_client = ocr_client_cls(self._config_model.pipeline.ocr_api)
-            ocr_client = self._ocr_client
-            if ocr_client is None:
-                raise RuntimeError("OCR client failed to initialize")
-            if self._started_ocr:
-                return
-            ocr_client.start()
-            self._started_ocr = True
-
-        def close(self) -> None:
-            if self._started_ocr and self._ocr_client is not None:
-                self._ocr_client.stop()
-                self._started_ocr = False
-            if self._started_layout:
-                self._layout_detector.stop()
-                self._started_layout = False
-
-    return LazyGlmOcrParser
+    return _build_lazy_glmocr_parser_impl(
+        load_config=load_config,
+        page_loader_cls=page_loader_cls,
+        layout_detector_cls=layout_detector_cls,
+        ocr_client_cls=ocr_client_cls,
+        pipeline_result_cls=pipeline_result_cls,
+        result_formatter_cls=result_formatter_cls,
+        crop_image_region=crop_image_region,
+    )
 
 
 def _parse_page_with_cpu_fallback(
@@ -681,66 +517,31 @@ def _parse_page_with_cpu_fallback(
     layout_device: str,
     layout_dotted: dict[str, Any],
 ) -> Any:
-    try:
-        return getattr(parser, method_name)(page_path)
-    except Exception as exc:
-        if not _should_retry_parse_on_cpu(exc, layout_device):
-            raise
-
-    close = getattr(parser, "close", None)
-    if callable(close):
-        with suppress(Exception):
-            close()
-
-    _cleanup_after_cuda_oom()
-    with parser_cls(config_path=config_path, layout_device="cpu", _dotted=layout_dotted) as cpu_parser:
-        return getattr(cpu_parser, method_name)(page_path)
+    return _parse_page_with_cpu_fallback_impl(
+        parser,
+        page_path,
+        method_name=method_name,
+        parser_cls=parser_cls,
+        config_path=config_path,
+        layout_device=layout_device,
+        layout_dotted=layout_dotted,
+    )
 
 
 def _should_retry_parse_on_cpu(exc: Exception, layout_device: str) -> bool:
-    return layout_device.startswith("cuda") and _is_cuda_oom_error(exc)
+    return _should_retry_parse_on_cpu_impl(exc, layout_device)
 
 
 def _is_cuda_oom_error(exc: BaseException) -> bool:
-    if exc.__class__.__name__ == "OutOfMemoryError":
-        module_name = getattr(exc.__class__, "__module__", "")
-        if module_name.startswith("torch"):
-            return True
-
-    message = str(exc).lower()
-    return "cuda" in message and "out of memory" in message
+    return _is_cuda_oom_error_impl(exc)
 
 
 def _cleanup_after_cuda_oom() -> None:
-    gc.collect()
-    try:
-        torch_module = import_module("torch")
-    except ImportError:
-        return
-
-    cuda = getattr(torch_module, "cuda", None)
-    if cuda is None or not hasattr(cuda, "empty_cache"):
-        return
-    cuda.empty_cache()
+    _cleanup_after_cuda_oom_impl()
 
 
 def _build_raw_json(grouped_results: list[list[dict[str, Any]]]) -> list[list[dict[str, Any]]]:
-    raw = []
-    for page_results in grouped_results:
-        sorted_results = sorted(page_results, key=lambda x: x.get("index", 0))
-        raw.append(
-            [
-                {
-                    "index": i,
-                    "label": region.get("label", "text"),
-                    "content": region.get("content", ""),
-                    "bbox_2d": region.get("bbox_2d"),
-                    "polygon": region.get("polygon"),
-                }
-                for i, region in enumerate(sorted_results)
-            ]
-        )
-    return raw
+    return _build_raw_json_impl(grouped_results)
 
 
 def _detect_coord_space(blocks: list[dict[str, Any]], page_path: str) -> str:
@@ -763,11 +564,7 @@ def _save_result_to_raw_dir(
     page_path: str,
     page_number: int,
 ) -> Path:
-    raw_root = Path(raw_dir)
-    raw_root.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix=f".page-{page_number:04d}-", dir=raw_root) as save_root:
-        result.save(output_dir=save_root)
-        return _publish_saved_model_json_path(save_root, raw_root, page_path, page_number)
+    return _save_result_to_raw_dir_impl(result, raw_dir, page_path, page_number)
 
 
 def _write_page_layout_to_raw_dir(
@@ -776,13 +573,7 @@ def _write_page_layout_to_raw_dir(
     page_path: str,
     page_number: int,
 ) -> Path:
-    target_dir = Path(raw_dir) / f"page-{page_number:04d}"
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    model_path = target_dir / f"{Path(page_path).stem}_model.json"
-    write_json(model_path, page_layout)
-    return model_path
+    return _write_page_layout_to_raw_dir_impl(page_layout, raw_dir, page_path, page_number)
 
 
 def _publish_saved_model_json_path(
@@ -791,18 +582,7 @@ def _publish_saved_model_json_path(
     page_path: str,
     page_number: int,
 ) -> Path:
-    page_stem = Path(page_path).stem
-    source_dir = Path(save_root) / page_stem
-    model_path = source_dir / f"{page_stem}_model.json"
-    if not model_path.exists():
-        raise FileNotFoundError(f"Missing saved GLM-OCR model JSON: {model_path}")
-
-    target_dir = Path(raw_root) / f"page-{page_number:04d}"
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(source_dir), str(target_dir))
-    return target_dir / model_path.name
+    return _publish_saved_model_json_path_impl(save_root, raw_root, page_path, page_number)
 
 
 def _recognize_full_page_markdown(

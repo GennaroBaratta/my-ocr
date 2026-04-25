@@ -9,8 +9,9 @@ from flet import Alignment, BoxFit
 
 from .overlay_styles import overlay_colors_for_label
 from .. import theme
-from ..image_utils import get_image_size
+from ..image_utils import get_image_size, get_image_source
 from ..state import AppState, BoundingBox
+from ..zoom import effective_zoom_level, set_zoom_available_width
 
 _MOVE_HANDLE_SIZE = 16
 
@@ -20,6 +21,7 @@ def build_bbox_editor(
     on_box_selected: Callable[[str | None], None],
     on_box_changed: Callable[[], None],
     on_box_live_change: Callable[[], None],
+    on_zoom_scale_change: Callable[[float], None] | None = None,
 ) -> ft.Container:
     stack = _build_editor_stack(state, on_box_selected, on_box_changed, on_box_live_change)
     if stack is None:
@@ -43,13 +45,32 @@ def build_bbox_editor(
         scroll=ft.ScrollMode.AUTO,
     )
 
-    return ft.Container(
+    def on_editor_size_change(e: ft.PageResizeEvent) -> None:
+        set_zoom_available_width(state, e.width)
+        refresh_bbox_editor(
+            editor_container,
+            state,
+            on_box_selected,
+            on_box_changed,
+            on_box_live_change,
+            on_zoom_scale_change,
+        )
+        try:
+            editor_container.update()
+        except RuntimeError:
+            pass
+
+    editor_container = ft.Container(
         content=canvas,
         expand=True,
         bgcolor=theme.BG_PAGE,
         padding=16,
         clip_behavior=ft.ClipBehavior.HARD_EDGE,
+        on_size_change=on_editor_size_change,
     )
+    if on_zoom_scale_change:
+        on_zoom_scale_change(_current_scale(state))
+    return editor_container
 
 
 def refresh_bbox_editor(
@@ -58,17 +79,27 @@ def refresh_bbox_editor(
     on_box_selected: Callable[[str | None], None],
     on_box_changed: Callable[[], None],
     on_box_live_change: Callable[[], None],
+    on_zoom_scale_change: Callable[[float], None] | None = None,
 ) -> None:
     stack = _build_editor_stack(state, on_box_selected, on_box_changed, on_box_live_change)
     if stack is None or not isinstance(editor.content, ft.Column):
-        replacement = build_bbox_editor(state, on_box_selected, on_box_changed, on_box_live_change)
+        replacement = build_bbox_editor(
+            state,
+            on_box_selected,
+            on_box_changed,
+            on_box_live_change,
+            on_zoom_scale_change,
+        )
         editor.content = replacement.content
         editor.alignment = replacement.alignment
         editor.padding = replacement.padding
+        editor.on_size_change = replacement.on_size_change
         return
 
     stack_row = cast(ft.Row, editor.content.controls[0])
     stack_row.controls = [stack]
+    if on_zoom_scale_change:
+        on_zoom_scale_change(_current_scale(state))
 
 
 def _build_editor_stack(
@@ -81,12 +112,12 @@ def _build_editor_stack(
     if not page_data:
         return None
 
-    scale = state.zoom_level
     image_width, image_height = get_image_size(page_data.image_path)
+    scale = effective_zoom_level(state, image_width)
     canvas_width = max(1, int(image_width * scale)) if image_width else None
     canvas_height = max(1, int(image_height * scale)) if image_height else None
     image = ft.Image(
-        src=page_data.image_path,
+        src=get_image_source(page_data.image_path),
         width=canvas_width,
         height=canvas_height,
         fit=BoxFit.FILL if canvas_width and canvas_height else BoxFit.CONTAIN,
@@ -176,6 +207,14 @@ def _build_editor_stack(
         width=canvas_width,
         height=canvas_height,
     )
+
+
+def _current_scale(state: AppState) -> float:
+    page_data = state.current_page
+    if not page_data:
+        return 1.0
+    image_width, _image_height = get_image_size(page_data.image_path)
+    return effective_zoom_level(state, image_width)
 
 
 def _build_box_overlay(

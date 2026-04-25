@@ -13,16 +13,18 @@ class SplitPane(ft.Row):
         left: ft.Control,
         right: ft.Control,
         initial_left_width: float = 500,
-        min_left: float = 200,
-        max_left: float = 900,
+        min_left: float = 240,
+        min_right: float = 240,
     ) -> None:
         self._left_width = initial_left_width
         self._min_left = min_left
-        self._max_left = max_left
+        self._min_right = min_right
+        self._divider_width = 6
+        self._total_width: float | None = None
 
         self._left_container = ft.Container(
             content=left,
-            width=initial_left_width,
+            width=self._clamp_left_width(initial_left_width),
             clip_behavior=ft.ClipBehavior.HARD_EDGE,
         )
         self._right_container = ft.Container(
@@ -33,7 +35,7 @@ class SplitPane(ft.Row):
 
         divider = ft.GestureDetector(
             content=ft.Container(
-                width=6,
+                width=self._divider_width,
                 bgcolor=theme.BORDER,
                 border_radius=3,
             ),
@@ -45,12 +47,36 @@ class SplitPane(ft.Row):
             controls=[self._left_container, divider, self._right_container],
             spacing=0,
             expand=True,
+            on_size_change=self._on_size_change,
         )
 
     def _on_drag(self, e: ft.DragUpdateEvent) -> None:
         delta = e.local_delta or e.global_delta
         if delta is None:
             return
-        self._left_width = max(self._min_left, min(self._max_left, self._left_width + delta.x))
+        self._left_width = self._clamp_left_width(self._left_width + delta.x)
         self._left_container.width = self._left_width
-        self.update()
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _on_size_change(self, e: ft.PageResizeEvent) -> None:
+        self._total_width = e.width
+        self._left_width = self._clamp_left_width(self._left_width)
+        self._left_container.width = self._left_width
+        try:
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _clamp_left_width(self, width: float) -> float:
+        if self._total_width is None:
+            return max(self._min_left, width)
+
+        available_width = max(0.0, self._total_width - self._divider_width)
+        if available_width <= self._min_left + self._min_right:
+            return max(0.0, available_width / 2)
+
+        max_left = available_width - self._min_right
+        return max(self._min_left, min(max_left, width))

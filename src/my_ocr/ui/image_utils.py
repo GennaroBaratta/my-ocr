@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from PIL import Image
 
@@ -15,3 +16,11 @@ def get_image_size(image_path: str) -> tuple[int, int]:
             return image.size
     except OSError:
         return 0, 0
+
+
+def get_image_source(image_path: str) -> str | bytes:
+    """Return a Flet-compatible image source for local desktop and web clients."""
+    try:
+        return Path(image_path).read_bytes()
+    except OSError:
+        return image_path

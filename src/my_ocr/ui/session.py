@@ -45,6 +45,8 @@ class UiSessionState:
     current_page_index: int = 0
     selected_box_id: str | None = None
     zoom_level: float = 1.0
+    zoom_mode: str = "fit_width"
+    zoom_fit_width: float | None = None
     is_adding_box: bool = False
     processing: bool = False
     progress_message: str = ""

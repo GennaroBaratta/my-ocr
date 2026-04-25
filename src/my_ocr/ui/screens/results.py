@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import functools
 import json
 from pathlib import Path
@@ -11,14 +12,11 @@ from typing import cast
 import flet as ft
 
 from .. import theme
-from ..components.code_display import (
-    _current_page_ocr_markdown_for_state,
-    _ocr_json_text_for_state,
-    build_code_display,
-)
+from ..components.code_display import build_code_display
 from ..components.doc_viewer import build_doc_viewer
 from ..components.split_pane import SplitPane
 from ..components.stepper import build_stepper
+from ..ocr_result_text import current_page_ocr_markdown_for_state, ocr_json_text_for_state
 from ..state import AppState
 
 
@@ -50,13 +48,13 @@ def build_results_view(
     )
 
     def current_ocr_json_text() -> str:
-        return _ocr_json_text_for_state(state)
+        return ocr_json_text_for_state(state)
 
     def current_ocr_markdown_text() -> str:
         return state.ocr_markdown
 
     def current_page_export_markdown_text() -> str:
-        return _current_page_ocr_markdown_for_state(state)
+        return current_page_ocr_markdown_for_state(state)
 
     rerun_in_progress = False
 
@@ -151,33 +149,21 @@ def build_results_view(
         run_id = state.run_id
         page_index = state.current_page_index
         page_number = state.current_page_number
-        set_rerun_in_progress(True)
 
-        async def do_rerun() -> None:
-            try:
-                await asyncio.to_thread(
-                    functools.partial(
-                        prepare_review_page_workflow,
-                        run_id,
-                        page_number,
-                        run_root=state.run_root,
-                        layout_profile=state.layout_profile,
-                    )
-                )
-                reload_state(page_index)
-                page.go(f"/review/{run_id}")
-            except Exception as exc:
-                page.show_dialog(
-                    ft.SnackBar(
-                        ft.Text(f"Page layout re-detect failed: {exc}"),
-                        bgcolor=theme.ERROR,
-                    )
-                )
-                page.update()
-            finally:
-                set_rerun_in_progress(False)
+        def on_success() -> None:
+            reload_state(page_index)
+            page.go(f"/review/{run_id}")
 
-        page.run_task(do_rerun)
+        _start_page_rerun(
+            page,
+            state,
+            workflow=prepare_review_page_workflow,
+            run_id=run_id,
+            page_number=page_number,
+            set_rerun_in_progress=set_rerun_in_progress,
+            on_success=on_success,
+            error_prefix="Page layout re-detect failed",
+        )
 
     def rerun_page_ocr() -> None:
         from my_ocr.application.use_cases.ocr import run_reviewed_ocr_page_workflow
@@ -187,33 +173,21 @@ def build_results_view(
         run_id = state.run_id
         page_index = state.current_page_index
         page_number = state.current_page_number
-        set_rerun_in_progress(True)
 
-        async def do_rerun() -> None:
-            try:
-                await asyncio.to_thread(
-                    functools.partial(
-                        run_reviewed_ocr_page_workflow,
-                        run_id,
-                        page_number,
-                        run_root=state.run_root,
-                        layout_profile=state.layout_profile,
-                    )
-                )
-                reload_state(page_index)
-                rebuild()
-            except Exception as exc:
-                page.show_dialog(
-                    ft.SnackBar(
-                        ft.Text(f"Page OCR rerun failed: {exc}"),
-                        bgcolor=theme.ERROR,
-                    )
-                )
-                page.update()
-            finally:
-                set_rerun_in_progress(False)
+        def on_success() -> None:
+            reload_state(page_index)
+            rebuild()
 
-        page.run_task(do_rerun)
+        _start_page_rerun(
+            page,
+            state,
+            workflow=run_reviewed_ocr_page_workflow,
+            run_id=run_id,
+            page_number=page_number,
+            set_rerun_in_progress=set_rerun_in_progress,
+            on_success=on_success,
+            error_prefix="Page OCR rerun failed",
+        )
 
     copy_json_button = ft.OutlinedButton(
         "Copy OCR JSON",
@@ -392,6 +366,45 @@ def _save_markdown(path: str, content: str) -> None:
 
 def _save_json(path: str, content: str) -> None:
     Path(cast(str, path)).write_text(content, encoding="utf-8")
+
+
+def _start_page_rerun(
+    page: ft.Page,
+    state: AppState,
+    *,
+    workflow: Callable[..., Path],
+    run_id: str,
+    page_number: int,
+    set_rerun_in_progress: Callable[[bool], None],
+    on_success: Callable[[], None],
+    error_prefix: str,
+) -> None:
+    set_rerun_in_progress(True)
+
+    async def do_rerun() -> None:
+        try:
+            await asyncio.to_thread(
+                functools.partial(
+                    workflow,
+                    run_id,
+                    page_number,
+                    run_root=state.run_root,
+                    layout_profile=state.layout_profile,
+                )
+            )
+            on_success()
+        except Exception as exc:
+            page.show_dialog(
+                ft.SnackBar(
+                    ft.Text(f"{error_prefix}: {exc}"),
+                    bgcolor=theme.ERROR,
+                )
+            )
+            page.update()
+        finally:
+            set_rerun_in_progress(False)
+
+    page.run_task(do_rerun)
 
 
 def _page_label_text(state: AppState) -> str:

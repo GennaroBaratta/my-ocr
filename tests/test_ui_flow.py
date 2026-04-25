@@ -577,6 +577,21 @@ def test_code_display_uses_run_level_ocr_json_without_predictions(tmp_path) -> N
     assert [cast(Any, tab).label for tab in tab_bar.tabs] == ["Markdown", "OCR JSON", "Raw"]
 
 
+def test_code_display_tab_bodies_scroll_inside_panel() -> None:
+    state = AppState()
+    state.ocr_markdown = "# Page 1\n\n" + "\n".join(f"Line {index}" for index in range(100))
+
+    display = build_code_display(state)
+    tabs = cast(ft.Tabs, display.controls[0])
+    tab_content = cast(ft.Column, tabs.content)
+    tab_view = cast(ft.TabBarView, tab_content.controls[1])
+
+    for panel in tab_view.controls:
+        scroll_body = cast(ft.Column, cast(ft.Column, panel).controls[1])
+        assert scroll_body.expand is True
+        assert scroll_body.scroll == ft.ScrollMode.AUTO
+
+
 def test_results_view_uses_ocr_json_actions_without_predictions(tmp_path) -> None:
     image_module = import_module("PIL.Image")
 

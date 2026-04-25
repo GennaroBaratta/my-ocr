@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any, cast
-
 import flet as ft
 
 from .. import theme
+from ..ocr_result_text import (
+    current_page_index as _current_page_index,
+    current_page_markdown_for_state as _current_page_markdown_for_state,
+    current_page_ocr_markdown_for_state as _current_page_ocr_markdown_for_state,
+    markdown_pages_for_state as _markdown_pages_for_state,
+    ocr_json_text_for_state as _ocr_json_text_for_state,
+    ocr_pages_for_state as _ocr_pages_for_state,
+    raw_page_text_for_state as _raw_page_text_for_state,
+)
 from ..state import AppState
+
+__all__ = [
+    "_current_page_markdown_for_state",
+    "_current_page_ocr_markdown_for_state",
+    "_markdown_pages_for_state",
+    "_ocr_json_text_for_state",
+    "_ocr_pages_for_state",
+    "build_code_display",
+]
 
 
 def build_code_display(state: AppState) -> ft.Column:
@@ -107,6 +122,12 @@ def _on_tab_change(e: ft.Event[ft.Tabs], state: AppState) -> None:
 
 
 def _build_panel(title: str, detail: str, body: ft.Control) -> ft.Column:
+    scroll_body = ft.Column(
+        [body],
+        spacing=0,
+        expand=True,
+        scroll=ft.ScrollMode.AUTO,
+    )
     return ft.Column(
         [
             ft.Container(
@@ -128,7 +149,7 @@ def _build_panel(title: str, detail: str, body: ft.Control) -> ft.Column:
                 bgcolor=theme.BG_SURFACE,
                 border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
             ),
-            body,
+            scroll_body,
         ],
         spacing=0,
         expand=True,
@@ -140,78 +161,3 @@ def _page_detail_text(current_page_index: int, markdown_pages: list[str]) -> str
     if page_count == 0:
         return "No pages"
     return f"Page {current_page_index + 1} of {page_count}"
-
-
-def _current_page_index(state: AppState, markdown_pages: list[str]) -> int:
-    if not markdown_pages:
-        return 0
-    return min(max(state.current_page_index, 0), len(markdown_pages) - 1)
-
-
-def _markdown_pages_for_state(state: AppState) -> list[str]:
-    pages = _ocr_pages_for_state(state)
-    if pages:
-        markdown_pages = [
-            page.get("markdown", "") if isinstance(page.get("markdown"), str) else ""
-            for page in pages
-        ]
-        target_count = max(len(markdown_pages), len(state.pages), 1)
-        while len(markdown_pages) < target_count:
-            markdown_pages.append("")
-        return markdown_pages
-    if state.ocr_markdown.strip():
-        return [state.ocr_markdown]
-    return [""]
-
-
-def _raw_page_text_for_state(state: AppState) -> str:
-    markdown_pages = _markdown_pages_for_state(state)
-    current_page_index = _current_page_index(state, markdown_pages)
-    pages = _ocr_pages_for_state(state)
-    if 0 <= current_page_index < len(pages):
-        return json.dumps(pages[current_page_index], indent=2, ensure_ascii=False)
-    return "No OCR page payload available for this page."
-
-
-def _current_page_markdown_for_state(state: AppState) -> str:
-    markdown_pages = _markdown_pages_for_state(state)
-    current_page_index = _current_page_index(state, markdown_pages)
-    if 0 <= current_page_index < len(markdown_pages):
-        return markdown_pages[current_page_index]
-    return ""
-
-
-def _current_page_ocr_markdown_for_state(state: AppState) -> str:
-    pages = _ocr_pages_for_state(state)
-    if not pages:
-        return ""
-    current_page_index = state.current_page_index
-    if not 0 <= current_page_index < len(pages):
-        return ""
-    markdown = pages[current_page_index].get("markdown")
-    return markdown if isinstance(markdown, str) else ""
-
-
-def _ocr_json_text_for_state(state: AppState) -> str:
-    if not state.run_paths or not state.run_paths.ocr_json_path.exists():
-        return ""
-    try:
-        payload = json.loads(state.run_paths.ocr_json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ""
-    return json.dumps(payload, indent=2, ensure_ascii=False) if isinstance(payload, dict) else ""
-
-
-def _ocr_pages_for_state(state: AppState) -> list[dict[str, Any]]:
-    if not state.run_paths or not state.run_paths.ocr_json_path.exists():
-        return []
-    try:
-        payload = json.loads(state.run_paths.ocr_json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return []
-    if not isinstance(payload, dict):
-        return []
-    pages = payload.get("pages")
-    if not isinstance(pages, list):
-        return []
-    return [cast(dict[str, Any], page) for page in pages if isinstance(page, dict)]

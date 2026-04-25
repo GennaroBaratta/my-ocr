@@ -171,6 +171,84 @@ def test_overlay_colors_follow_review_kind_labels(monkeypatch) -> None:
     assert header_box.bgcolor == f"{theme.BOX_HEADER}01"
 
 
+def test_bbox_editor_uses_shared_fit_width_scale_for_overlays(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.bbox_editor.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 82
+    state.pages = [
+        PageData(
+            index=0,
+            page_number=1,
+            image_path="/tmp/page-0001.png",
+            boxes=[
+                BoundingBox(
+                    id="p0-b0",
+                    page_index=0,
+                    x=10,
+                    y=20,
+                    width=30,
+                    height=40,
+                    label="text",
+                )
+            ],
+        )
+    ]
+    state.current_page_index = 0
+
+    editor = build_bbox_editor(
+        state,
+        lambda _box_id: None,
+        lambda: None,
+        lambda: None,
+    )
+
+    stack = _editor_stack(editor)
+    box_detector = cast(ft.GestureDetector, stack.controls[2])
+    box_content = cast(ft.Container, box_detector.content)
+
+    assert stack.width == 50
+    assert stack.height == 100
+    assert box_detector.left == 5
+    assert box_detector.top == 10
+    assert box_content.width == 15
+    assert box_content.height == 20
+
+
+def test_bbox_editor_resize_reports_fit_width_scale_once(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "my_ocr.ui.components.bbox_editor.get_image_size",
+        lambda _path: (100, 200),
+    )
+
+    state = AppState()
+    state.zoom_fit_width = 82
+    state.pages = [PageData(index=0, page_number=1, image_path="/tmp/page-0001.png")]
+    state.current_page_index = 0
+    scales: list[float] = []
+
+    editor = build_bbox_editor(
+        state,
+        lambda _box_id: None,
+        lambda: None,
+        lambda: None,
+        scales.append,
+    )
+    scales.clear()
+    on_size_change = cast(Callable[[object], None], editor.on_size_change)
+
+    on_size_change(SimpleNamespace(width=132))
+
+    stack = _editor_stack(editor)
+    assert state.zoom_fit_width == 132
+    assert scales == [1.0]
+    assert stack.width == 100
+    assert stack.height == 200
+
+
 def test_drag_to_add_box_uses_canonical_text_label_and_exits_add_mode(monkeypatch) -> None:
     monkeypatch.setattr(
         "my_ocr.ui.components.bbox_editor.get_image_size",
