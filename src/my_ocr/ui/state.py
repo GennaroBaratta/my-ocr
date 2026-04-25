@@ -61,7 +61,9 @@ class AppState:
         self.session.current_input_path = snapshot.manifest.input.path
         self.session.pages = pages_from_snapshot(snapshot)
         self.session.ocr_markdown = snapshot.ocr_result.markdown if snapshot.ocr_result else ""
-        self.session.ocr_json = snapshot.ocr_result.to_dict() if snapshot.ocr_result else {}
+        self.session.ocr_json = (
+            snapshot.ocr_result.model_dump(mode="json") if snapshot.ocr_result else {}
+        )
         canonical = snapshot.extraction.get("canonical")
         self.session.extraction_json = canonical if isinstance(canonical, dict) else {}
         self.session.layout_warning = snapshot.manifest.diagnostics.layout.warning

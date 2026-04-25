@@ -7,13 +7,14 @@ from typing import Any
 import pytest
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.artifacts import (
+from my_ocr.pipeline.types import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
 )
 from my_ocr.models import (
+    LayoutDiagnostics,
     LayoutBlock,
     OcrPageResult,
     OcrRunResult,
@@ -22,12 +23,12 @@ from my_ocr.models import (
     ReviewPage,
     RunId,
 )
-from my_ocr.application.workflow import DocumentWorkflow
+from my_ocr.pipeline.workflow import DocumentWorkflow
 from my_ocr.pipeline.errors import UnsupportedRunSchema
 from my_ocr.pipeline.options import StructuredExtractionOptions
 
 
-def test_prepare_layout_review_writes_v2_manifest_and_relative_payloads(tmp_path: Path) -> None:
+def test_prepare_layout_review_writes_v3_manifest_and_relative_payloads(tmp_path: Path) -> None:
     input_path = _image(tmp_path / "input.png")
     store = FilesystemRunStore(tmp_path / "runs")
 
@@ -36,7 +37,7 @@ def test_prepare_layout_review_writes_v2_manifest_and_relative_payloads(tmp_path
     run_dir = result.snapshot.run_dir
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     review = json.loads((run_dir / "layout" / "review.json").read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["pages"][0]["image_path"] == "pages/page-0001.png"
     assert manifest["status"]["layout"] == "prepared"
     assert manifest["diagnostics"]["layout"]["layout_profile_warning"] == "profile warning"
@@ -47,18 +48,21 @@ def test_prepare_layout_review_writes_v2_manifest_and_relative_payloads(tmp_path
 
 def test_run_reviewed_ocr_writes_ocr_and_clears_extraction(tmp_path: Path) -> None:
     store, run_id = _prepared_run(tmp_path)
-    tx = store.begin_update(run_id)
-    tx.write_rules_extraction({"stale": True})
-    tx.commit()
+    store.write_rules_extraction(run_id, {"stale": True})
 
     result = _workflow(store).run_reviewed_ocr(RunId(run_id))
 
     run_dir = result.snapshot.run_dir
     assert (run_dir / "ocr" / "markdown.md").read_text(encoding="utf-8") == "# Page 1"
     assert not (run_dir / "extraction").exists()
-    assert json.loads((run_dir / "ocr" / "pages.json").read_text(encoding="utf-8"))[
+    ocr_page = json.loads((run_dir / "ocr" / "pages.json").read_text(encoding="utf-8"))[
         "pages"
-    ][0]["provider_path"] == "ocr/provider/page-0001"
+    ][0]
+    assert ocr_page["provider_path"] == "ocr/provider/page-0001"
+    assert "sdk_json_path" not in ocr_page
+    assert "sdk_json_path" not in ocr_page["raw_payload"]
+    assert (run_dir / ocr_page["provider_path"] / "model.json").exists()
+    assert not (run_dir / "ocr_raw").exists()
 
 
 def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
@@ -90,7 +94,7 @@ def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
     )
 
 
-def test_extract_rules_and_structured_write_v2_extraction_outputs(tmp_path: Path) -> None:
+def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path) -> None:
     store, run_id = _prepared_run(tmp_path)
     workflow = _workflow(store)
     workflow.run_reviewed_ocr(RunId(run_id))
@@ -133,16 +137,16 @@ def test_v1_run_folders_are_explicitly_unsupported(tmp_path: Path) -> None:
     run_dir.mkdir(parents=True)
     (run_dir / "meta.json").write_text("{}", encoding="utf-8")
 
-    with pytest.raises(UnsupportedRunSchema, match="created before v2"):
+    with pytest.raises(UnsupportedRunSchema, match="created before v3"):
         FilesystemRunStore(tmp_path / "runs").open_run("old")
 
 
-def test_transaction_rollback_removes_work_dir_without_publishing(tmp_path: Path) -> None:
+def test_discard_workspace_removes_work_dir_without_publishing(tmp_path: Path) -> None:
     store = FilesystemRunStore(tmp_path / "runs")
-    tx = store.create_run("input.pdf", RunId("rollback"))
-    work_dir = tx.work_dir
+    workspace = store.start_run("input.pdf", RunId("rollback"))
+    work_dir = workspace.work_dir
 
-    tx.rollback()
+    store.discard_workspace(workspace)
 
     assert not work_dir.exists()
     assert not (tmp_path / "runs" / "rollback").exists()
@@ -175,7 +179,9 @@ class FakeLayoutDetector:
     def __init__(self, *, label: str = "text") -> None:
         self._label = label
 
-    def detect_layout(self, pages: list[PageRef], _options: object) -> LayoutDetectionResult:
+    def detect_layout(
+        self, pages: list[PageRef], _run_dir: Path, _options: object
+    ) -> LayoutDetectionResult:
         copies: list[ArtifactCopy] = []
         review_pages: list[ReviewPage] = []
         for page in pages:
@@ -200,18 +206,15 @@ class FakeLayoutDetector:
                             id=f"p{page.page_number}-b0",
                             index=0,
                             label=self._label,
-                            bbox=(1, 2, 8, 9),
+                            bbox=[1, 2, 8, 9],
                         )
                     ],
                 )
             )
         return LayoutDetectionResult(
-            layout=ReviewLayout(review_pages, status="prepared"),
+            layout=ReviewLayout(pages=review_pages, status="prepared"),
             artifacts=ProviderArtifacts(tuple(copies)),
-            diagnostics=type("Diagnostics", (), {
-                "warning": "profile warning",
-                "to_dict": lambda self: {"layout_profile_warning": "profile warning"},
-            })(),
+            diagnostics=LayoutDiagnostics({"layout_profile_warning": "profile warning"}),
         )
 
 
@@ -220,20 +223,34 @@ class FakeOcrEngine:
         self._prefix = prefix
 
     def recognize(
-        self, pages: list[PageRef], _review: ReviewLayout | None, _options: object
+        self, pages: list[PageRef], _run_dir: Path, _review: ReviewLayout | None, _options: object
     ) -> OcrRecognitionResult:
-        results = [
-            OcrPageResult(
-                page_number=page.page_number,
-                image_path=page.image_path,
-                markdown=f"{self._prefix} Page {page.page_number}",
-                markdown_source="sdk_markdown",
-                provider_path=f"ocr/provider/page-{page.page_number:04d}",
+        copies: list[ArtifactCopy] = []
+        results: list[OcrPageResult] = []
+        for page in pages:
+            source = _run_dir / "ocr_raw" / f"page-{page.page_number:04d}"
+            source.mkdir(parents=True, exist_ok=True)
+            (source / "model.json").write_text("{}", encoding="utf-8")
+            copies.append(
+                ArtifactCopy(
+                    source=source,
+                    relative_target=f"ocr/provider/page-{page.page_number:04d}",
+                )
             )
-            for page in pages
-        ]
+            results.append(
+                OcrPageResult(
+                    page_number=page.page_number,
+                    image_path=page.image_path,
+                    markdown=f"{self._prefix} Page {page.page_number}",
+                    markdown_source="sdk_markdown",
+                    provider_path=f"ocr/provider/page-{page.page_number:04d}",
+                )
+            )
         markdown = "\n\n".join(page.markdown for page in results)
-        return OcrRecognitionResult(OcrRunResult(results, markdown), ProviderArtifacts.empty())
+        return OcrRecognitionResult(
+            OcrRunResult(pages=results, markdown=markdown),
+            ProviderArtifacts(tuple(copies), (_run_dir / "ocr_raw",)),
+        )
 
 
 class FakeRulesExtractor:
@@ -282,3 +299,4 @@ def _image(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (10, 10), "white").save(path)
     return path
+

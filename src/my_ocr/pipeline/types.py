@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from my_ocr.models import LayoutDiagnostics, OcrRunResult, ReviewLayout
+from my_ocr.models import LayoutDiagnostics, OcrRunResult, ReviewLayout, RunSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,3 +33,9 @@ class LayoutDetectionResult:
 class OcrRecognitionResult:
     result: OcrRunResult
     artifacts: ProviderArtifacts = field(default_factory=ProviderArtifacts.empty)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowResult:
+    snapshot: RunSnapshot
+    warning: str | None = None

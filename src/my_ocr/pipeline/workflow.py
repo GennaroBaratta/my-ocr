@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.application.artifacts import (
+from my_ocr.pipeline.types import (
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
+    WorkflowResult,
 )
 from my_ocr.pipeline.errors import (
     LayoutDetectionFailed,
@@ -24,12 +25,10 @@ from my_ocr.pipeline.options import (
     OcrOptions,
     StructuredExtractionOptions,
 )
-from my_ocr.application.results import WorkflowResult
 from my_ocr.pipeline.extraction import validate_structured_prediction
-from my_ocr.pipeline.storage import RunHandle, RunStorage
+from my_ocr.pipeline.storage import RunStorage
 
 
-RunTransaction = RunHandle
 RunStore = RunStorage
 
 
@@ -39,7 +38,7 @@ class DocumentNormalizer(Protocol):
 
 class LayoutDetector(Protocol):
     def detect_layout(
-        self, pages: list[PageRef], options: LayoutOptions
+        self, pages: list[PageRef], run_dir: Path, options: LayoutOptions
     ) -> LayoutDetectionResult: ...
 
 
@@ -47,6 +46,7 @@ class OcrEngine(Protocol):
     def recognize(
         self,
         pages: list[PageRef],
+        run_dir: Path,
         review: ReviewLayout | None,
         options: OcrOptions,
     ) -> OcrRecognitionResult: ...
@@ -67,7 +67,7 @@ class StructuredExtractor(Protocol):
 
 
 class DocumentWorkflow:
-    """Coordinates the document processing workflow against application ports."""
+    """Coordinates document processing."""
 
     def __init__(
         self,
@@ -91,22 +91,23 @@ class DocumentWorkflow:
         run_id: RunId | None = None,
         options: LayoutOptions = LayoutOptions(),
     ) -> WorkflowResult:
-        run = self._run_store.create_run(input_path, run_id)
+        workspace = self._run_store.start_run(input_path, run_id)
         try:
-            pages = self._normalizer.normalize(input_path, run.work_dir / "pages")
-            self._run_store.write_pages(run, pages)
+            pages = self._normalizer.normalize(input_path, workspace.work_dir / "pages")
             try:
-                result = self._layout_detector.detect_layout(pages, options)
+                result = self._layout_detector.detect_layout(pages, workspace.work_dir, options)
             except Exception as exc:
                 raise LayoutDetectionFailed(f"Layout detection failed: {exc}") from exc
-            self._run_store.write_review_layout(
-                run, result.layout, result.artifacts, result.diagnostics
+            snapshot = self._run_store.publish_prepared_run(
+                workspace,
+                pages,
+                result.layout,
+                result.artifacts,
+                result.diagnostics,
             )
-            self._run_store.clear_extraction_outputs(run)
-            snapshot = self._run_store.commit_run(run)
             return WorkflowResult(snapshot=snapshot, warning=result.diagnostics.warning)
         except Exception:
-            self._run_store.rollback_run(run)
+            self._run_store.discard_workspace(workspace)
             raise
 
     def run_reviewed_ocr(
@@ -119,7 +120,7 @@ class DocumentWorkflow:
             raise MissingPage(f"No pages found for run {run_id}")
         try:
             recognition = self._ocr_engine.recognize(
-                snapshot.pages, snapshot.review_layout, options
+                snapshot.pages, snapshot.run_dir, snapshot.review_layout, options
             )
         except Exception as exc:
             raise OcrFailed(f"OCR failed: {exc}") from exc
@@ -146,7 +147,7 @@ class DocumentWorkflow:
         if page is None:
             raise MissingPage(f"Page {page_number} not found")
         try:
-            result = self._layout_detector.detect_layout([page], options)
+            result = self._layout_detector.detect_layout([page], snapshot.run_dir, options)
         except Exception as exc:
             raise LayoutDetectionFailed(f"Layout detection failed: {exc}") from exc
         if not result.layout.pages:
@@ -167,7 +168,9 @@ class DocumentWorkflow:
         if page is None:
             raise MissingPage(f"Page {page_number} not found")
         try:
-            recognition = self._ocr_engine.recognize([page], snapshot.review_layout, options)
+            recognition = self._ocr_engine.recognize(
+                [page], snapshot.run_dir, snapshot.review_layout, options
+            )
         except Exception as exc:
             raise OcrFailed(f"OCR failed: {exc}") from exc
         if not recognition.result.pages:
@@ -233,3 +236,4 @@ class DocumentWorkflow:
         resolved_run_id = prepared.snapshot.run_id
         self.run_reviewed_ocr(resolved_run_id, options=ocr_options)
         return self.extract_rules(resolved_run_id)
+

@@ -88,16 +88,16 @@ def test_domain_does_not_import_outer_layers() -> None:
     assert not _violations(
         "domain",
         (
-            "my_ocr.application",
+            "my_ocr.pipeline",
             "my_ocr.adapters",
             "my_ocr.ui",
         ),
     )
 
 
-def test_application_does_not_import_adapters_or_ui_even_dynamically() -> None:
+def test_pipeline_does_not_import_adapters_or_ui_even_dynamically() -> None:
     assert not _violations(
-        "application",
+        "pipeline",
         (
             "my_ocr.adapters",
             "my_ocr.ui",
@@ -105,14 +105,17 @@ def test_application_does_not_import_adapters_or_ui_even_dynamically() -> None:
     )
 
 
-def test_ui_does_not_import_removed_application_artifacts_or_use_cases() -> None:
-    assert not _violations(
-        "ui",
-        (
-            "my_ocr.application.artifacts",
-            "my_ocr.application.use_cases",
-        ),
-    )
+def test_source_tests_and_tools_do_not_import_application_package() -> None:
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
+    failures: list[str] = []
+    blocked = "my_ocr.application"
+    for root in roots:
+        for path in root.rglob("*.py"):
+            modules = _imported_modules(path) | _dynamic_import_strings(path)
+            if any(module == blocked or module.startswith(f"{blocked}.") for module in modules):
+                failures.append(f"{path.relative_to(REPO_ROOT)} imports application package")
+
+    assert not failures
 
 
 def test_ui_does_not_import_filesystem_run_store_directly() -> None:
@@ -131,9 +134,9 @@ def test_ui_state_does_not_define_magic_session_delegation() -> None:
 
 
 def test_ui_does_not_open_run_transactions_directly() -> None:
-    roots = (SRC_ROOT / "ui",)
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
     failures = [
-        f"{path.relative_to(SRC_ROOT)}:{line}"
+        f"{path.relative_to(REPO_ROOT)}:{line}"
         for path, line in _attribute_call_sites(roots, "begin_update")
     ]
 
@@ -141,9 +144,9 @@ def test_ui_does_not_open_run_transactions_directly() -> None:
 
 
 def test_review_layout_saves_are_coordinated_by_workflow() -> None:
-    workflow_path = SRC_ROOT / "application" / "workflow.py"
+    workflow_path = SRC_ROOT / "pipeline" / "workflow.py"
     roots = (
-        SRC_ROOT / "application",
+        SRC_ROOT / "pipeline",
         SRC_ROOT / "adapters" / "inbound",
         SRC_ROOT / "ui",
     )
@@ -156,41 +159,35 @@ def test_review_layout_saves_are_coordinated_by_workflow() -> None:
     assert not failures
 
 
-def test_source_and_tests_do_not_import_removed_command_layer() -> None:
+def test_source_tests_and_tools_do_not_define_removed_ocr_legacy_helpers() -> None:
     roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
     failures: list[str] = []
+    blocked = {
+        "_run_dir_from_pages",
+        "_legacy_review_payload",
+        "_review_layout_from_legacy",
+        "_ocr_result_from_legacy",
+        "_legacy_layout_cleanup_paths",
+        "_legacy_ocr_cleanup_paths",
+    }
     for root in roots:
         for path in root.rglob("*.py"):
-            modules = _imported_modules(path) | _dynamic_import_strings(path)
-            if "my_ocr.application.commands" in modules:
-                failures.append(f"{path.relative_to(REPO_ROOT)} imports command layer")
+            overlap = blocked & _defined_function_names(path)
+            if overlap:
+                failures.append(
+                    f"{path.relative_to(REPO_ROOT)} defines removed helpers: {sorted(overlap)}"
+                )
 
     assert not failures
 
 
-def test_source_tests_and_tools_do_not_import_removed_application_dto() -> None:
+def test_source_tests_and_tools_do_not_call_removed_run_transaction_methods() -> None:
     roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
-    failures: list[str] = []
-    for root in roots:
-        for path in root.rglob("*.py"):
-            modules = _imported_modules(path) | _dynamic_import_strings(path)
-            if "my_ocr.application.dto" in modules:
-                failures.append(f"{path.relative_to(REPO_ROOT)} imports application dto")
+    failures = [
+        f"{path.relative_to(REPO_ROOT)}:{line}"
+        for attribute in ("create_run", "write_pages", "commit_run", "rollback_run")
+        for path, line in _attribute_call_sites(roots, attribute)
+    ]
 
     assert not failures
 
-
-def test_source_tests_and_tools_do_not_import_removed_application_ports() -> None:
-    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
-    failures: list[str] = []
-    blocked = "my_ocr.application.ports"
-    for root in roots:
-        for path in root.rglob("*.py"):
-            modules = _imported_modules(path) | _dynamic_import_strings(path)
-            if any(
-                module == blocked or module.startswith(f"{blocked}.")
-                for module in modules
-            ):
-                failures.append(f"{path.relative_to(REPO_ROOT)} imports application ports")
-
-    assert not failures

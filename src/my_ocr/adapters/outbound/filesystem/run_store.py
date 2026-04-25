@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass
 import re
 import shutil
 import tempfile
@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from my_ocr.application.artifacts import ArtifactCopy, ProviderArtifacts
+from pydantic import ValidationError
+
+from my_ocr.filesystem import read_json as _read_json
+from my_ocr.filesystem import read_text as _read_text
+from my_ocr.filesystem import write_json as _write_json
+from my_ocr.filesystem import write_text as _write_text
 from my_ocr.models import (
     LayoutDiagnostics,
     OcrPageResult,
@@ -16,9 +21,11 @@ from my_ocr.models import (
     PageRef,
     ReviewLayout,
     ReviewPage,
+    RunDiagnostics,
     RunId,
     RunManifest,
     RunSnapshot,
+    RunStatus,
     SCHEMA_VERSION,
 )
 from my_ocr.pipeline.errors import (
@@ -27,74 +34,116 @@ from my_ocr.pipeline.errors import (
     RunNotFound,
     UnsupportedRunSchema,
 )
-from my_ocr.filesystem import read_json as _read_json
-from my_ocr.filesystem import read_text as _read_text
-from my_ocr.filesystem import write_json as _write_json
-from my_ocr.filesystem import write_text as _write_text
+from my_ocr.pipeline.types import ArtifactCopy, ProviderArtifacts
 
 DEFAULT_RUN_ROOT = "data/runs"
+
+
+@dataclass(frozen=True, slots=True)
+class RunWorkspace:
+    run_id: RunId
+    target_dir: Path
+    work_dir: Path
 
 
 class FilesystemRunStore:
     def __init__(self, run_root: str | Path = DEFAULT_RUN_ROOT) -> None:
         self.run_root = Path(run_root)
 
-    def create_run(self, input_path: str | Path, run_id: RunId | None = None) -> "RunTransaction":
+    def start_run(self, input_path: str | Path, run_id: RunId | None = None) -> RunWorkspace:
         self.run_root.mkdir(parents=True, exist_ok=True)
         resolved_run_id = run_id or RunId(f"{_slugify(Path(input_path).stem)}-{_timestamp_id()}")
-        target_dir = self.run_root / str(resolved_run_id)
+        target_dir = self._run_dir(resolved_run_id)
         work_dir = Path(
             tempfile.mkdtemp(prefix=f".{resolved_run_id}-work-", dir=str(self.run_root))
         )
-        manifest = RunManifest.new(resolved_run_id, input_path)
-        _write_json(work_dir / "run.json", manifest.to_dict())
-        return RunTransaction(self, target_dir, work_dir, is_new=not target_dir.exists())
+        _write_manifest(work_dir, RunManifest.new(resolved_run_id, input_path))
+        return RunWorkspace(resolved_run_id, target_dir, work_dir)
+
+    def publish_prepared_run(
+        self,
+        workspace: RunWorkspace,
+        pages: list[PageRef],
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot:
+        try:
+            manifest = _load_manifest(workspace.work_dir)
+            _write_manifest(
+                workspace.work_dir,
+                manifest.with_updates(
+                    pages=pages,
+                    status=RunStatus(layout=layout.status or "prepared"),
+                    diagnostics=(
+                        manifest.diagnostics
+                        if diagnostics is None
+                        else RunDiagnostics(layout=diagnostics)
+                    ),
+                ),
+            )
+            _write_review_layout_to_dir(workspace.work_dir, layout, artifacts)
+            return _publish_workspace(workspace)
+        except Exception:
+            self.discard_workspace(workspace)
+            raise
+
+    def discard_workspace(self, workspace: RunWorkspace) -> None:
+        shutil.rmtree(workspace.work_dir, ignore_errors=True)
 
     def open_run(self, run_id: RunId | str) -> RunSnapshot:
         return _load_snapshot(self._run_dir(run_id))
 
-    def write_pages(
-        self, run: "RunTransaction | RunId | str", pages: list[PageRef]
-    ) -> RunSnapshot | None:
-        if isinstance(run, RunTransaction):
-            run.write_pages(pages)
-            return None
-        tx = self.begin_update(run)
-        try:
-            tx.write_pages(pages)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
     def write_review_layout(
         self,
-        run: "RunTransaction | RunId | str",
+        run_id: RunId | str,
         layout: ReviewLayout,
         artifacts: ProviderArtifacts,
         diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot | None:
-        if isinstance(run, RunTransaction):
-            run.write_review_layout(layout, artifacts, diagnostics)
-            return None
-        tx = self.begin_update(run)
-        try:
-            tx.write_review_layout(layout, artifacts, diagnostics)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
+    ) -> RunSnapshot:
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
+        _write_review_layout_to_dir(run_dir, layout, artifacts)
+        _remove_path(run_dir / "ocr")
+        _remove_path(run_dir / "extraction")
+        manifest = snapshot.manifest.with_updates(
+            status=RunStatus(layout=layout.status or "prepared", ocr="pending", extraction="pending"),
+            diagnostics=(
+                snapshot.manifest.diagnostics
+                if diagnostics is None
+                else RunDiagnostics(
+                    layout=diagnostics,
+                    ocr=snapshot.manifest.diagnostics.ocr,
+                    extraction=snapshot.manifest.diagnostics.extraction,
+                )
+            ),
+        )
+        _write_manifest(run_dir, manifest)
+        return _load_snapshot(run_dir)
 
     def write_ocr_result(
         self, run_id: RunId | str, result: OcrRunResult, artifacts: ProviderArtifacts
     ) -> RunSnapshot:
-        tx = self.begin_update(run_id)
-        try:
-            tx.write_ocr_result(result, artifacts)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
+        _write_ocr_result_to_dir(run_dir, result, artifacts)
+        _remove_path(run_dir / "extraction")
+        _write_manifest(
+            run_dir,
+            snapshot.manifest.with_updates(
+                status=RunStatus(
+                    layout=snapshot.manifest.status.layout,
+                    ocr="complete",
+                    extraction="pending",
+                ),
+                diagnostics=RunDiagnostics(
+                    layout=snapshot.manifest.diagnostics.layout,
+                    ocr=dict(result.diagnostics),
+                    extraction={},
+                ),
+            ),
+        )
+        return _load_snapshot(run_dir)
 
     def replace_page_layout(
         self,
@@ -103,164 +152,7 @@ class FilesystemRunStore:
         page: ReviewPage,
         artifacts: ProviderArtifacts,
     ) -> RunSnapshot:
-        tx = self.begin_update(run_id)
-        try:
-            tx.replace_page_layout(page_number, page, artifacts)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
-    def replace_page_ocr(
-        self,
-        run_id: RunId | str,
-        page_number: int,
-        page: OcrPageResult,
-        artifacts: ProviderArtifacts,
-    ) -> RunSnapshot:
-        tx = self.begin_update(run_id)
-        try:
-            tx.replace_page_ocr(page_number, page, artifacts)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
-    def write_rules_extraction(
-        self, run_id: RunId | str, prediction: dict[str, Any]
-    ) -> RunSnapshot:
-        tx = self.begin_update(run_id)
-        try:
-            tx.write_rules_extraction(prediction)
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
-    def write_structured_extraction(
-        self,
-        run_id: RunId | str,
-        prediction: dict[str, Any],
-        metadata: dict[str, Any],
-        *,
-        canonical_prediction: dict[str, Any],
-    ) -> RunSnapshot:
-        tx = self.begin_update(run_id)
-        try:
-            tx.write_structured_extraction(
-                prediction,
-                metadata,
-                canonical_prediction=canonical_prediction,
-            )
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
-    def clear_extraction_outputs(
-        self, run: "RunTransaction | RunId | str"
-    ) -> RunSnapshot | None:
-        if isinstance(run, RunTransaction):
-            run.clear_extraction_outputs()
-            return None
-        tx = self.begin_update(run)
-        try:
-            tx.clear_extraction_outputs()
-            return tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
-
-    def commit_run(self, run: "RunTransaction") -> RunSnapshot:
-        return run.commit()
-
-    def rollback_run(self, run: "RunTransaction") -> None:
-        run.rollback()
-
-    def begin_update(self, run_id: RunId | str) -> "RunTransaction":
-        target_dir = self._run_dir(run_id)
-        if not target_dir.exists():
-            raise RunNotFound(f"Run not found: {run_id}")
-        _load_manifest(target_dir)
-        self.run_root.mkdir(parents=True, exist_ok=True)
-        work_dir = Path(tempfile.mkdtemp(prefix=f".{target_dir.name}-work-", dir=str(self.run_root)))
-        shutil.copytree(target_dir, work_dir, dirs_exist_ok=True)
-        return RunTransaction(self, target_dir, work_dir, is_new=False)
-
-    def _run_dir(self, run_id: RunId | str) -> Path:
-        return self.run_root / str(run_id)
-
-
-class RunTransaction:
-    def __init__(
-        self,
-        store: FilesystemRunStore,
-        target_dir: Path,
-        work_dir: Path,
-        *,
-        is_new: bool,
-    ) -> None:
-        self._store = store
-        self._target_dir = target_dir
-        self.work_dir = work_dir
-        self._is_new = is_new
-        self._closed = False
-        self.run_id = RunId(target_dir.name)
-
-    @property
-    def pages_dir(self) -> Path:
-        return self.work_dir / "pages"
-
-    def write_pages(self, pages: list[PageRef]) -> None:
-        manifest = self._manifest()
-        manifest = manifest.with_updates(pages=pages)
-        self._write_manifest(manifest)
-
-    def write_review_layout(
-        self,
-        layout: ReviewLayout,
-        artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
-    ) -> None:
-        _write_json(self.work_dir / "layout" / "review.json", layout.to_dict())
-        self._copy_artifacts(artifacts)
-        _remove_path(self.work_dir / "ocr")
-        _remove_path(self.work_dir / "extraction")
-        manifest = self._manifest()
-        self._write_manifest(
-            manifest.with_updates(
-                status=replace(
-                    manifest.status,
-                    layout=layout.status or "prepared",
-                    ocr="pending",
-                    extraction="pending",
-                ),
-                diagnostics=(
-                    manifest.diagnostics
-                    if diagnostics is None
-                    else replace(manifest.diagnostics, layout=diagnostics)
-                ),
-            )
-        )
-
-    def write_ocr_result(self, result: OcrRunResult, artifacts: ProviderArtifacts) -> None:
-        ocr_dir = self.work_dir / "ocr"
-        _write_text(ocr_dir / "markdown.md", result.markdown)
-        _write_json(ocr_dir / "pages.json", result.to_dict())
-        self._copy_artifacts(artifacts)
-        manifest = self._manifest()
-        self._write_manifest(
-            manifest.with_updates(
-                status=replace(manifest.status, ocr="complete", extraction="pending"),
-                diagnostics=replace(manifest.diagnostics, ocr=dict(result.diagnostics)),
-            )
-        )
-        self.clear_extraction_outputs()
-
-    def replace_page_layout(
-        self, page_number: int, page: ReviewPage, artifacts: ProviderArtifacts
-    ) -> None:
-        snapshot = _load_snapshot(self.work_dir)
+        snapshot = _load_snapshot(self._existing_run_dir(run_id))
         existing = snapshot.review_layout or ReviewLayout(pages=[], status="prepared")
         pages_by_number = {review_page.page_number: review_page for review_page in existing.pages}
         pages_by_number[page_number] = page
@@ -269,15 +161,20 @@ class RunTransaction:
             for manifest_page in snapshot.pages
             if manifest_page.page_number in pages_by_number
         ]
-        self.write_review_layout(
+        return self.write_review_layout(
+            run_id,
             ReviewLayout(pages=ordered_pages, status="prepared", version=existing.version),
             artifacts,
         )
 
     def replace_page_ocr(
-        self, page_number: int, page: OcrPageResult, artifacts: ProviderArtifacts
-    ) -> None:
-        snapshot = _load_snapshot(self.work_dir)
+        self,
+        run_id: RunId | str,
+        page_number: int,
+        page: OcrPageResult,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot:
+        snapshot = _load_snapshot(self._existing_run_dir(run_id))
         if snapshot.ocr_result is None:
             raise MissingPage("Cannot replace a page before OCR has been run.")
         pages_by_number = {
@@ -290,7 +187,8 @@ class RunTransaction:
             if manifest_page.page_number in pages_by_number
         ]
         markdown = "\n\n".join(page.markdown.strip() for page in ordered_pages if page.markdown.strip())
-        self.write_ocr_result(
+        return self.write_ocr_result(
+            run_id,
             OcrRunResult(
                 pages=ordered_pages,
                 markdown=markdown,
@@ -299,96 +197,143 @@ class RunTransaction:
             artifacts,
         )
 
-    def write_rules_extraction(self, prediction: dict[str, Any]) -> None:
-        _write_json(self.work_dir / "extraction" / "rules.json", prediction)
-        _write_json(self.work_dir / "extraction" / "canonical.json", prediction)
-        manifest = self._manifest()
-        self._write_manifest(
-            manifest.with_updates(status=replace(manifest.status, extraction="rules"))
+    def write_rules_extraction(
+        self, run_id: RunId | str, prediction: dict[str, Any]
+    ) -> RunSnapshot:
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
+        _write_json(run_dir / "extraction" / "rules.json", prediction)
+        _write_json(run_dir / "extraction" / "canonical.json", prediction)
+        _write_manifest(
+            run_dir,
+            snapshot.manifest.with_updates(
+                status=RunStatus(
+                    layout=snapshot.manifest.status.layout,
+                    ocr=snapshot.manifest.status.ocr,
+                    extraction="rules",
+                )
+            ),
         )
+        return _load_snapshot(run_dir)
 
     def write_structured_extraction(
         self,
+        run_id: RunId | str,
         prediction: dict[str, Any],
         metadata: dict[str, Any],
         *,
         canonical_prediction: dict[str, Any],
-    ) -> None:
-        _write_json(self.work_dir / "extraction" / "structured.json", prediction)
-        _write_json(self.work_dir / "extraction" / "structured_meta.json", metadata)
-        _write_json(self.work_dir / "extraction" / "canonical.json", canonical_prediction)
-        manifest = self._manifest()
-        self._write_manifest(
-            manifest.with_updates(
-                status=replace(manifest.status, extraction="structured"),
-                diagnostics=replace(manifest.diagnostics, extraction=dict(metadata)),
-            )
+    ) -> RunSnapshot:
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
+        _write_json(run_dir / "extraction" / "structured.json", prediction)
+        _write_json(run_dir / "extraction" / "structured_meta.json", metadata)
+        _write_json(run_dir / "extraction" / "canonical.json", canonical_prediction)
+        _write_manifest(
+            run_dir,
+            snapshot.manifest.with_updates(
+                status=RunStatus(
+                    layout=snapshot.manifest.status.layout,
+                    ocr=snapshot.manifest.status.ocr,
+                    extraction="structured",
+                ),
+                diagnostics=RunDiagnostics(
+                    layout=snapshot.manifest.diagnostics.layout,
+                    ocr=snapshot.manifest.diagnostics.ocr,
+                    extraction=dict(metadata),
+                ),
+            ),
         )
+        return _load_snapshot(run_dir)
 
-    def clear_extraction_outputs(self) -> None:
-        extraction_dir = self.work_dir / "extraction"
-        if extraction_dir.exists():
-            shutil.rmtree(extraction_dir)
-        manifest = self._manifest()
-        if manifest.status.extraction != "pending":
-            self._write_manifest(
-                manifest.with_updates(status=replace(manifest.status, extraction="pending"))
-            )
-
-    def commit(self) -> RunSnapshot:
-        if self._closed:
-            return _load_snapshot(self._target_dir)
-        _load_manifest(self.work_dir)
-        backup_dir: Path | None = None
-        try:
-            self._target_dir.parent.mkdir(parents=True, exist_ok=True)
-            if self._target_dir.exists():
-                backup_dir = Path(
-                    tempfile.mkdtemp(
-                        prefix=f".{self._target_dir.name}-backup-",
-                        dir=str(self._target_dir.parent),
+    def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot:
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
+        _remove_path(run_dir / "extraction")
+        if snapshot.manifest.status.extraction != "pending":
+            _write_manifest(
+                run_dir,
+                snapshot.manifest.with_updates(
+                    status=RunStatus(
+                        layout=snapshot.manifest.status.layout,
+                        ocr=snapshot.manifest.status.ocr,
+                        extraction="pending",
                     )
+                ),
+            )
+        return _load_snapshot(run_dir)
+
+    def _run_dir(self, run_id: RunId | str) -> Path:
+        return self.run_root / str(run_id)
+
+    def _existing_run_dir(self, run_id: RunId | str) -> Path:
+        run_dir = self._run_dir(run_id)
+        if not run_dir.exists():
+            raise RunNotFound(f"Run not found: {run_id}")
+        _load_manifest(run_dir)
+        return run_dir
+
+
+def _publish_workspace(workspace: RunWorkspace) -> RunSnapshot:
+    _load_manifest(workspace.work_dir)
+    backup_dir: Path | None = None
+    try:
+        workspace.target_dir.parent.mkdir(parents=True, exist_ok=True)
+        if workspace.target_dir.exists():
+            backup_dir = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{workspace.target_dir.name}-backup-",
+                    dir=str(workspace.target_dir.parent),
                 )
-                shutil.rmtree(backup_dir)
-                self._target_dir.replace(backup_dir)
-            self.work_dir.replace(self._target_dir)
-        except Exception as exc:
-            if self._target_dir.exists():
-                shutil.rmtree(self._target_dir, ignore_errors=True)
-            if backup_dir is not None and backup_dir.exists():
-                backup_dir.replace(self._target_dir)
-            raise RunCommitFailed(f"Failed to commit run {self.run_id}") from exc
-        finally:
-            if backup_dir is not None and backup_dir.exists():
-                shutil.rmtree(backup_dir, ignore_errors=True)
-            self._closed = True
-        return _load_snapshot(self._target_dir)
-
-    def rollback(self) -> None:
-        if not self._closed:
-            shutil.rmtree(self.work_dir, ignore_errors=True)
-            self._closed = True
-
-    def _manifest(self) -> RunManifest:
-        return _load_manifest(self.work_dir)
-
-    def _write_manifest(self, manifest: RunManifest) -> None:
-        _write_json(self.work_dir / "run.json", manifest.to_dict())
-
-    def _copy_artifacts(self, artifacts: ProviderArtifacts) -> None:
-        try:
-            for item in artifacts.copies:
-                _copy_path(item, self.work_dir)
-        finally:
-            for path in artifacts.cleanup_paths:
-                _remove_cleanup_path(path, target_dir=self._target_dir, work_dir=self.work_dir)
+            )
+            shutil.rmtree(backup_dir)
+            workspace.target_dir.replace(backup_dir)
+        workspace.work_dir.replace(workspace.target_dir)
+    except Exception as exc:
+        if workspace.target_dir.exists():
+            shutil.rmtree(workspace.target_dir, ignore_errors=True)
+        if backup_dir is not None and backup_dir.exists():
+            backup_dir.replace(workspace.target_dir)
+        raise RunCommitFailed(f"Failed to publish run {workspace.run_id}") from exc
+    finally:
+        if backup_dir is not None and backup_dir.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
+    return _load_snapshot(workspace.target_dir)
 
 
-def _copy_path(item: ArtifactCopy, work_dir: Path) -> None:
-    target = item.relative_target
-    if Path(target).is_absolute() or ".." in Path(target).parts:
+def _write_manifest(run_dir: Path, manifest: RunManifest) -> None:
+    _write_json(run_dir / "run.json", manifest.model_dump(mode="json"))
+
+
+def _write_review_layout_to_dir(
+    run_dir: Path, layout: ReviewLayout, artifacts: ProviderArtifacts
+) -> None:
+    _write_json(run_dir / "layout" / "review.json", layout.model_dump(mode="json"))
+    _copy_artifacts(artifacts, run_dir)
+
+
+def _write_ocr_result_to_dir(
+    run_dir: Path, result: OcrRunResult, artifacts: ProviderArtifacts
+) -> None:
+    _write_text(run_dir / "ocr" / "markdown.md", result.markdown)
+    _write_json(run_dir / "ocr" / "pages.json", result.model_dump(mode="json"))
+    _copy_artifacts(artifacts, run_dir)
+
+
+def _copy_artifacts(artifacts: ProviderArtifacts, run_dir: Path) -> None:
+    try:
+        for item in artifacts.copies:
+            _copy_path(item, run_dir)
+    finally:
+        for path in artifacts.cleanup_paths:
+            _remove_path(path)
+
+
+def _copy_path(item: ArtifactCopy, run_dir: Path) -> None:
+    target = Path(item.relative_target)
+    if target.is_absolute() or ".." in target.parts:
         raise ValueError(f"Artifact target must be run-relative: {target}")
-    destination = work_dir / target
+    destination = run_dir / target
     if destination.exists():
         if destination.is_dir():
             shutil.rmtree(destination)
@@ -421,24 +366,34 @@ def _load_manifest(run_dir: Path) -> RunManifest:
     manifest_path = run_dir / "run.json"
     if not manifest_path.exists():
         raise UnsupportedRunSchema(
-            "Unsupported run schema: this run was created before v2. "
-            "Re-run the document to create a v2 run."
+            "Unsupported run schema: this run was created before v3. "
+            "Re-run the document to create a v3 run."
         )
     payload = _read_json(manifest_path)
     if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA_VERSION:
         raise UnsupportedRunSchema(
-            "Unsupported run schema: this run was created before v2. "
-            "Re-run the document to create a v2 run."
+            "Unsupported run schema: this run was created before v3. "
+            "Re-run the document to create a v3 run."
         )
-    return RunManifest.from_dict(payload, run_dir=run_dir)
+    try:
+        manifest = RunManifest.model_validate(payload)
+    except ValidationError as exc:
+        raise UnsupportedRunSchema(f"Unsupported run schema: {exc}") from exc
+    return manifest.model_copy(
+        update={
+            "pages": [
+                page.model_copy(update={"resolved_path": run_dir / page.image_path})
+                for page in manifest.pages
+            ]
+        }
+    )
 
 
 def _load_review_layout(run_dir: Path) -> ReviewLayout | None:
     path = run_dir / "layout" / "review.json"
     if not path.exists():
         return None
-    payload = _read_json(path)
-    return ReviewLayout.from_dict(payload) if isinstance(payload, dict) else None
+    return ReviewLayout.model_validate(_read_json(path))
 
 
 def _load_ocr_result(run_dir: Path) -> OcrRunResult | None:
@@ -447,8 +402,11 @@ def _load_ocr_result(run_dir: Path) -> OcrRunResult | None:
     if not pages_path.exists():
         return None
     payload = _read_json(pages_path)
-    markdown = _read_text(markdown_path) if markdown_path.exists() else ""
-    return OcrRunResult.from_dict(payload, markdown=markdown) if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    if "markdown" not in payload and markdown_path.exists():
+        payload = {**payload, "markdown": _read_text(markdown_path)}
+    return OcrRunResult.model_validate(payload)
 
 
 def _load_extraction(run_dir: Path) -> dict[str, Any]:
@@ -473,18 +431,6 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()
-
-
-def _remove_cleanup_path(path: Path, *, target_dir: Path, work_dir: Path) -> None:
-    candidates = [path]
-    try:
-        relative = path.relative_to(target_dir)
-    except ValueError:
-        relative = None
-    if relative is not None:
-        candidates.append(work_dir / relative)
-    for candidate in candidates:
-        _remove_path(candidate)
 
 
 def _slugify(value: str) -> str:

@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.models import PageRef, RunId
+from my_ocr.models import PageRef, ReviewLayout, RunId
+from my_ocr.pipeline.types import ProviderArtifacts
 from my_ocr.ui.state import AppState
 
 
-def test_app_state_loads_v2_run_and_saves_reviewed_layout(tmp_path: Path) -> None:
+def test_app_state_loads_v3_run_and_saves_reviewed_layout(tmp_path: Path) -> None:
     _seed_run(tmp_path / "runs", "demo")
     state = AppState()
     state.run_root = str(tmp_path / "runs")
@@ -58,11 +59,12 @@ def _seed_run(run_root: Path, run_id: str) -> None:
     from PIL import Image
 
     store = FilesystemRunStore(run_root)
-    tx = store.create_run("input.pdf", RunId(run_id))
-    page_path = tx.work_dir / "pages" / "page-0001.png"
+    workspace = store.start_run("input.pdf", RunId(run_id))
+    page_path = workspace.work_dir / "pages" / "page-0001.png"
     page_path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (10, 10), "white").save(page_path)
-    tx.write_pages(
+    store.publish_prepared_run(
+        workspace,
         [
             PageRef(
                 page_number=1,
@@ -71,8 +73,9 @@ def _seed_run(run_root: Path, run_id: str) -> None:
                 height=10,
                 resolved_path=page_path,
             )
-        ]
+        ],
+        ReviewLayout(pages=[], status="prepared"),
+        ProviderArtifacts.empty(),
     )
-    tx.commit()
 
 

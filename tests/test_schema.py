@@ -1,4 +1,8 @@
 from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
+import pytest
+from pydantic import ValidationError
+
+from my_ocr.models import LayoutBlock, PageRef, RunId, RunManifest, SCHEMA_VERSION
 
 
 def test_document_fields_normalizes_mapping() -> None:
@@ -34,3 +38,33 @@ def test_json_schema_contains_required_fields() -> None:
         "language",
         "summary_line",
     }
+
+
+def test_persisted_models_reject_unknown_fields_and_wrong_types() -> None:
+    with pytest.raises(ValidationError):
+        PageRef.model_validate(
+            {
+                "page_number": "1",
+                "image_path": "pages/page-0001.png",
+                "width": 10,
+                "height": 10,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        LayoutBlock.model_validate(
+            {
+                "id": "b1",
+                "index": 0,
+                "label": "text",
+                "bbox": [1, 2, 3, 4],
+                "unexpected": True,
+            }
+        )
+
+
+def test_run_manifest_uses_schema_v3() -> None:
+    manifest = RunManifest.new(RunId("demo"), "input.pdf")
+
+    assert SCHEMA_VERSION == 3
+    assert manifest.model_dump(mode="json")["schema_version"] == 3

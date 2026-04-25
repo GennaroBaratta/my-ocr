@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.application.artifacts import ProviderArtifacts
 from my_ocr.models import (
     LayoutDiagnostics,
     OcrPageResult,
@@ -14,29 +13,39 @@ from my_ocr.models import (
     RunId,
     RunSnapshot,
 )
+from my_ocr.pipeline.types import ProviderArtifacts
 
 
-class RunHandle(Protocol):
+class RunWorkspace(Protocol):
     run_id: RunId
     work_dir: Path
 
 
 class RunStorage(Protocol):
-    def create_run(
+    def start_run(
         self, input_path: str | Path, run_id: RunId | None = None
-    ) -> RunHandle: ...
+    ) -> RunWorkspace: ...
 
-    def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
-
-    def write_pages(self, run: RunHandle | RunId | str, pages: list[PageRef]) -> RunSnapshot | None: ...
-
-    def write_review_layout(
+    def publish_prepared_run(
         self,
-        run: RunHandle | RunId | str,
+        workspace: RunWorkspace,
+        pages: list[PageRef],
         layout: ReviewLayout,
         artifacts: ProviderArtifacts,
         diagnostics: LayoutDiagnostics | None = None,
-    ) -> RunSnapshot | None: ...
+    ) -> RunSnapshot: ...
+
+    def discard_workspace(self, workspace: RunWorkspace) -> None: ...
+
+    def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
+
+    def write_review_layout(
+        self,
+        run_id: RunId | str,
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot: ...
 
     def write_ocr_result(
         self,
@@ -74,9 +83,4 @@ class RunStorage(Protocol):
         canonical_prediction: dict[str, Any],
     ) -> RunSnapshot: ...
 
-    def clear_extraction_outputs(self, run: RunHandle | RunId | str) -> RunSnapshot | None: ...
-
-    def commit_run(self, run: RunHandle) -> RunSnapshot: ...
-
-    def rollback_run(self, run: RunHandle) -> None: ...
-
+    def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot: ...

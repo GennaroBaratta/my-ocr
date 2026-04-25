@@ -10,7 +10,10 @@ import pytest
 
 from my_ocr.adapters.outbound.ocr import glmocr_engine as ocr
 from my_ocr.adapters.outbound.ocr import fallback_ocr as ocr_fallback
-from my_ocr.adapters.outbound.ocr.glmocr_engine import prepare_review_artifacts, run_ocr
+from my_ocr.adapters.outbound.ocr.glmocr_engine import (
+    prepare_review_artifacts as _prepare_review_artifacts,
+)
+from my_ocr.adapters.outbound.ocr.glmocr_engine import run_ocr as _run_ocr
 from my_ocr.adapters.outbound.ocr.fallback_ocr import run_crop_fallback_for_page
 from my_ocr.domain.layout import (
     FORMULA_RECOGNITION_PROMPT,
@@ -19,6 +22,8 @@ from my_ocr.domain.layout import (
     build_ocr_chunks,
 )
 from my_ocr.domain.text import normalize_table_html
+from my_ocr.models import LayoutBlock, PageRef, ReviewLayout, ReviewPage
+from my_ocr.pipeline.options import LayoutOptions, OcrOptions
 from tests.support import (
     build_reviewed_layout_block,
     build_reviewed_layout_page,
@@ -96,6 +101,143 @@ def _patch_parser_cls(monkeypatch: pytest.MonkeyPatch, parser_cls: type) -> None
 def _write_test_image(path: Path) -> None:
     image_module = import_module("PIL.Image")
     image_module.new("RGB", (10, 10), color="white").save(path)
+
+
+def _page_refs(
+    page_paths,
+    *,
+    page_numbers: list[int] | None = None,
+) -> list[PageRef]:
+    candidates = [page_paths] if isinstance(page_paths, (str, Path)) else list(page_paths)
+    refs: list[PageRef] = []
+    image_module = import_module("PIL.Image")
+    for index, raw_path in enumerate(candidates, start=1):
+        path = Path(raw_path)
+        width = 0
+        height = 0
+        if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}:
+            with image_module.open(path) as image:
+                width, height = image.size
+        inferred_number = (
+            int(path.stem.rsplit("-", 1)[-1])
+            if "-" in path.stem and path.stem.rsplit("-", 1)[-1].isdigit()
+            else index
+        )
+        refs.append(
+            PageRef(
+                page_number=page_numbers[index - 1] if page_numbers else inferred_number,
+                image_path=str(path),
+                width=width,
+                height=height,
+                resolved_path=path,
+            )
+        )
+    return refs
+
+
+def _review_layout_from_file(path: str | Path | None) -> ReviewLayout | None:
+    if path is None:
+        return None
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    pages: list[ReviewPage] = []
+    for index, page in enumerate(payload.get("pages", []), start=1):
+        size = page.get("image_size", {})
+        pages.append(
+            ReviewPage(
+                page_number=page.get("page_number", index),
+                image_path=page.get("image_path", page.get("page_path", "")),
+                image_width=size.get("width", 0),
+                image_height=size.get("height", 0),
+                coord_space=page.get("coord_space", "pixel"),
+                blocks=[
+                    LayoutBlock.model_validate(block)
+                    for block in page.get("blocks", [])
+                    if isinstance(block, dict)
+                ],
+            )
+        )
+    return ReviewLayout(pages=pages, status=payload.get("status", "reviewed"))
+
+
+def run_ocr(
+    page_paths,
+    run_dir,
+    *,
+    config_path: str = "config/local.yaml",
+    layout_device: str = "cuda",
+    layout_profile: str | None = "auto",
+    reviewed_layout_path=None,
+    page_numbers=None,
+):
+    result = _run_ocr(
+        _page_refs(page_paths, page_numbers=page_numbers),
+        run_dir,
+        review=_review_layout_from_file(reviewed_layout_path),
+        options=OcrOptions(
+            config_path=config_path,
+            layout_device=layout_device,
+            layout_profile=layout_profile,
+        ),
+    )
+    pages = []
+    for page in result.result.pages:
+        payload = page.model_dump(mode="json")
+        payload["page_path"] = page.image_path
+        payload.update(page.raw_payload)
+        pages.append(payload)
+    summary = result.result.summary
+    if reviewed_layout_path is not None:
+        review = _review_layout_from_file(reviewed_layout_path)
+        summary["reviewed_layout"] = {
+            "path": str(reviewed_layout_path),
+            "page_count": len(review.pages) if review else 0,
+            "apply_mode": "reviewed_layout_primary",
+        }
+    return {
+        "markdown": result.result.markdown,
+        "json": {"pages": pages, "summary": summary},
+        "raw_dir": str(Path(run_dir) / "ocr_raw"),
+        "config_path": config_path,
+        "layout_device": layout_device,
+        "layout_diagnostics": result.result.diagnostics,
+        "_dto": result,
+    }
+
+
+def prepare_review_artifacts(
+    page_paths,
+    run_dir,
+    *,
+    config_path: str = "config/local.yaml",
+    layout_device: str = "cuda",
+    layout_profile: str | None = "auto",
+    page_numbers=None,
+):
+    result = _prepare_review_artifacts(
+        _page_refs(page_paths, page_numbers=page_numbers),
+        run_dir,
+        options=LayoutOptions(
+            config_path=config_path,
+            layout_device=layout_device,
+            layout_profile=layout_profile,
+        ),
+    )
+    payload = result.layout.model_dump(mode="json")
+    payload["summary"] = result.layout.summary
+    for page in payload["pages"]:
+        page_number = page["page_number"]
+        source_dir = Path(run_dir) / "ocr_raw" / f"page-{page_number:04d}"
+        model_paths = sorted(source_dir.glob("*_model.json"))
+        page["page_path"] = page["image_path"]
+        page["source_sdk_json_path"] = str(model_paths[0]) if model_paths else ""
+    return {
+        "reviewed_layout": payload,
+        "raw_dir": str(Path(run_dir) / "ocr_raw"),
+        "config_path": config_path,
+        "layout_device": layout_device,
+        "layout_diagnostics": result.diagnostics.payload,
+        "_dto": result,
+    }
 
 
 def test_lazy_parser_wrapper_defers_pipeline_start_until_first_parse() -> None:
@@ -454,16 +596,13 @@ def test_run_ocr_uses_page_images_and_public_outputs(tmp_path, monkeypatch) -> N
     assert FakeGlmOcr.calls == [str(source)]
     assert result["markdown"] == "# doc"
     assert result["json"]["summary"] == {"page_count": 1, "sources": {"sdk_markdown": 1}}
-    assert result["json"]["pages"][0]["sdk_json_path"] == str(
-        tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
-    )
-    assert json.loads(
-        Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8")
-    ) == {"doc": "page-0001.png"}
+    page = result["json"]["pages"][0]
+    expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    assert page["provider_path"] == "ocr/provider/page-0001"
+    assert "sdk_json_path" not in page
+    assert json.loads(expected_model_path.read_text(encoding="utf-8")) == {"doc": "page-0001.png"}
     assert result["config_path"] == "config/local.yaml"
     assert result["layout_device"] == "cuda"
-    assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "# doc"
-    assert json.loads((tmp_path / "run" / "ocr.json").read_text(encoding="utf-8")) == result["json"]
     assert (tmp_path / "run" / "ocr_raw" / "page-0001" / "artifact.txt").exists()
     assert not (tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001").exists()
 
@@ -587,9 +726,10 @@ def test_run_ocr_retries_same_page_once_on_cpu_after_cuda_oom(tmp_path, monkeypa
     assert empty_cache_calls == ["called"]
     assert result["markdown"] == "# cpu doc"
     assert result["layout_device"] == "cuda"
-    assert result["json"]["pages"][0]["sdk_json_path"] == str(
-        tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
-    )
+    page = result["json"]["pages"][0]
+    assert page["provider_path"] == "ocr/provider/page-0001"
+    assert "sdk_json_path" not in page
+    assert (tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json").exists()
 
 
 def test_run_ocr_does_not_retry_non_oom_errors(tmp_path, monkeypatch) -> None:
@@ -682,27 +822,15 @@ def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
 
     assert result["markdown"] == "Full page text"
     assert result["json"]["pages"][0]["markdown_source"] == "full_page_fallback"
-    assert json.loads((tmp_path / "run" / "ocr_fallback.json").read_text(encoding="utf-8")) == {
-        "pages": [
-            {
-                "page_number": 1,
-                "page_path": str(source),
-                "assessment": {
-                    "use_fallback": True,
-                    "reason": "empty_markdown_and_empty_layout_text",
-                    "structured_layout_payload": True,
-                    "layout_block_count": 1,
-                    "ocr_block_count": 1,
-                    "text_block_count": 1,
-                    "meaningful_text_block_count": 0,
-                    "bbox_coord_space": "normalized",
-                },
-                "chunks": [],
-                "markdown": "Full page text",
-                "markdown_source": "full_page_fallback",
-            }
-        ],
-        "summary": {"page_count": 1},
+    assert result["json"]["pages"][0]["assessment"] == {
+        "use_fallback": True,
+        "reason": "empty_markdown_and_empty_layout_text",
+        "structured_layout_payload": True,
+        "layout_block_count": 1,
+        "ocr_block_count": 1,
+        "text_block_count": 1,
+        "meaningful_text_block_count": 0,
+        "bbox_coord_space": "normalized",
     }
 
 
@@ -784,10 +912,8 @@ def test_run_ocr_always_loads_saved_model_json(tmp_path, monkeypatch) -> None:
     assert captured["page_json"] == {
         "blocks": [{"label": "table", "content": "", "bbox_2d": [100, 100, 500, 500], "index": 2}]
     }
-    assert (
-        json.loads(Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8"))
-        == captured["page_json"]
-    )
+    expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    assert json.loads(expected_model_path.read_text(encoding="utf-8")) == captured["page_json"]
     assert result["json"]["pages"][0]["markdown_source"] == "crop_fallback"
 
 
@@ -867,7 +993,6 @@ def test_run_ocr_persists_normalized_table_markdown(tmp_path, monkeypatch) -> No
     result = run_ocr([str(source)], tmp_path / "run")
 
     assert result["markdown"] == "Intro\n\nX | Y\n1 | 2"
-    assert (tmp_path / "run" / "ocr.md").read_text(encoding="utf-8") == "Intro\n\nX | Y\n1 | 2"
 
 
 def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, monkeypatch) -> None:
@@ -922,8 +1047,9 @@ def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, mo
     assert captured["coord_space"] == "pixel"
     assert result["markdown"] == "review-driven text"
     assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
-    assert result["json"]["pages"][0]["reviewed_layout_path"] == str(reviewed_layout_path)
-    assert json.loads(Path(result["json"]["pages"][0]["sdk_json_path"]).read_text(encoding="utf-8")) == {
+    expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    assert "sdk_json_path" not in result["json"]["pages"][0]
+    assert json.loads(expected_model_path.read_text(encoding="utf-8")) == {
         "blocks": [{"index": 0, "label": "table", "content": "", "bbox_2d": [2, 3, 9, 10]}]
     }
     assert result["json"]["summary"]["reviewed_layout"] == {
@@ -984,7 +1110,9 @@ def test_run_ocr_uses_nonempty_reviewed_layout_as_canonical_layout(
     assert page["markdown"] == "Reviewed block text"
     assert page["markdown_source"] == "layout_json"
     assert result["json"]["summary"]["reviewed_layout"]["apply_mode"] == "reviewed_layout_primary"
-    assert json.loads(Path(page["sdk_json_path"]).read_text(encoding="utf-8")) == {
+    expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
+    assert "sdk_json_path" not in page
+    assert json.loads(expected_model_path.read_text(encoding="utf-8")) == {
         "blocks": [
             {
                 "index": 0,
@@ -1066,9 +1194,8 @@ def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> No
     review_result = prepare_review_artifacts([str(source)], tmp_path / "review-run")
 
     assert ocr_result["json"]["pages"][0]["page_number"] == 5
-    assert ocr_result["json"]["pages"][0]["sdk_json_path"] == str(
-        tmp_path / "ocr-run" / "ocr_raw" / "page-0005" / "page-0005_model.json"
-    )
+    assert ocr_result["json"]["pages"][0]["provider_path"] == "ocr/provider/page-0005"
+    assert "sdk_json_path" not in ocr_result["json"]["pages"][0]
     assert review_result["reviewed_layout"]["pages"][0]["page_number"] == 5
     assert review_result["reviewed_layout"]["pages"][0]["source_sdk_json_path"] == str(
         tmp_path / "review-run" / "ocr_raw" / "page-0005" / "page-0005_model.json"
@@ -1085,7 +1212,8 @@ def test_run_ocr_canonicalizes_raw_dir_for_explicit_page_number(tmp_path, monkey
     expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0005" / "scan_model.json"
     page = result["json"]["pages"][0]
     assert page["page_number"] == 5
-    assert page["sdk_json_path"] == str(expected_model_path)
+    assert page["provider_path"] == "ocr/provider/page-0005"
+    assert "sdk_json_path" not in page
     assert expected_model_path.exists()
     assert not (tmp_path / "run" / "ocr_raw" / "scan").exists()
 
@@ -1111,8 +1239,10 @@ def test_run_ocr_keeps_colliding_page_stems_isolated(tmp_path, monkeypatch) -> N
 
     first_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
     second_model_path = tmp_path / "run" / "ocr_raw" / "page-0005" / "page-0001_model.json"
-    assert result["json"]["pages"][0]["sdk_json_path"] == str(first_model_path)
-    assert result["json"]["pages"][1]["sdk_json_path"] == str(second_model_path)
+    assert result["json"]["pages"][0]["provider_path"] == "ocr/provider/page-0001"
+    assert result["json"]["pages"][1]["provider_path"] == "ocr/provider/page-0005"
+    assert "sdk_json_path" not in result["json"]["pages"][0]
+    assert "sdk_json_path" not in result["json"]["pages"][1]
     assert json.loads(first_model_path.read_text(encoding="utf-8")) == {"source_dir": "first"}
     assert json.loads(second_model_path.read_text(encoding="utf-8")) == {"source_dir": "second"}
 
