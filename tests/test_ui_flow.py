@@ -54,7 +54,7 @@ def _toolbar_buttons_by_content(toolbar_row: ft.Row) -> dict[str, ft.Control]:
 
 
 def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.prepare_review as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -125,7 +125,7 @@ def test_start_review_prep_routes_upload_into_review(tmp_path, monkeypatch) -> N
 
 
 def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.prepare_review as workflows
 
     def fake_prepare_review_workflow(_input_path: str, *, run_root: str, **kwargs) -> Path:
         raise RuntimeError(f"bad input under {run_root}")
@@ -165,7 +165,7 @@ def test_start_review_prep_hides_overlay_and_shows_error_on_failure(monkeypatch)
 
 
 def test_start_review_prep_shows_layout_profile_warning_from_metadata(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.prepare_review as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -236,7 +236,7 @@ def test_start_review_prep_shows_layout_profile_warning_from_metadata(tmp_path, 
 
 
 def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.run_ocr_from_review as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -325,7 +325,7 @@ def test_start_reviewed_ocr_routes_review_into_results(tmp_path, monkeypatch) ->
 def test_start_reviewed_ocr_shows_layout_profile_warning_from_metadata(
     tmp_path, monkeypatch
 ) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.run_ocr_from_review as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -811,7 +811,7 @@ def test_results_view_disables_page_markdown_download_without_per_page_ocr_paylo
 
 
 def test_results_view_page_layout_redetect_routes_back_to_review_same_page(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.redetect_page_layout as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -887,7 +887,7 @@ def test_results_view_page_layout_redetect_routes_back_to_review_same_page(tmp_p
 
 
 def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.rerun_page_ocr as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -984,7 +984,7 @@ def test_results_view_page_ocr_rerun_reloads_same_page(tmp_path, monkeypatch) ->
 
 
 def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.redetect_page_layout as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -1077,7 +1077,7 @@ def test_results_view_blocks_page_reruns_while_previous_rerun_is_in_flight(tmp_p
 
 
 def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.redetect_page_layout as workflows
 
     image_module = import_module("PIL.Image")
 
@@ -1160,7 +1160,8 @@ def test_results_view_reenables_page_reruns_after_rerun_failure(tmp_path, monkey
 
 
 def test_results_view_sparse_page_number_actions_use_actual_page_number(tmp_path, monkeypatch) -> None:
-    import my_ocr.application.use_cases.ocr as workflows
+    import my_ocr.application.use_cases.redetect_page_layout as layout_workflows
+    import my_ocr.application.use_cases.rerun_page_ocr as ocr_workflows
 
     image_module = import_module("PIL.Image")
 
@@ -1207,8 +1208,16 @@ def test_results_view_sparse_page_number_actions_use_actual_page_number(tmp_path
     async def run_in_place(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         return func(*args, **kwargs)
 
-    monkeypatch.setattr(workflows, "prepare_review_page_workflow", fake_prepare_review_page_workflow)
-    monkeypatch.setattr(workflows, "run_reviewed_ocr_page_workflow", fake_run_reviewed_ocr_page_workflow)
+    monkeypatch.setattr(
+        layout_workflows,
+        "prepare_review_page_workflow",
+        fake_prepare_review_page_workflow,
+    )
+    monkeypatch.setattr(
+        ocr_workflows,
+        "run_reviewed_ocr_page_workflow",
+        fake_run_reviewed_ocr_page_workflow,
+    )
     monkeypatch.setattr(asyncio, "to_thread", run_in_place)
 
     state = AppState()

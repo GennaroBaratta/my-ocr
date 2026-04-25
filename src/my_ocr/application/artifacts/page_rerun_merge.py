@@ -20,7 +20,7 @@ from my_ocr.domain.review_layout import (
     save_review_layout_payload,
 )
 
-from ._workflow_payloads import (
+from .artifact_payload_paths import (
     count_page_sources,
     load_json,
     ordered_page_records,
@@ -29,7 +29,7 @@ from ._workflow_payloads import (
     write_json,
     write_merged_markdown,
 )
-from ._workflow_publish import copy_path, remove_paths
+from .run_artifact_publisher import copy_path, remove_paths
 
 
 def resolve_page_path_for_number(paths: Any, page_number: int, *payloads: Any) -> str:

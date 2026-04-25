@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.application.artifacts.run_paths import RunPaths
 from my_ocr.domain.layout import normalize_bbox
 from my_ocr.domain.page_identity import (
     infer_page_number,

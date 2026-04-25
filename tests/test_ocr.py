@@ -996,6 +996,67 @@ def test_run_ocr_uses_nonempty_reviewed_layout_as_canonical_layout(
     }
 
 
+def test_run_ocr_uses_reviewed_layout_without_loading_glm_parser(
+    tmp_path, monkeypatch
+) -> None:
+    def fail_parser_load():
+        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+
+    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
+    monkeypatch.setattr(
+        ocr._layout_profile_mod,
+        "resolve_layout_profile",
+        lambda *_args, **_kwargs: ({}, {}),
+    )
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    reviewed_layout_path = tmp_path / "reviewed_layout.json"
+    reviewed_layout_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "page_path": str(source),
+                        "image_size": {"width": 100, "height": 100},
+                        "source_sdk_json_path": None,
+                        "coord_space": "pixel",
+                        "blocks": [
+                            {
+                                "id": "p0-b0",
+                                "index": 0,
+                                "label": "text",
+                                "content": "Reviewed text",
+                                "confidence": 1.0,
+                                "bbox": [1, 2, 40, 30],
+                            }
+                        ],
+                    }
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        reviewed_layout_path=reviewed_layout_path,
+    )
+
+    assert result["markdown"] == "Reviewed text"
+    assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
+    assert result["json"]["pages"][0]["markdown_source"] == "layout_json"
+    assert (
+        result["json"]["summary"]["reviewed_layout"]["apply_mode"]
+        == "reviewed_layout_primary"
+    )
+
+
 def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> None:
     _patch_parser_cls(monkeypatch, FakeGlmOcr)
     source = tmp_path / "page-0005.png"

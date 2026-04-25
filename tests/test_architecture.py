@@ -54,9 +54,9 @@ def test_application_does_not_import_adapters_or_ui() -> None:
 
 def test_ui_uses_only_application_use_cases_and_public_backend_dtos() -> None:
     allowed_prefixes = (
+        "my_ocr.application.artifacts",
         "my_ocr.application.use_cases",
         "my_ocr.adapters.outbound.config.settings",
-        "my_ocr.adapters.outbound.filesystem.run_paths",
         "my_ocr.domain",
     )
     failures: list[str] = []

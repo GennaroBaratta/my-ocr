@@ -158,7 +158,7 @@ def _start_review_prep(
     import asyncio
     import functools
 
-    from my_ocr.application.use_cases.ocr import prepare_review_workflow
+    from my_ocr.application.use_cases.prepare_review import prepare_review_workflow
 
     loading_overlay.visible = True
     progress_ring.visible = True

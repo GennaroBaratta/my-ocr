@@ -10,7 +10,7 @@ from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mo
 from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
 from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
 from my_ocr.adapters.outbound.filesystem.json_store import load_json, write_json, write_text
-from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.application.artifacts.run_paths import RunPaths
 from my_ocr.adapters.outbound.ocr._glmocr_artifacts import (
     publish_saved_model_json_path as _publish_saved_model_json_path_impl,
     save_result_to_raw_dir as _save_result_to_raw_dir_impl,

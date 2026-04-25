@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from typing import Any
 
-from ._workflow_payloads import (
+from .artifact_payload_paths import (
     normalize_published_ocr_artifacts,
     normalize_published_review_json,
 )

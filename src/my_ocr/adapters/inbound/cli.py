@@ -12,7 +12,7 @@ from my_ocr.adapters.outbound.config.settings import (
 )
 from my_ocr.adapters.outbound.filesystem.ingestion import normalize_document
 from my_ocr.adapters.outbound.filesystem.json_store import write_json
-from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
+from my_ocr.application.artifacts.run_paths import RunPaths
 from my_ocr.adapters.outbound.ocr.glmocr_engine import run_ocr
 from my_ocr.application.services.rules_extractor import extract_from_markdown
 from my_ocr.application.use_cases.evaluation import (
@@ -20,12 +20,13 @@ from my_ocr.application.use_cases.evaluation import (
     evaluate_workflow,
     write_markdown_report,
 )
-from my_ocr.application.use_cases.extraction import run_rules_workflow, run_structured_workflow
-from my_ocr.application.use_cases.ocr import (
+from my_ocr.application.use_cases.extract_rules import run_rules_workflow
+from my_ocr.application.use_cases.extract_structured import run_structured_workflow
+from my_ocr.application.use_cases.run_ocr import (
     run_ocr_workflow,
     write_run_metadata as workflow_write_run_metadata,
 )
-from my_ocr.application.use_cases.pipeline import run_pipeline_workflow
+from my_ocr.application.use_cases.run_pipeline import run_pipeline_workflow
 
 
 def build_parser() -> argparse.ArgumentParser:

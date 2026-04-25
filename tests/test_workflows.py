@@ -6,16 +6,15 @@ from pathlib import Path
 
 import pytest
 
-import my_ocr.application.use_cases.ocr as workflows
-from my_ocr.application.use_cases.ocr import (
-    prepare_review_page_workflow,
-    prepare_review_workflow,
-    run_ocr_workflow,
-    run_pipeline_workflow,
-    run_reviewed_ocr_page_workflow,
-    run_reviewed_ocr_workflow,
-    run_structured_workflow,
-)
+import my_ocr.application.use_cases._run_state as run_state
+import my_ocr.application.use_cases.run_ocr as run_ocr_use_case
+from my_ocr.application.use_cases.extract_structured import run_structured_workflow
+from my_ocr.application.use_cases.prepare_review import prepare_review_workflow
+from my_ocr.application.use_cases.redetect_page_layout import prepare_review_page_workflow
+from my_ocr.application.use_cases.rerun_page_ocr import run_reviewed_ocr_page_workflow
+from my_ocr.application.use_cases.run_ocr import run_ocr_workflow
+from my_ocr.application.use_cases.run_ocr_from_review import run_reviewed_ocr_workflow
+from my_ocr.application.use_cases.run_pipeline import run_pipeline_workflow
 from my_ocr.adapters.outbound.config.settings import DEFAULT_LAYOUT_DEVICE, DEFAULT_OLLAMA_MODEL
 from tests.support import (
     build_basic_ocr_result,
@@ -154,7 +153,7 @@ def test_run_ocr_workflow_removes_new_run_dir_when_staging_setup_fails(
     def failing_create_staging(_paths):
         raise RuntimeError("staging setup failed")
 
-    monkeypatch.setattr(workflows, "_create_staged_ocr_paths", failing_create_staging)
+    monkeypatch.setattr(run_ocr_use_case, "create_staged_ocr_paths", failing_create_staging)
 
     with pytest.raises(RuntimeError, match="staging setup failed"):
         run_ocr_workflow(
@@ -1744,7 +1743,11 @@ def test_run_ocr_workflow_restores_existing_run_when_publish_fails(tmp_path, mon
     def failing_normalize_publish(*_args, **_kwargs) -> None:
         raise RuntimeError("publish normalize failed")
 
-    monkeypatch.setattr(workflows, "_normalize_published_ocr_artifacts", failing_normalize_publish)
+    monkeypatch.setattr(
+        run_state,
+        "normalize_published_ocr_artifacts",
+        failing_normalize_publish,
+    )
 
     with pytest.raises(RuntimeError, match="publish normalize failed"):
         run_ocr_workflow(
@@ -1804,7 +1807,7 @@ def test_run_ocr_workflow_restores_existing_run_when_backup_move_fails(
             "layout_device": layout_device,
         }
 
-    real_move_path = workflows._move_path
+    real_move_path = run_state.move_path
     backup_move_calls = 0
 
     def flaky_move_path(source_path: Path, target_path: Path) -> None:
@@ -1815,7 +1818,7 @@ def test_run_ocr_workflow_restores_existing_run_when_backup_move_fails(
                 raise RuntimeError("mid-backup failure")
         real_move_path(source_path, target_path)
 
-    monkeypatch.setattr(workflows, "_move_path", flaky_move_path)
+    monkeypatch.setattr(run_state, "move_path", flaky_move_path)
 
     with pytest.raises(RuntimeError, match="mid-backup failure"):
         run_ocr_workflow(
@@ -1876,7 +1879,7 @@ def test_run_ocr_workflow_preserves_backup_when_restore_fails_midway(tmp_path, m
     def failing_normalize_publish(*_args, **_kwargs) -> None:
         raise RuntimeError("publish normalize failed")
 
-    real_copy_path = workflows._copy_path
+    real_copy_path = run_state.copy_path
     restore_copy_calls = 0
 
     def flaky_copy_path(source_path: Path, target_path: Path) -> None:
@@ -1886,8 +1889,12 @@ def test_run_ocr_workflow_preserves_backup_when_restore_fails_midway(tmp_path, m
             raise RuntimeError("restore failed")
         real_copy_path(source_path, target_path)
 
-    monkeypatch.setattr(workflows, "_normalize_published_ocr_artifacts", failing_normalize_publish)
-    monkeypatch.setattr(workflows, "_copy_path", flaky_copy_path)
+    monkeypatch.setattr(
+        run_state,
+        "normalize_published_ocr_artifacts",
+        failing_normalize_publish,
+    )
+    monkeypatch.setattr(run_state, "copy_path", flaky_copy_path)
 
     with pytest.raises(RuntimeError, match="Backup preserved at"):
         run_ocr_workflow(

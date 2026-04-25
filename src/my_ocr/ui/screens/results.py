@@ -142,7 +142,7 @@ def build_results_view(
             state.current_page_index = 0
 
     def rerun_page_layout() -> None:
-        from my_ocr.application.use_cases.ocr import prepare_review_page_workflow
+        from my_ocr.application.use_cases.redetect_page_layout import prepare_review_page_workflow
 
         if not state.run_id or rerun_in_progress:
             return
@@ -166,7 +166,7 @@ def build_results_view(
         )
 
     def rerun_page_ocr() -> None:
-        from my_ocr.application.use_cases.ocr import run_reviewed_ocr_page_workflow
+        from my_ocr.application.use_cases.rerun_page_ocr import run_reviewed_ocr_page_workflow
 
         if not state.run_id or rerun_in_progress:
             return
