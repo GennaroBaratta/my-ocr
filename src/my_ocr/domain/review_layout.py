@@ -8,6 +8,7 @@ from typing import Any
 from .layout import extract_layout_blocks, normalize_bbox
 
 REVIEW_LAYOUT_VERSION = 1
+REVIEWED_LAYOUT_APPLY_MODE = "reviewed_layout_primary"
 
 
 def build_review_layout_payload(pages: Sequence[dict[str, Any]], *, status: str) -> dict[str, Any]:

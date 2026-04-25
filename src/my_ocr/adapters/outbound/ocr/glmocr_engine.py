@@ -39,6 +39,7 @@ from my_ocr.domain.layout import (
 )
 from my_ocr.domain.page_identity import infer_page_number
 from my_ocr.domain.review_layout import (
+    REVIEWED_LAYOUT_APPLY_MODE,
     build_review_layout_payload,
     build_review_page_from_layout,
     load_review_layout_payload,
@@ -113,7 +114,7 @@ def run_ocr(
                         _dotted=layout_dotted,
                     )
                     parser.__enter__()
-                page_result, fallback_result = _run_page_ocr(
+                page_result, fallback_result, parser_retired = _run_page_ocr(
                     parser,
                     page_path,
                     page_number,
@@ -128,6 +129,8 @@ def run_ocr(
                     reviewed_layout_page=None,
                     reviewed_layout_path=reviewed_layout_path,
                 )
+                if parser_retired:
+                    parser = None
             pages.append(page_result)
             source = str(page_result["markdown_source"])
             source_counts[source] = source_counts.get(source, 0) + 1
@@ -149,7 +152,7 @@ def run_ocr(
         json_result["summary"]["reviewed_layout"] = {
             "path": str(reviewed_layout_path),
             "page_count": len(reviewed_layout_pages),
-            "apply_mode": "planning_and_fallback_only",
+            "apply_mode": REVIEWED_LAYOUT_APPLY_MODE,
         }
 
     write_text(paths.ocr_markdown_path, markdown)
@@ -195,9 +198,17 @@ def prepare_review_artifacts(
 
     review_pages: list[dict[str, Any]] = []
 
-    with parser_cls(config_path=config_path, layout_device=layout_device, _dotted=layout_dotted) as parser:
+    parser: Any | None = None
+    try:
         for page_number, page_path in page_inputs:
-            result = _parse_page_with_cpu_fallback(
+            if parser is None:
+                parser = parser_cls(
+                    config_path=config_path,
+                    layout_device=layout_device,
+                    _dotted=layout_dotted,
+                )
+                parser.__enter__()
+            outcome = _parse_page_with_cpu_fallback(
                 parser,
                 page_path,
                 method_name="parse_layout_only",
@@ -206,6 +217,9 @@ def prepare_review_artifacts(
                 layout_device=layout_device,
                 layout_dotted=layout_dotted,
             )
+            if outcome.parser_retired:
+                parser = None
+            result = outcome.result
             result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
             if isinstance(result_dict, dict) and result_dict.get("error"):
                 raise RuntimeError(
@@ -233,6 +247,9 @@ def prepare_review_artifacts(
                     image_height=image_height,
                 )
             )
+    finally:
+        if parser is not None:
+            parser.__exit__(None, None, None)
 
     reviewed_layout_payload = build_review_layout_payload(review_pages, status="prepared")
     save_review_layout_payload(paths.reviewed_layout_path, reviewed_layout_payload)
@@ -298,8 +315,8 @@ def _run_page_ocr(
     num_ctx: int,
     reviewed_layout_page: dict[str, Any] | None,
     reviewed_layout_path: str | Path | None,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    result = _parse_page_with_cpu_fallback(
+) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
+    outcome = _parse_page_with_cpu_fallback(
         parser,
         page_path,
         parser_cls=parser_cls,
@@ -307,6 +324,7 @@ def _run_page_ocr(
         layout_device=layout_device,
         layout_dotted=layout_dotted,
     )
+    result = outcome.result
     result_dict = result.to_dict() if hasattr(result, "to_dict") else {}
     if isinstance(result_dict, dict) and result_dict.get("error"):
         raise RuntimeError(f"OCR failed for {page_path}: {result_dict['error']}")
@@ -329,7 +347,7 @@ def _run_page_ocr(
         page_layout, page_coord_space = reviewed_layout
         layout_source = "reviewed_layout"
 
-    return _finalize_page_ocr(
+    page_result, fallback_result = _finalize_page_ocr(
         page_path=page_path,
         page_number=page_number,
         paths=paths,
@@ -344,6 +362,7 @@ def _run_page_ocr(
         reviewed_layout_path=reviewed_layout_path,
         include_reviewed_layout_path=reviewed_layout is not None,
     )
+    return page_result, fallback_result, outcome.parser_retired
 
 
 def _run_page_ocr_from_reviewed_layout(

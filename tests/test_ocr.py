@@ -929,9 +929,71 @@ def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, mo
     assert result["json"]["summary"]["reviewed_layout"] == {
         "path": str(reviewed_layout_path),
         "page_count": 1,
-        "apply_mode": "planning_and_fallback_only",
+        "apply_mode": "reviewed_layout_primary",
     }
     assert result["json"]["pages"][0]["markdown"] == "review-driven text"
+
+
+def test_run_ocr_uses_nonempty_reviewed_layout_as_canonical_layout(
+    tmp_path, monkeypatch
+) -> None:
+    def fail_parser_load():
+        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+
+    def fail_crop_fallback(**_kwargs):
+        raise AssertionError("non-empty reviewed layout should not use crop fallback")
+
+    monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
+    monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fail_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    reviewed_layout_path = tmp_path / "reviewed_layout.json"
+    reviewed_layout_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "status": "reviewed",
+                "pages": [
+                    build_reviewed_layout_page(
+                        page_path=str(source),
+                        source_sdk_json_path=str(tmp_path / "sdk_layout.json"),
+                        blocks=[
+                            build_reviewed_layout_block(
+                                content="Reviewed block text",
+                                bbox=[2, 3, 9, 10],
+                            )
+                        ],
+                    )
+                ],
+                "summary": {"page_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        reviewed_layout_path=reviewed_layout_path,
+    )
+
+    page = result["json"]["pages"][0]
+    assert page["layout_source"] == "reviewed_layout"
+    assert page["sdk_markdown"] == ""
+    assert page["markdown"] == "Reviewed block text"
+    assert page["markdown_source"] == "layout_json"
+    assert result["json"]["summary"]["reviewed_layout"]["apply_mode"] == "reviewed_layout_primary"
+    assert json.loads(Path(page["sdk_json_path"]).read_text(encoding="utf-8")) == {
+        "blocks": [
+            {
+                "index": 0,
+                "label": "text",
+                "content": "Reviewed block text",
+                "bbox_2d": [2, 3, 9, 10],
+            }
+        ]
+    }
 
 
 def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> None:
@@ -1131,6 +1193,62 @@ def test_run_ocr_closes_failed_parser_before_cpu_retry(tmp_path, monkeypatch) ->
     assert result["markdown"] == "# cpu doc"
 
 
+def test_run_ocr_reopens_cuda_parser_after_cpu_retry_for_later_pages(
+    tmp_path, monkeypatch
+) -> None:
+    empty_cache_calls: list[str] = []
+
+    class CudaOomGlmOcr(FakeGlmOcr):
+        init_devices: list[str] = []
+        parse_events: list[tuple[str, str]] = []
+
+        def __init__(self, *, config_path: str, layout_device: str, **kwargs: object) -> None:
+            super().__init__(config_path=config_path, layout_device=layout_device, **kwargs)
+            self.closed = False
+            self.init_devices.append(layout_device)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            self.close()
+
+        def parse(self, input_path: str):
+            if self.closed:
+                raise AssertionError("closed parser was reused")
+            self.parse_events.append((self.layout_device, input_path))
+            page_stem = Path(input_path).stem
+            if self.layout_device == "cuda" and page_stem == "page-0001":
+                raise RuntimeError("CUDA out of memory while running layout detection")
+            return FakeResult(
+                markdown_result=f"# {self.layout_device} {page_stem}",
+                json_result={"doc": Path(input_path).name},
+                artifact_stem=page_stem,
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    _patch_parser_cls(monkeypatch, CudaOomGlmOcr)
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: empty_cache_calls.append("called"))),
+    )
+    page_one = tmp_path / "page-0001.png"
+    page_two = tmp_path / "page-0002.png"
+    _write_test_image(page_one)
+    _write_test_image(page_two)
+
+    result = run_ocr([str(page_one), str(page_two)], tmp_path / "run")
+
+    assert CudaOomGlmOcr.init_devices == ["cuda", "cpu", "cuda"]
+    assert CudaOomGlmOcr.parse_events == [
+        ("cuda", str(page_one)),
+        ("cpu", str(page_one)),
+        ("cuda", str(page_two)),
+    ]
+    assert empty_cache_calls == ["called"]
+    assert result["markdown"] == "# cpu page-0001\n\n# cuda page-0002"
+
+
 def test_prepare_review_artifacts_closes_failed_parser_before_cpu_retry(tmp_path, monkeypatch) -> None:
     empty_cache_calls: list[str] = []
 
@@ -1171,3 +1289,74 @@ def test_prepare_review_artifacts_closes_failed_parser_before_cpu_retry(tmp_path
     assert ReviewCudaOomGlmOcr.close_devices == ["cuda"]
     assert empty_cache_calls == ["called"]
     assert result["reviewed_layout"]["summary"] == {"page_count": 1}
+
+
+def test_prepare_review_artifacts_reopens_cuda_parser_after_cpu_retry_for_later_pages(
+    tmp_path, monkeypatch
+) -> None:
+    empty_cache_calls: list[str] = []
+
+    class ReviewCudaOomGlmOcr(FakeGlmOcr):
+        init_devices: list[str] = []
+        layout_only_events: list[tuple[str, str]] = []
+
+        def __init__(self, *, config_path: str, layout_device: str, **kwargs: object) -> None:
+            super().__init__(config_path=config_path, layout_device=layout_device, **kwargs)
+            self.closed = False
+            self.init_devices.append(layout_device)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            self.close()
+
+        def parse(self, input_path: str):
+            raise AssertionError("review preparation should use layout-only parsing")
+
+        def parse_layout_only(self, input_path: str):
+            if self.closed:
+                raise AssertionError("closed parser was reused")
+            self.layout_only_events.append((self.layout_device, input_path))
+            page_stem = Path(input_path).stem
+            if self.layout_device == "cuda" and page_stem == "page-0001":
+                raise RuntimeError("CUDA out of memory while parsing review artifacts")
+            return FakeResult(
+                markdown_result="",
+                json_result={"doc": Path(input_path).name},
+                saved_model_json={
+                    "blocks": [
+                        {
+                            "label": "text",
+                            "content": f"{self.layout_device} {page_stem}",
+                            "bbox_2d": [100, 100, 900, 900],
+                        }
+                    ]
+                },
+                artifact_stem=page_stem,
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    _patch_parser_cls(monkeypatch, ReviewCudaOomGlmOcr)
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: empty_cache_calls.append("called"))),
+    )
+    page_one = tmp_path / "page-0001.png"
+    page_two = tmp_path / "page-0002.png"
+    _write_test_image(page_one)
+    _write_test_image(page_two)
+
+    result = prepare_review_artifacts([str(page_one), str(page_two)], tmp_path / "review-run")
+
+    assert ReviewCudaOomGlmOcr.init_devices == ["cuda", "cpu", "cuda"]
+    assert ReviewCudaOomGlmOcr.layout_only_events == [
+        ("cuda", str(page_one)),
+        ("cpu", str(page_one)),
+        ("cuda", str(page_two)),
+    ]
+    assert empty_cache_calls == ["called"]
+    assert [page["blocks"][0]["content"] for page in result["reviewed_layout"]["pages"]] == [
+        "cpu page-0001",
+        "cuda page-0002",
+    ]

@@ -1169,7 +1169,7 @@ def test_run_reviewed_ocr_page_workflow_merges_only_selected_page_outputs(tmp_pa
                     "reviewed_layout": {
                         "path": str(run_dir / "reviewed_layout.json"),
                         "page_count": 2,
-                        "apply_mode": "planning_and_fallback_only",
+                        "apply_mode": "reviewed_layout_primary",
                     },
                 },
             }
@@ -1276,7 +1276,7 @@ def test_run_reviewed_ocr_page_workflow_merges_only_selected_page_outputs(tmp_pa
         "reviewed_layout": {
             "path": str(run_dir / "reviewed_layout.json"),
             "page_count": 2,
-            "apply_mode": "planning_and_fallback_only",
+            "apply_mode": "reviewed_layout_primary",
         },
     }
     assert (run_dir / "ocr.md").read_text(encoding="utf-8") == "# Old Page 1\n\n# New Page 2"

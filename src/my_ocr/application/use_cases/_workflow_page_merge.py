@@ -12,6 +12,7 @@ from my_ocr.domain.page_identity import (
 )
 from my_ocr.domain.review_layout import (
     REVIEW_LAYOUT_VERSION,
+    REVIEWED_LAYOUT_APPLY_MODE,
     build_review_layout_payload,
     build_review_page_from_layout,
     load_review_layout_payload,
@@ -290,7 +291,7 @@ def merge_ocr_page_artifacts(
         merged_summary["reviewed_layout"] = {
             "path": str(target_paths.reviewed_layout_path),
             "page_count": len(merged_pages),
-            "apply_mode": "planning_and_fallback_only",
+            "apply_mode": REVIEWED_LAYOUT_APPLY_MODE,
         }
     merged_payload["summary"] = merged_summary
     write_json(staged_paths.ocr_json_path, merged_payload)

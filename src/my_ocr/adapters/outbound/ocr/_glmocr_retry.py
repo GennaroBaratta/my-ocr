@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from dataclasses import dataclass
 import gc
 from importlib import import_module
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class _ParseOutcome:
+    result: Any
+    parser_retired: bool = False
 
 
 def parse_page_with_cpu_fallback(
@@ -15,9 +22,9 @@ def parse_page_with_cpu_fallback(
     config_path: str,
     layout_device: str,
     layout_dotted: dict[str, Any],
-) -> Any:
+) -> _ParseOutcome:
     try:
-        return getattr(parser, method_name)(page_path)
+        return _ParseOutcome(getattr(parser, method_name)(page_path))
     except Exception as exc:
         if not should_retry_parse_on_cpu(exc, layout_device):
             raise
@@ -28,8 +35,15 @@ def parse_page_with_cpu_fallback(
             close()
 
     cleanup_after_cuda_oom()
-    with parser_cls(config_path=config_path, layout_device="cpu", _dotted=layout_dotted) as cpu_parser:
-        return getattr(cpu_parser, method_name)(page_path)
+    with parser_cls(
+        config_path=config_path,
+        layout_device="cpu",
+        _dotted=layout_dotted,
+    ) as cpu_parser:
+        return _ParseOutcome(
+            getattr(cpu_parser, method_name)(page_path),
+            parser_retired=True,
+        )
 
 
 def should_retry_parse_on_cpu(exc: Exception, layout_device: str) -> bool:
