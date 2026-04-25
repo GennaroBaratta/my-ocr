@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 import flet as ft
-
-from my_ocr.support.filesystem import write_text
 
 from ..actions import run_workflow_action
 from ..state import AppState
@@ -178,11 +177,11 @@ class ResultsScreenActions:
 
 
 def save_markdown(path: str, content: str) -> None:
-    write_text(path, content)
+    Path(path).write_text(content, encoding="utf-8")
 
 
 def save_json(path: str, content: str) -> None:
-    write_text(path, content)
+    Path(path).write_text(content, encoding="utf-8")
 
 
 def start_page_rerun(

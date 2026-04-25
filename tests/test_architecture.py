@@ -80,12 +80,33 @@ def _defined_class_names(path: Path) -> set[str]:
     return {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
 
 
+def _is_module_or_child(module: str, prefix: str) -> bool:
+    return module == prefix or module.startswith(f"{prefix}.")
+
+
+def _matches_any_prefix(module: str, prefixes: tuple[str, ...]) -> bool:
+    return any(_is_module_or_child(module, prefix) for prefix in prefixes)
+
+
+def _first_party_imports(path: Path) -> set[str]:
+    modules = _imported_modules(path) | _dynamic_import_strings(path)
+    return {module for module in modules if _is_module_or_child(module, "my_ocr")}
+
+
 def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     failures: list[str] = []
     for path in _py_files(package):
-        modules = _imported_modules(path) | _dynamic_import_strings(path)
-        for module in modules:
-            if module.startswith(blocked_prefixes):
+        for module in _first_party_imports(path):
+            if _matches_any_prefix(module, blocked_prefixes):
+                failures.append(f"{path.relative_to(SRC_ROOT)} references {module}")
+    return failures
+
+
+def _unexpected_imports(paths: list[Path], allowed_prefixes: tuple[str, ...]) -> list[str]:
+    failures: list[str] = []
+    for path in paths:
+        for module in sorted(_first_party_imports(path)):
+            if not _matches_any_prefix(module, allowed_prefixes):
                 failures.append(f"{path.relative_to(SRC_ROOT)} references {module}")
     return failures
 
@@ -160,6 +181,37 @@ def test_ui_does_not_import_runtime_stage_implementations_directly() -> None:
             "my_ocr.ingest",
             "my_ocr.ocr",
             "my_ocr.runs.store",
+        ),
+    )
+
+
+def test_ui_imports_only_through_boundary_packages() -> None:
+    assert not _unexpected_imports(
+        _py_files("ui"),
+        (
+            "my_ocr.bootstrap",
+            "my_ocr.domain",
+            "my_ocr.ui",
+            "my_ocr.workflow",
+        ),
+    )
+
+
+def test_ocr_and_extraction_do_not_import_ui_or_run_store_details() -> None:
+    failures = [
+        *_violations("ocr", ("my_ocr.ui", "my_ocr.runs.store")),
+        *_violations("extraction", ("my_ocr.ui", "my_ocr.runs.store")),
+    ]
+
+    assert not failures
+
+
+def test_workflow_imports_only_application_boundary_packages() -> None:
+    assert not _unexpected_imports(
+        [SRC_ROOT / "workflow.py"],
+        (
+            "my_ocr.domain",
+            "my_ocr.extraction.validation",
         ),
     )
 
