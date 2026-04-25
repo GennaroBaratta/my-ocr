@@ -3,20 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.application.dto import (
+from my_ocr.application.artifacts import (
     LayoutDetectionResult,
-    LayoutOptions,
-    OcrPageResult,
-    OcrOptions,
     OcrRecognitionResult,
+    ProviderArtifacts,
+)
+from my_ocr.application.models import (
+    LayoutDiagnostics,
+    OcrPageResult,
     OcrRunResult,
     PageRef,
-    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
     RunId,
     RunSnapshot,
-    LayoutDiagnostics,
+)
+from my_ocr.application.options import (
+    LayoutOptions,
+    OcrOptions,
     StructuredExtractionOptions,
 )
 

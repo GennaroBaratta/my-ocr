@@ -5,12 +5,9 @@ import tempfile
 from pathlib import Path
 
 from my_ocr.adapters.outbound.ocr import glmocr_engine
-from my_ocr.application.dto import (
-    OcrOptions,
-    OcrRecognitionResult,
-    PageRef,
-    ReviewLayout,
-)
+from my_ocr.application.artifacts import OcrRecognitionResult
+from my_ocr.application.models import PageRef, ReviewLayout
+from my_ocr.application.options import OcrOptions
 
 from ._convert import (
     combined_artifacts,

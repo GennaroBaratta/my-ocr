@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from my_ocr.adapters.outbound.filesystem.run_read_model import RecentRunRecord
-from my_ocr.application.dto import LayoutBlock, ReviewLayout, RunSnapshot
+from my_ocr.application.models import LayoutBlock, ReviewLayout, RunSnapshot
 
 from .session import BoundingBox, PageData, RecentRunSummary
 
@@ -31,7 +31,7 @@ def pages_from_snapshot(snapshot: RunSnapshot) -> list[PageData]:
 
 
 def page_data_to_review_layout(pages: list[PageData]) -> ReviewLayout:
-    from my_ocr.application.dto import LayoutBlock, ReviewPage
+    from my_ocr.application.models import LayoutBlock, ReviewPage
     from my_ocr.ui.image_utils import get_image_size
 
     review_pages: list[ReviewPage] = []

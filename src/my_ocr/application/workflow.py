@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from my_ocr.application.dto import (
+from my_ocr.application.artifacts import ProviderArtifacts
+from my_ocr.application.models import ReviewLayout, RunId
+from my_ocr.application.options import (
     LayoutOptions,
     OcrOptions,
-    RunId,
     StructuredExtractionOptions,
-    WorkflowResult,
 )
+from my_ocr.application.results import WorkflowResult
 from my_ocr.application.errors import (
     LayoutDetectionFailed,
     MissingPage,
@@ -82,6 +83,15 @@ class DocumentWorkflow:
         tx = self._run_store.begin_update(run_id)
         try:
             tx.write_ocr_result(recognition.result, recognition.artifacts)
+            return WorkflowResult(snapshot=tx.commit())
+        except Exception:
+            tx.rollback()
+            raise
+
+    def save_review_layout(self, run_id: RunId, layout: ReviewLayout) -> WorkflowResult:
+        tx = self._run_store.begin_update(run_id)
+        try:
+            tx.write_review_layout(layout, ProviderArtifacts.empty())
             return WorkflowResult(snapshot=tx.commit())
         except Exception:
             tx.rollback()

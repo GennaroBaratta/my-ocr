@@ -4,13 +4,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from my_ocr.application.dto import (
-    ArtifactCopy,
+from my_ocr.application.artifacts import ArtifactCopy, ProviderArtifacts
+from my_ocr.application.models import (
     LayoutBlock,
     OcrPageResult,
     OcrRunResult,
     PageRef,
-    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
 )

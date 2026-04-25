@@ -4,7 +4,7 @@ import re
 import shutil
 from pathlib import Path
 
-from my_ocr.application.dto import PageRef
+from my_ocr.application.models import PageRef
 from my_ocr.application.errors import MissingInputDocument
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
@@ -90,4 +90,3 @@ def _reset_dir(path: Path) -> Path:
 def _natural_sort_key(path: Path) -> list[int | str]:
     parts = re.split(r"(\d+)", path.name.lower())
     return [int(part) if part.isdigit() else part for part in parts]
-

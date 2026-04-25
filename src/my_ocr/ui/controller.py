@@ -4,7 +4,8 @@ import asyncio
 from dataclasses import dataclass
 import functools
 
-from my_ocr.application.dto import LayoutOptions, OcrOptions, RunId
+from my_ocr.application.models import RunId
+from my_ocr.application.options import LayoutOptions, OcrOptions
 
 
 @dataclass(frozen=True, slots=True)

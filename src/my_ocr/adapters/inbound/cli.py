@@ -4,12 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from my_ocr.application.dto import (
-    LayoutOptions,
-    OcrOptions,
-    RunId,
-    StructuredExtractionOptions,
-)
+from my_ocr.application.models import RunId
+from my_ocr.application.options import LayoutOptions, OcrOptions, StructuredExtractionOptions
 from my_ocr.application.use_cases.evaluation import (
     evaluate_directories,
     evaluate_workflow,

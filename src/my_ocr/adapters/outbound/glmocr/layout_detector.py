@@ -5,12 +5,9 @@ import tempfile
 from pathlib import Path
 
 from my_ocr.adapters.outbound.ocr import glmocr_engine
-from my_ocr.application.dto import (
-    LayoutDetectionResult,
-    LayoutDiagnostics,
-    LayoutOptions,
-    PageRef,
-)
+from my_ocr.application.artifacts import LayoutDetectionResult
+from my_ocr.application.models import LayoutDiagnostics, PageRef
+from my_ocr.application.options import LayoutOptions
 
 from ._convert import provider_artifacts_from_pages, read_json, review_layout_from_legacy
 

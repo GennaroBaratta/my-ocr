@@ -44,6 +44,27 @@ def _dynamic_import_strings(path: Path) -> set[str]:
     return modules
 
 
+def _attribute_call_lines(path: Path, attribute: str) -> list[int]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attribute
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def _attribute_call_sites(roots: tuple[Path, ...], attribute: str) -> list[tuple[Path, int]]:
+    calls: list[tuple[Path, int]] = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            calls.extend((path, line) for line in _attribute_call_lines(path, attribute))
+    return calls
+
+
 def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     failures: list[str] = []
     for path in _py_files(package):
@@ -83,6 +104,36 @@ def test_ui_does_not_import_removed_application_artifacts_or_use_cases() -> None
             "my_ocr.application.use_cases",
         ),
     )
+
+
+def test_ui_does_not_import_filesystem_run_store_directly() -> None:
+    assert not _violations(
+        "ui",
+        ("my_ocr.adapters.outbound.filesystem.run_store",),
+    )
+
+
+def test_ui_state_does_not_open_run_transactions_directly() -> None:
+    state_path = SRC_ROOT / "ui" / "state.py"
+    lines = _attribute_call_lines(state_path, "begin_update")
+
+    assert not lines, f"ui/state.py calls begin_update on lines {lines}"
+
+
+def test_review_layout_saves_are_coordinated_by_workflow() -> None:
+    workflow_path = SRC_ROOT / "application" / "workflow.py"
+    roots = (
+        SRC_ROOT / "application",
+        SRC_ROOT / "adapters" / "inbound",
+        SRC_ROOT / "ui",
+    )
+    failures = [
+        f"{path.relative_to(SRC_ROOT)}:{line}"
+        for path, line in _attribute_call_sites(roots, "write_review_layout")
+        if path != workflow_path
+    ]
+
+    assert not failures
 
 
 def test_source_and_tests_do_not_import_removed_command_layer() -> None:

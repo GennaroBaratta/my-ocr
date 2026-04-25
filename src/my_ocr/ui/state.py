@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from my_ocr.application.dto import ProviderArtifacts
 from my_ocr.application.errors import UnsupportedRunSchema
+from my_ocr.application.models import RunId
 from my_ocr.bootstrap import (
     BackendServices,
     DEFAULT_OLLAMA_ENDPOINT,
@@ -172,13 +172,10 @@ class AppState:
     def save_reviewed_layout(self) -> None:
         if not self.run_id:
             return
-        tx = self.services.run_store.begin_update(self.run_id)
-        try:
-            tx.write_review_layout(page_data_to_review_layout(self.pages), ProviderArtifacts.empty())
-            tx.commit()
-        except Exception:
-            tx.rollback()
-            raise
+        self.services.workflow.save_review_layout(
+            RunId(self.run_id),
+            page_data_to_review_layout(self.pages),
+        )
 
     @property
     def current_page(self) -> PageData | None:

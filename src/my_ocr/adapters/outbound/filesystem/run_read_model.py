@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from my_ocr.application.dto import RunSnapshot
+from my_ocr.application.models import RunSnapshot
 from my_ocr.application.errors import UnsupportedRunSchema
 
 from .run_store import DEFAULT_RUN_ROOT, FilesystemRunStore
@@ -69,4 +69,3 @@ def _status_for_snapshot(snapshot: RunSnapshot) -> str:
     if snapshot.review_layout is not None:
         return "review_ready"
     return "pending"
-

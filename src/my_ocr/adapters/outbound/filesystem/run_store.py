@@ -9,13 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from my_ocr.application.dto import (
-    ArtifactCopy,
+from my_ocr.application.artifacts import ArtifactCopy, ProviderArtifacts
+from my_ocr.application.models import (
     LayoutDiagnostics,
     OcrPageResult,
     OcrRunResult,
     PageRef,
-    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
     RunId,

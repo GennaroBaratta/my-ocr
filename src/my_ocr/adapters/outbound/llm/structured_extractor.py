@@ -14,7 +14,8 @@ from my_ocr.adapters.outbound.config.settings import (
     resolve_ocr_api_client,
 )
 from my_ocr.adapters.outbound.filesystem.json_store import write_json
-from my_ocr.application.dto import PageRef, StructuredExtractionOptions
+from my_ocr.application.models import PageRef
+from my_ocr.application.options import StructuredExtractionOptions
 from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
 from my_ocr.domain.document import JSON_SCHEMA, DocumentFields
 from my_ocr.domain.text import replace_html_tables
