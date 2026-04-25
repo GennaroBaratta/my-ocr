@@ -13,12 +13,12 @@ from my_ocr.adapters.outbound.config.settings import (
     DEFAULT_OLLAMA_NUM_CTX,
     resolve_ocr_api_client,
 )
-from my_ocr.adapters.outbound.filesystem.json_store import write_json
-from my_ocr.application.models import PageRef
-from my_ocr.application.options import StructuredExtractionOptions
+from my_ocr.models import PageRef
+from my_ocr.pipeline.options import StructuredExtractionOptions
 from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
 from my_ocr.domain.document import JSON_SCHEMA, DocumentFields
 from my_ocr.domain.text import replace_html_tables
+from my_ocr.filesystem import write_json
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 RAW_BODY_METADATA_KEY = "_raw_body"

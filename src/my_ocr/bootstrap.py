@@ -14,10 +14,10 @@ from my_ocr.adapters.outbound.filesystem.document_normalizer import (
 )
 from my_ocr.adapters.outbound.filesystem.run_read_model import FilesystemRunReadModel
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.adapters.outbound.glmocr import GlmOcrEngine, GlmOcrLayoutDetector
 from my_ocr.adapters.outbound.llm.structured_extractor import OllamaStructuredExtractor
-from my_ocr.application.services.rules_extractor import extract_from_markdown
-from my_ocr.application.workflow import DocumentWorkflow
+from my_ocr.adapters.outbound.ocr.glmocr_engine import GlmOcrEngine, GlmOcrLayoutDetector
+from my_ocr.pipeline.extraction import extract_from_markdown
+from my_ocr.pipeline.workflow import DocumentWorkflow
 
 
 class RulesExtractorAdapter:

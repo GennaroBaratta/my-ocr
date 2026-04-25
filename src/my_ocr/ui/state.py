@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from my_ocr.application.errors import UnsupportedRunSchema
-from my_ocr.application.models import RunId
+from my_ocr.pipeline.errors import UnsupportedRunSchema
+from my_ocr.models import RunId
 from my_ocr.bootstrap import (
     BackendServices,
     DEFAULT_OLLAMA_ENDPOINT,
@@ -86,15 +86,6 @@ class AppState:
                 if box.id == self.session.selected_box_id:
                     return box
         return None
-
-    def update_box(self, box_id: str, **kwargs: object) -> None:
-        for page in self.session.pages:
-            for box in page.boxes:
-                if box.id == box_id:
-                    for key, value in kwargs.items():
-                        setattr(box, key, value)
-                    self.save_reviewed_layout()
-                    return
 
     def add_box_to_current_page(
         self,

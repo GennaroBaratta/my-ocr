@@ -7,24 +7,14 @@ from pathlib import Path
 import flet as ft
 
 from .. import theme
+from ..actions import go_to_result_route, run_workflow_action, show_layout_warning
 from ..components.drop_zone import build_drop_zone
+from ..components.loading_overlay import LoadingOverlay, build_loading_overlay
 from ..components.ollama_status import OllamaStatus
 from ..components.recent_runs import build_recent_runs
 from ..components.settings_dialog import open_settings_dialog
 from ..components.stepper import build_stepper
 from ..state import AppState
-
-
-def _show_layout_warning(page: ft.Page, state: AppState) -> None:
-    warning = state.layout_profile_warning()
-    if not warning:
-        return
-    page.show_dialog(
-        ft.SnackBar(
-            ft.Text(warning),
-            bgcolor=theme.ACCENT_YELLOW,
-        )
-    )
 
 
 def build_upload_view(
@@ -34,24 +24,7 @@ def build_upload_view(
 ) -> ft.View:
     state.load_recent_runs()
 
-    progress_ring = ft.ProgressRing(
-        visible=False,
-        color=theme.PRIMARY,
-        stroke_width=4,
-    )
-    status_text = ft.Text("", size=16, weight=ft.FontWeight.W_500, color=theme.TEXT_PRIMARY, visible=False)
-    
-    loading_overlay = ft.Container(
-        content=ft.Column(
-            [progress_ring, ft.Container(height=16), status_text],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            alignment=ft.MainAxisAlignment.CENTER,
-        ),
-        bgcolor=f"#CC{theme.BG_PAGE[1:]}",
-        visible=False,
-        alignment=ft.Alignment.CENTER,
-        expand=True,
-    )
+    loading_overlay = build_loading_overlay()
 
     async def browse_files() -> None:
         files = await file_picker.pick_files(
@@ -63,7 +36,7 @@ def build_upload_view(
         file_path = files[0].path
         if not file_path:
             return
-        _start_review_prep(page, state, file_path, loading_overlay, progress_ring, status_text)
+        _start_review_prep(page, state, file_path, loading_overlay)
 
     settings_btn = ft.IconButton(
         icon=ft.Icons.SETTINGS_OUTLINED,
@@ -132,7 +105,7 @@ def build_upload_view(
                                 left=16,
                                 bottom=16,
                             ),
-                            loading_overlay,
+                            loading_overlay.control,
                         ],
                         expand=True,
                     )
@@ -151,36 +124,16 @@ def _start_review_prep(
     page: ft.Page,
     state: AppState,
     file_path: str,
-    loading_overlay: ft.Container,
-    progress_ring: ft.ProgressRing,
-    status_text: ft.Text,
+    loading_overlay: LoadingOverlay,
 ) -> None:
-    loading_overlay.visible = True
-    progress_ring.visible = True
-    status_text.visible = True
-    status_text.color = theme.TEXT_PRIMARY
-    status_text.value = f"Preparing layout review for {Path(file_path).name}…"
-    page.update()
-
-    async def do_prepare_review() -> None:
-        try:
-            result = await state.controller.prepare_review(file_path)
-            loading_overlay.visible = False
-            progress_ring.visible = False
-            status_text.visible = False
-            _show_layout_warning(page, state)
-            if result.route:
-                page.go(result.route)
-        except Exception as exc:
-            loading_overlay.visible = False
-            progress_ring.visible = False
-            status_text.visible = False
-            page.show_dialog(
-                ft.SnackBar(
-                    ft.Text(f"Error preparing review: {exc}"),
-                    bgcolor=theme.ERROR,
-                )
-            )
-            page.update()
-
-    page.run_task(do_prepare_review)
+    run_workflow_action(
+        page,
+        action=lambda: state.controller.prepare_review(file_path),
+        loading=loading_overlay,
+        loading_message=f"Preparing layout review for {Path(file_path).name}…",
+        error_prefix="Error preparing review",
+        on_success=lambda result: (
+            show_layout_warning(page, state),
+            go_to_result_route(page, result),
+        ),
+    )

@@ -6,7 +6,7 @@ import flet as ft
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
 from my_ocr.application.artifacts import ProviderArtifacts
-from my_ocr.application.models import OcrPageResult, OcrRunResult, PageRef, RunId
+from my_ocr.models import OcrPageResult, OcrRunResult, PageRef, RunId
 from my_ocr.ui.components.code_display import build_code_display
 from my_ocr.ui.ocr_result_text import ocr_json_text_for_state
 from my_ocr.ui.state import AppState

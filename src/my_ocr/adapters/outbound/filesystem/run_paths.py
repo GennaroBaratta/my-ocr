@@ -16,10 +16,6 @@ class RunPaths:
         return cls(Path(run_dir))
 
     @property
-    def run_name(self) -> str:
-        return self.run_dir.name
-
-    @property
     def pages_dir(self) -> Path:
         return self.run_dir / "pages"
 
@@ -64,11 +60,6 @@ class RunPaths:
             elif path.exists():
                 path.unlink()
         self.raw_dir.mkdir(parents=True, exist_ok=True)
-
-    def raw_page_dir(self, page_number: int) -> Path:
-        path = self.raw_dir / f"page-{page_number:04d}"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
 
     def fallback_page_dir(self, page_number: int) -> Path:
         path = self.fallback_dir / f"page-{page_number:04d}"

@@ -178,3 +178,19 @@ def test_source_tests_and_tools_do_not_import_removed_application_dto() -> None:
                 failures.append(f"{path.relative_to(REPO_ROOT)} imports application dto")
 
     assert not failures
+
+
+def test_source_tests_and_tools_do_not_import_removed_application_ports() -> None:
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
+    failures: list[str] = []
+    blocked = "my_ocr.application.ports"
+    for root in roots:
+        for path in root.rglob("*.py"):
+            modules = _imported_modules(path) | _dynamic_import_strings(path)
+            if any(
+                module == blocked or module.startswith(f"{blocked}.")
+                for module in modules
+            ):
+                failures.append(f"{path.relative_to(REPO_ROOT)} imports application ports")
+
+    assert not failures

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Awaitable, cast
+from typing import Awaitable
 
 import flet as ft
 
+from my_ocr.filesystem import write_text
+
 from .. import theme
+from ..actions import run_workflow_action
 from ..components.code_display import build_code_display
 from ..components.doc_viewer import build_doc_viewer, refresh_doc_viewer_available_width
 from ..components.split_pane import SplitPane
@@ -377,11 +380,11 @@ def build_results_view(
 
 
 def _save_markdown(path: str, content: str) -> None:
-    Path(cast(str, path)).write_text(content, encoding="utf-8")
+    write_text(path, content)
 
 
 def _save_json(path: str, content: str) -> None:
-    Path(cast(str, path)).write_text(content, encoding="utf-8")
+    write_text(path, content)
 
 
 def _start_page_rerun(
@@ -393,23 +396,13 @@ def _start_page_rerun(
     error_prefix: str,
 ) -> None:
     set_rerun_in_progress(True)
-
-    async def do_rerun() -> None:
-        try:
-            await action()
-            on_success()
-        except Exception as exc:
-            page.show_dialog(
-                ft.SnackBar(
-                    ft.Text(f"{error_prefix}: {exc}"),
-                    bgcolor=theme.ERROR,
-                )
-            )
-            page.update()
-        finally:
-            set_rerun_in_progress(False)
-
-    page.run_task(do_rerun)
+    run_workflow_action(
+        page,
+        action=action,
+        error_prefix=error_prefix,
+        on_success=lambda _result: on_success(),
+        on_complete=lambda: set_rerun_in_progress(False),
+    )
 
 
 def _page_label_text(state: AppState) -> str:

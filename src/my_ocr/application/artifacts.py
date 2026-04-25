@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from my_ocr.application.models import LayoutDiagnostics, OcrRunResult, ReviewLayout
+from my_ocr.models import LayoutDiagnostics, OcrRunResult, ReviewLayout
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.application.models import PageRef, RunId
+from my_ocr.models import PageRef, RunId
 from my_ocr.ui.state import AppState
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import json
 import re
 import shutil
 import tempfile
@@ -10,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from my_ocr.application.artifacts import ArtifactCopy, ProviderArtifacts
-from my_ocr.application.models import (
+from my_ocr.models import (
     LayoutDiagnostics,
     OcrPageResult,
     OcrRunResult,
@@ -22,12 +21,16 @@ from my_ocr.application.models import (
     RunSnapshot,
     SCHEMA_VERSION,
 )
-from my_ocr.application.errors import (
+from my_ocr.pipeline.errors import (
     MissingPage,
     RunCommitFailed,
     RunNotFound,
     UnsupportedRunSchema,
 )
+from my_ocr.filesystem import read_json as _read_json
+from my_ocr.filesystem import read_text as _read_text
+from my_ocr.filesystem import write_json as _write_json
+from my_ocr.filesystem import write_text as _write_text
 
 DEFAULT_RUN_ROOT = "data/runs"
 
@@ -49,6 +52,130 @@ class FilesystemRunStore:
 
     def open_run(self, run_id: RunId | str) -> RunSnapshot:
         return _load_snapshot(self._run_dir(run_id))
+
+    def write_pages(
+        self, run: "RunTransaction | RunId | str", pages: list[PageRef]
+    ) -> RunSnapshot | None:
+        if isinstance(run, RunTransaction):
+            run.write_pages(pages)
+            return None
+        tx = self.begin_update(run)
+        try:
+            tx.write_pages(pages)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def write_review_layout(
+        self,
+        run: "RunTransaction | RunId | str",
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot | None:
+        if isinstance(run, RunTransaction):
+            run.write_review_layout(layout, artifacts, diagnostics)
+            return None
+        tx = self.begin_update(run)
+        try:
+            tx.write_review_layout(layout, artifacts, diagnostics)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def write_ocr_result(
+        self, run_id: RunId | str, result: OcrRunResult, artifacts: ProviderArtifacts
+    ) -> RunSnapshot:
+        tx = self.begin_update(run_id)
+        try:
+            tx.write_ocr_result(result, artifacts)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def replace_page_layout(
+        self,
+        run_id: RunId | str,
+        page_number: int,
+        page: ReviewPage,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot:
+        tx = self.begin_update(run_id)
+        try:
+            tx.replace_page_layout(page_number, page, artifacts)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def replace_page_ocr(
+        self,
+        run_id: RunId | str,
+        page_number: int,
+        page: OcrPageResult,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot:
+        tx = self.begin_update(run_id)
+        try:
+            tx.replace_page_ocr(page_number, page, artifacts)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def write_rules_extraction(
+        self, run_id: RunId | str, prediction: dict[str, Any]
+    ) -> RunSnapshot:
+        tx = self.begin_update(run_id)
+        try:
+            tx.write_rules_extraction(prediction)
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def write_structured_extraction(
+        self,
+        run_id: RunId | str,
+        prediction: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        canonical_prediction: dict[str, Any],
+    ) -> RunSnapshot:
+        tx = self.begin_update(run_id)
+        try:
+            tx.write_structured_extraction(
+                prediction,
+                metadata,
+                canonical_prediction=canonical_prediction,
+            )
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def clear_extraction_outputs(
+        self, run: "RunTransaction | RunId | str"
+    ) -> RunSnapshot | None:
+        if isinstance(run, RunTransaction):
+            run.clear_extraction_outputs()
+            return None
+        tx = self.begin_update(run)
+        try:
+            tx.clear_extraction_outputs()
+            return tx.commit()
+        except Exception:
+            tx.rollback()
+            raise
+
+    def commit_run(self, run: "RunTransaction") -> RunSnapshot:
+        return run.commit()
+
+    def rollback_run(self, run: "RunTransaction") -> None:
+        run.rollback()
 
     def begin_update(self, run_id: RunId | str) -> "RunTransaction":
         target_dir = self._run_dir(run_id)
@@ -254,7 +381,7 @@ class RunTransaction:
                 _copy_path(item, self.work_dir)
         finally:
             for path in artifacts.cleanup_paths:
-                shutil.rmtree(path, ignore_errors=True)
+                _remove_cleanup_path(path, target_dir=self._target_dir, work_dir=self.work_dir)
 
 
 def _copy_path(item: ArtifactCopy, work_dir: Path) -> None:
@@ -320,7 +447,7 @@ def _load_ocr_result(run_dir: Path) -> OcrRunResult | None:
     if not pages_path.exists():
         return None
     payload = _read_json(pages_path)
-    markdown = markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else ""
+    markdown = _read_text(markdown_path) if markdown_path.exists() else ""
     return OcrRunResult.from_dict(payload, markdown=markdown) if isinstance(payload, dict) else None
 
 
@@ -341,25 +468,23 @@ def _load_extraction(run_dir: Path) -> dict[str, Any]:
     return payload
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def _read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 def _remove_path(path: Path) -> None:
     if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()
+
+
+def _remove_cleanup_path(path: Path, *, target_dir: Path, work_dir: Path) -> None:
+    candidates = [path]
+    try:
+        relative = path.relative_to(target_dir)
+    except ValueError:
+        relative = None
+    if relative is not None:
+        candidates.append(work_dir / relative)
+    for candidate in candidates:
+        _remove_path(candidate)
 
 
 def _slugify(value: str) -> str:

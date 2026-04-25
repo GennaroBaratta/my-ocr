@@ -9,7 +9,6 @@ from typing import Any
 from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mod
 from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
 from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
-from my_ocr.adapters.outbound.filesystem.json_store import load_json, write_json, write_text
 from my_ocr.adapters.outbound.filesystem.review_layout_store import (
     load_review_layout_payload,
     save_review_layout_payload,
@@ -35,6 +34,12 @@ from my_ocr.adapters.outbound.ocr.fallback_ocr import (
     recognize_full_page,
     run_crop_fallback_for_page,
 )
+from my_ocr.application.artifacts import (
+    ArtifactCopy,
+    LayoutDetectionResult,
+    OcrRecognitionResult,
+    ProviderArtifacts,
+)
 from my_ocr.domain.layout import (
     detect_bbox_coord_space,
     extract_layout_blocks,
@@ -49,6 +54,17 @@ from my_ocr.domain.review_layout import (
     review_layout_pages_by_number,
     review_page_to_layout_payload,
 )
+from my_ocr.filesystem import load_json, write_json, write_text
+from my_ocr.models import (
+    LayoutBlock,
+    LayoutDiagnostics,
+    OcrPageResult,
+    OcrRunResult,
+    PageRef,
+    ReviewLayout,
+    ReviewPage,
+)
+from my_ocr.pipeline.options import LayoutOptions, OcrOptions
 
 
 def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
@@ -56,6 +72,73 @@ def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
     if not isinstance(warning, str) or not warning.strip():
         return
     print(f"Warning: {warning}", file=sys.stderr)
+
+
+class GlmOcrLayoutDetector:
+    def detect_layout(
+        self, pages: list[PageRef], options: LayoutOptions
+    ) -> LayoutDetectionResult:
+        run_dir = _run_dir_from_pages(pages)
+        result = prepare_review_artifacts(
+            [str(page.path_for_io) for page in pages],
+            run_dir,
+            config_path=options.config_path,
+            layout_device=options.layout_device,
+            layout_profile=options.layout_profile,
+            page_numbers=[page.page_number for page in pages],
+        )
+        layout = _review_layout_from_legacy(
+            _dict_payload(result.get("reviewed_layout")), pages, status="prepared"
+        )
+        artifacts = _with_cleanup(
+            _provider_artifacts_from_pages(run_dir / "ocr_raw", "layout/provider", pages),
+            _legacy_layout_cleanup_paths(run_dir),
+        )
+        return LayoutDetectionResult(
+            layout=layout,
+            artifacts=artifacts,
+            diagnostics=LayoutDiagnostics.from_dict(result.get("layout_diagnostics")),
+        )
+
+
+class GlmOcrEngine:
+    def recognize(
+        self,
+        pages: list[PageRef],
+        review: ReviewLayout | None,
+        options: OcrOptions,
+    ) -> OcrRecognitionResult:
+        run_dir = _run_dir_from_pages(pages)
+        review_path: Path | None = None
+        if review is not None:
+            review_path = run_dir / "reviewed_layout.json"
+            write_json(review_path, _legacy_review_payload(review, pages))
+
+        result = run_ocr(
+            [str(page.path_for_io) for page in pages],
+            run_dir,
+            config_path=options.config_path,
+            layout_device=options.layout_device,
+            layout_profile=options.layout_profile,
+            reviewed_layout_path=review_path,
+            page_numbers=[page.page_number for page in pages],
+        )
+        ocr_result = _ocr_result_from_legacy(
+            _dict_payload(result.get("json")),
+            str(result.get("markdown", "")),
+            pages,
+        )
+        ocr_result = OcrRunResult(
+            pages=ocr_result.pages,
+            markdown=ocr_result.markdown,
+            diagnostics=dict(result.get("layout_diagnostics", {})),
+        )
+        artifacts = _combined_artifacts(
+            _provider_artifacts_from_pages(run_dir / "ocr_raw", "ocr/provider", pages),
+            _provider_artifacts_from_pages(run_dir / "ocr_fallback", "ocr/fallback", pages),
+        )
+        artifacts = _with_cleanup(artifacts, _legacy_ocr_cleanup_paths(run_dir))
+        return OcrRecognitionResult(result=ocr_result, artifacts=artifacts)
 
 
 def run_ocr(
@@ -637,3 +720,150 @@ def _resolve_reviewed_layout_page(
     if reviewed_layout_page is None:
         return None
     return review_page_to_layout_payload(reviewed_layout_page)
+
+
+def _run_dir_from_pages(pages: list[PageRef]) -> Path:
+    if not pages:
+        raise ValueError("At least one normalized page image is required.")
+    page_path = pages[0].path_for_io
+    if page_path.parent.name == "pages":
+        return page_path.parent.parent
+    return page_path.parent
+
+
+def _dict_payload(payload: Any) -> dict[str, Any]:
+    return payload if isinstance(payload, dict) else {}
+
+
+def _review_layout_from_legacy(
+    payload: dict[str, Any], pages: list[PageRef], *, status: str = "prepared"
+) -> ReviewLayout:
+    pages_by_number = {page.page_number: page for page in pages}
+    review_pages: list[ReviewPage] = []
+    for raw_page in payload.get("pages", []):
+        if not isinstance(raw_page, dict):
+            continue
+        page_number = int(raw_page.get("page_number", len(review_pages) + 1))
+        page_ref = pages_by_number.get(page_number)
+        size = raw_page.get("image_size", {})
+        image_width = int(size.get("width", page_ref.width if page_ref else 0))
+        image_height = int(size.get("height", page_ref.height if page_ref else 0))
+        review_pages.append(
+            ReviewPage(
+                page_number=page_number,
+                image_path=page_ref.image_path if page_ref else str(raw_page.get("page_path", "")),
+                image_width=image_width,
+                image_height=image_height,
+                coord_space=str(raw_page.get("coord_space", "pixel")),
+                provider_path=f"layout/provider/page-{page_number:04d}",
+                blocks=[
+                    LayoutBlock.from_dict(block)
+                    for block in raw_page.get("blocks", [])
+                    if isinstance(block, dict)
+                ],
+            )
+        )
+    return ReviewLayout(pages=review_pages, status=status)
+
+
+def _legacy_review_payload(review: ReviewLayout, pages: list[PageRef]) -> dict[str, Any]:
+    pages_by_number = {page.page_number: page for page in pages}
+    payload_pages: list[dict[str, Any]] = []
+    for review_page in review.pages:
+        page_ref = pages_by_number.get(review_page.page_number)
+        page_payload = review_page.to_dict()
+        page_payload["page_path"] = str(page_ref.path_for_io if page_ref else review_page.image_path)
+        page_payload["source_sdk_json_path"] = review_page.provider_path or ""
+        payload_pages.append(page_payload)
+    return {
+        "version": 2,
+        "status": review.status,
+        "pages": payload_pages,
+        "summary": {"page_count": len(payload_pages)},
+    }
+
+
+def _ocr_result_from_legacy(
+    payload: dict[str, Any], markdown: str, pages: list[PageRef]
+) -> OcrRunResult:
+    pages_by_number = {page.page_number: page for page in pages}
+    ocr_pages: list[OcrPageResult] = []
+    for raw_page in payload.get("pages", []):
+        if not isinstance(raw_page, dict):
+            continue
+        page_number = int(raw_page.get("page_number", len(ocr_pages) + 1))
+        page_ref = pages_by_number.get(page_number)
+        fallback_path = None
+        if raw_page.get("markdown_source") in {"crop_fallback", "full_page_fallback"}:
+            fallback_path = f"ocr/fallback/page-{page_number:04d}"
+        ocr_pages.append(
+            OcrPageResult(
+                page_number=page_number,
+                image_path=page_ref.image_path if page_ref else str(raw_page.get("page_path", "")),
+                markdown=str(raw_page.get("markdown", "")),
+                markdown_source=str(raw_page.get("markdown_source", "unknown")),
+                provider_path=f"ocr/provider/page-{page_number:04d}",
+                fallback_path=fallback_path,
+                raw_payload=_relative_raw_payload(raw_page, page_number, fallback_path),
+            )
+        )
+    return OcrRunResult(pages=ocr_pages, markdown=markdown)
+
+
+def _provider_artifacts_from_pages(
+    source_root: Path,
+    target_root: str,
+    pages: list[PageRef],
+) -> ProviderArtifacts:
+    copies: list[ArtifactCopy] = []
+    for page in pages:
+        source = source_root / f"page-{page.page_number:04d}"
+        if source.exists():
+            copies.append(
+                ArtifactCopy(
+                    source=source,
+                    relative_target=f"{target_root}/page-{page.page_number:04d}",
+                )
+            )
+    return ProviderArtifacts(tuple(copies))
+
+
+def _combined_artifacts(*bundles: ProviderArtifacts) -> ProviderArtifacts:
+    copies: list[ArtifactCopy] = []
+    cleanup_paths: list[Path] = []
+    for bundle in bundles:
+        copies.extend(bundle.copies)
+        cleanup_paths.extend(bundle.cleanup_paths)
+    return ProviderArtifacts(tuple(copies), tuple(cleanup_paths))
+
+
+def _with_cleanup(bundle: ProviderArtifacts, cleanup_paths: tuple[Path, ...]) -> ProviderArtifacts:
+    return ProviderArtifacts(bundle.copies, bundle.cleanup_paths + cleanup_paths)
+
+
+def _legacy_layout_cleanup_paths(run_dir: Path) -> tuple[Path, ...]:
+    return (run_dir / "ocr_raw", run_dir / "reviewed_layout.json")
+
+
+def _legacy_ocr_cleanup_paths(run_dir: Path) -> tuple[Path, ...]:
+    return (
+        run_dir / "ocr_raw",
+        run_dir / "ocr_fallback",
+        run_dir / "ocr.md",
+        run_dir / "ocr.json",
+        run_dir / "ocr_fallback.json",
+        run_dir / "reviewed_layout.json",
+    )
+
+
+def _relative_raw_payload(
+    raw_page: dict[str, Any], page_number: int, fallback_path: str | None
+) -> dict[str, Any]:
+    payload = {
+        "assessment": raw_page.get("assessment", {}),
+        "layout_source": raw_page.get("layout_source"),
+    }
+    if fallback_path:
+        payload["fallback_path"] = fallback_path
+    payload["provider_path"] = f"ocr/provider/page-{page_number:04d}"
+    return payload

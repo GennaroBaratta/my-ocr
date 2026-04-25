@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class ApplicationError(Exception):
-    """Base class for user-facing application failures."""
+    """Base class for user-facing pipeline failures."""
 
 
 class RunNotFound(ApplicationError):
@@ -35,4 +35,3 @@ class StructuredExtractionFailed(ApplicationError):
 
 class RunCommitFailed(ApplicationError):
     pass
-

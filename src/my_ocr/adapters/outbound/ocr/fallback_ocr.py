@@ -9,13 +9,13 @@ from my_ocr.adapters.outbound.config.settings import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
 )
-from my_ocr.adapters.outbound.filesystem.json_store import ensure_dir, write_text
 from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
 from my_ocr.domain.layout import (
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
     clean_recognized_text,
 )
+from my_ocr.filesystem import ensure_dir, write_text
 
 
 def run_crop_fallback_for_page(
@@ -80,16 +80,6 @@ def run_crop_fallback_for_page(
         chunk["text"].strip() for chunk in recognized_chunks if chunk["text"].strip()
     )
     return page_markdown, recognized_chunks
-
-
-def recognize_text_crop(
-    crop_path: str | Path,
-    *,
-    model: str = DEFAULT_OLLAMA_MODEL,
-    endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    num_ctx: int = DEFAULT_OLLAMA_NUM_CTX,
-) -> str:
-    return recognize_text_image(crop_path, model=model, endpoint=endpoint, num_ctx=num_ctx)
 
 
 def recognize_full_page(

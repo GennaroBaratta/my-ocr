@@ -13,7 +13,7 @@ from my_ocr.application.artifacts import (
     OcrRecognitionResult,
     ProviderArtifacts,
 )
-from my_ocr.application.models import (
+from my_ocr.models import (
     LayoutBlock,
     OcrPageResult,
     OcrRunResult,
@@ -22,9 +22,9 @@ from my_ocr.application.models import (
     ReviewPage,
     RunId,
 )
-from my_ocr.application.options import StructuredExtractionOptions
-from my_ocr.application.errors import UnsupportedRunSchema
 from my_ocr.application.workflow import DocumentWorkflow
+from my_ocr.pipeline.errors import UnsupportedRunSchema
+from my_ocr.pipeline.options import StructuredExtractionOptions
 
 
 def test_prepare_layout_review_writes_v2_manifest_and_relative_payloads(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from my_ocr.application.models import RunSnapshot
+from my_ocr.models import RunSnapshot
 
 
 @dataclass(frozen=True, slots=True)

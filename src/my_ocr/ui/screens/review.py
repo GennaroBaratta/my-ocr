@@ -8,8 +8,10 @@ from typing import Callable, cast
 import flet as ft
 
 from .. import theme
+from ..actions import go_to_result_route, run_workflow_action, show_error, show_layout_warning
 from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
+from ..components.loading_overlay import LoadingOverlay, build_loading_overlay
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
 from ..image_utils import get_image_size
@@ -24,41 +26,12 @@ from ..zoom import (
 )
 
 
-def _show_layout_warning(page: ft.Page, state: AppState) -> None:
-    warning = state.layout_profile_warning()
-    if not warning:
-        return
-    page.show_dialog(
-        ft.SnackBar(
-            ft.Text(warning),
-            bgcolor=theme.ACCENT_YELLOW,
-        )
-    )
-
-
 def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     filename = Path(state.session.current_input_path).name if state.session.current_input_path else ""
     if not filename:
         filename = state.session.run_id or "Document"
 
-    progress_ring = ft.ProgressRing(
-        visible=False,
-        color=theme.PRIMARY,
-        stroke_width=4,
-    )
-    status_text = ft.Text("Running OCR...", size=16, weight=ft.FontWeight.W_500, color=theme.TEXT_PRIMARY, visible=False)
-    
-    loading_overlay = ft.Container(
-        content=ft.Column(
-            [progress_ring, ft.Container(height=16), status_text],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            alignment=ft.MainAxisAlignment.CENTER,
-        ),
-        bgcolor=f"#CC{theme.BG_PAGE[1:]}",
-        visible=False,
-        alignment=ft.Alignment.CENTER,
-        expand=True,
-    )
+    loading_overlay = build_loading_overlay("Running OCR...")
 
     # ── Mutable content containers ──────────────────────────────────
     content_row = ft.Row(spacing=0, expand=True)
@@ -197,7 +170,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     def run_ocr() -> None:
         state.save_reviewed_layout()
-        _start_reviewed_ocr(page, state, loading_overlay, progress_ring, status_text)
+        _start_reviewed_ocr(page, state, loading_overlay)
 
     def on_add_box() -> None:
         state.session.is_adding_box = not state.session.is_adding_box
@@ -208,7 +181,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         rebuild()
 
     def on_redetect_layout() -> None:
-        _start_redetect_layout(page, state, loading_overlay, progress_ring, status_text, rebuild)
+        _start_redetect_layout(page, state, loading_overlay, rebuild)
 
     def on_page_select(idx: int) -> None:
         state.session.current_page_index = idx
@@ -401,7 +374,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
                     ft.Stack(
                         [
                             ft.Column([toolbar, content_row], spacing=0, expand=True),
-                            loading_overlay,
+                            loading_overlay.control,
                         ],
                         expand=True,
                     ),
@@ -478,68 +451,32 @@ def _sync_add_box_button(
         pass
 
 
-def _set_loading_controls(
-    loading_overlay: ft.Container,
-    progress_ring: ft.ProgressRing,
-    status_text: ft.Text,
-    *,
-    active: bool,
-    message: str | None = None,
-) -> None:
-    if message is not None:
-        status_text.value = message
-    loading_overlay.visible = active
-    progress_ring.visible = active
-    status_text.visible = active
-
-
 def _start_reviewed_ocr(
     page: ft.Page,
     state: AppState,
-    loading_overlay: ft.Container,
-    progress_ring: ft.ProgressRing,
-    status_text: ft.Text,
+    loading_overlay: LoadingOverlay,
 ) -> None:
     if not state.session.run_id:
         return
 
-    _set_loading_controls(
-        loading_overlay,
-        progress_ring,
-        status_text,
-        active=True,
-        message="Running OCR...",
-    )
-    page.update()
-
     run_id = state.session.run_id
-
-    async def do_ocr() -> None:
-        try:
-            result = await state.controller.run_reviewed_ocr(run_id)
-            _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
-            _show_layout_warning(page, state)
-            if result.route:
-                page.go(result.route)
-        except Exception as exc:
-            _set_loading_controls(loading_overlay, progress_ring, status_text, active=False)
-            page.show_dialog(
-                ft.SnackBar(
-                    ft.Text(f"OCR failed: {exc}"),
-                    bgcolor=theme.ERROR,
-                )
-            )
-            page.update()
-
-    page.run_task(do_ocr)
+    run_workflow_action(
+        page,
+        action=lambda: state.controller.run_reviewed_ocr(run_id),
+        loading=loading_overlay,
+        loading_message="Running OCR...",
+        error_prefix="OCR failed",
+        on_success=lambda result: (
+            show_layout_warning(page, state),
+            go_to_result_route(page, result),
+        ),
+    )
 
 
 def _start_redetect_layout(
     page: ft.Page,
     state: AppState,
-    loading_overlay: ft.Container,
-    progress_ring: ft.ProgressRing,
-    status_text: ft.Text,
+    loading_overlay: LoadingOverlay,
     rebuild: Callable[[], None],
 ) -> None:
     if not state.session.run_id:
@@ -547,61 +484,39 @@ def _start_redetect_layout(
 
     input_path = state.session.current_input_path
     if not input_path:
-        page.show_dialog(
-            ft.SnackBar(
-                ft.Text("Cannot re-detect: original input path is missing."),
-                bgcolor=theme.ERROR,
-            )
-        )
-        page.update()
+        show_error(page, "Cannot re-detect: original input path is missing.")
         return
 
     has_prior_review = bool(state.session.pages)
 
     def start_redetect() -> None:
         run_id = state.session.run_id
-        _set_loading_controls(
-            loading_overlay,
-            progress_ring,
-            status_text,
-            active=True,
-            message="Re-detecting layout…",
+
+        async def redetect() -> None:
+            if run_id is None:
+                return
+            await state.controller.redetect_review(input_path, run_id)
+
+        def on_success(_result: None) -> None:
+            loading_overlay.set_active(False, "Running OCR...")
+            if run_id:
+                state.load_run(run_id)
+            show_layout_warning(page, state)
+            rebuild()
+
+        def on_error(exc: Exception) -> None:
+            loading_overlay.set_active(False, "Running OCR...")
+            show_error(page, f"Re-detect failed: {exc}")
+
+        run_workflow_action(
+            page,
+            action=redetect,
+            loading=loading_overlay,
+            loading_message="Re-detecting layout…",
+            error_prefix="Re-detect failed",
+            on_success=on_success,
+            on_error=on_error,
         )
-        page.update()
-
-        async def do_redetect() -> None:
-            try:
-                if run_id is None:
-                    return
-                await state.controller.redetect_review(input_path, run_id)
-                _set_loading_controls(
-                    loading_overlay,
-                    progress_ring,
-                    status_text,
-                    active=False,
-                    message="Running OCR...",
-                )
-                if run_id:
-                    state.load_run(run_id)
-                _show_layout_warning(page, state)
-                rebuild()
-            except Exception as exc:
-                _set_loading_controls(
-                    loading_overlay,
-                    progress_ring,
-                    status_text,
-                    active=False,
-                    message="Running OCR...",
-                )
-                page.show_dialog(
-                    ft.SnackBar(
-                        ft.Text(f"Re-detect failed: {exc}"),
-                        bgcolor=theme.ERROR,
-                    )
-                )
-                page.update()
-
-        page.run_task(do_redetect)
 
     if not has_prior_review:
         start_redetect()

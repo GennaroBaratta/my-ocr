@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,18 +14,6 @@ DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434/api/generate"
 DEFAULT_OLLAMA_NUM_CTX = 8192
 DEFAULT_OLLAMA_KEEP_ALIVE = "15m"
 DEFAULT_OLLAMA_TIMEOUT_SECONDS = 300
-
-
-@dataclass(frozen=True, slots=True)
-class AppSettings:
-    run_root: str = DEFAULT_RUN_ROOT
-    ocr_config_path: str = DEFAULT_CONFIG_PATH
-    layout_device: str = DEFAULT_LAYOUT_DEVICE
-    ollama_model: str = DEFAULT_OLLAMA_MODEL
-    ollama_endpoint: str = DEFAULT_OLLAMA_ENDPOINT
-    ollama_keep_alive: str = DEFAULT_OLLAMA_KEEP_ALIVE
-    ollama_timeout_seconds: int = DEFAULT_OLLAMA_TIMEOUT_SECONDS
-    ollama_num_ctx: int = DEFAULT_OLLAMA_NUM_CTX
 
 
 def resolve_ocr_api_client(

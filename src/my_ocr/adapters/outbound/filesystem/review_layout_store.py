@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from my_ocr.filesystem import read_json, write_json
 
 
 def load_review_layout_payload(path: str | Path) -> dict[str, Any] | None:
     candidate = Path(path)
     if not candidate.exists():
         return None
-    payload = json.loads(candidate.read_text(encoding="utf-8"))
+    payload = read_json(candidate)
     if not isinstance(payload, dict):
         return None
     pages = payload.get("pages")
@@ -19,10 +20,5 @@ def load_review_layout_payload(path: str | Path) -> dict[str, Any] | None:
 
 
 def save_review_layout_payload(path: str | Path, payload: dict[str, Any]) -> None:
-    candidate = Path(path)
-    candidate.parent.mkdir(parents=True, exist_ok=True)
-    candidate.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    write_json(path, payload)
 

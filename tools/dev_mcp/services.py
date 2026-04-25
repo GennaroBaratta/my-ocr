@@ -15,7 +15,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from typing import Any
 
-from my_ocr.application.models import RunId
+from my_ocr.models import RunId
 from my_ocr.bootstrap import build_backend_services
 
 from .config import DevMcpConfig

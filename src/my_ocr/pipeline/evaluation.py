@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import json
 from pathlib import Path
 from typing import Any
 
 from my_ocr.domain.document import FIELD_NAMES, DocumentFields
+from my_ocr.filesystem import ensure_dir, read_json as load_json, write_text
 
 
 def evaluate_workflow(
@@ -21,22 +21,6 @@ def evaluate_workflow(
     report = evaluate(gold_dir, pred_dir)
     write_report(report, output)
     return report
-
-
-def ensure_dir(path: str | Path) -> Path:
-    target = Path(path)
-    target.mkdir(parents=True, exist_ok=True)
-    return target
-
-
-def load_json(path: str | Path) -> Any:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def write_text(path: str | Path, content: str) -> None:
-    target = Path(path)
-    ensure_dir(target.parent)
-    target.write_text(content, encoding="utf-8")
 
 
 def evaluate_directories(gold_dir: str | Path, pred_dir: str | Path) -> dict[str, Any]:

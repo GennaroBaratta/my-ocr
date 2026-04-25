@@ -4,13 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-from my_ocr.application.models import RunId
-from my_ocr.application.options import LayoutOptions, OcrOptions, StructuredExtractionOptions
-from my_ocr.application.use_cases.evaluation import (
+from my_ocr.models import RunId
+from my_ocr.pipeline.evaluation import (
     evaluate_directories,
     evaluate_workflow,
     write_markdown_report,
 )
+from my_ocr.pipeline.options import LayoutOptions, OcrOptions, StructuredExtractionOptions
 from my_ocr.bootstrap import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,
@@ -145,15 +145,6 @@ def cmd_run(args: argparse.Namespace) -> Path:
         ocr_options=_ocr_options(args),
     )
     return result.snapshot.run_dir
-
-
-def resolve_run_dir(run: str | None, run_root: str, input_path: str) -> Path:
-    run_id = run or Path(input_path).stem
-    return Path(run_root) / run_id
-
-
-def resolve_named_run_dir(run: str, run_root: str) -> Path:
-    return Path(run_root) / run
 
 
 def _optional_run_id(run: str | None) -> RunId | None:

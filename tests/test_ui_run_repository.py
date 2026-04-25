@@ -5,7 +5,7 @@ from pathlib import Path
 from my_ocr.adapters.outbound.filesystem.run_read_model import FilesystemRunReadModel
 from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
 from my_ocr.application.artifacts import ProviderArtifacts
-from my_ocr.application.models import (
+from my_ocr.models import (
     LayoutBlock,
     PageRef,
     ReviewLayout,
