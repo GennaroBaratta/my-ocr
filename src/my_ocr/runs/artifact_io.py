@@ -65,9 +65,6 @@ class RunArtifactPaths:
         return self.extraction_dir / "canonical.json"
 
 
-# Backwards-compatible alias during class rename.
-RunLayoutPaths = RunArtifactPaths
-
 
 def write_review_layout_payload(run_dir: Path, layout: ReviewLayout) -> None:
     write_json(RunArtifactPaths(run_dir).review_layout, layout.model_dump(mode="json"))

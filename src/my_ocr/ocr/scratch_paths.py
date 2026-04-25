@@ -44,6 +44,3 @@ class ProviderScratchPaths:
         return path
 
 
-
-# Backwards-compatible alias during module rename.
-RunPaths = ProviderScratchPaths
