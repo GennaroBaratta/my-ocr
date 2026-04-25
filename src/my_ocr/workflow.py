@@ -3,30 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.models import (
+from my_ocr.domain import (
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
     WorkflowResult,
-)
-from my_ocr.models import (
     LayoutDetectionFailed,
     MissingPage,
     OcrFailed,
     StructuredExtractionFailed,
-)
-from my_ocr.models import (
     PageRef,
     ReviewLayout,
     RunId,
-)
-from my_ocr.models import (
-    LayoutOptions,
-    OcrOptions,
+    OcrRuntimeOptions,
     StructuredExtractionOptions,
 )
 from my_ocr.extraction.rules import validate_structured_prediction
-from my_ocr.storage import RunStorage
+from my_ocr.runs.store import RunStorage
 
 
 RunStore = RunStorage
@@ -38,7 +31,7 @@ class DocumentNormalizer(Protocol):
 
 class LayoutDetector(Protocol):
     def detect_layout(
-        self, pages: list[PageRef], run_dir: Path, options: LayoutOptions
+        self, pages: list[PageRef], run_dir: Path, options: OcrRuntimeOptions
     ) -> LayoutDetectionResult: ...
 
 
@@ -48,12 +41,12 @@ class OcrEngine(Protocol):
         pages: list[PageRef],
         run_dir: Path,
         review: ReviewLayout | None,
-        options: OcrOptions,
+        options: OcrRuntimeOptions,
     ) -> OcrRecognitionResult: ...
 
 
 class RulesExtractor(Protocol):
-    def extract(self, markdown: str) -> dict[str, Any]: ...
+    def __call__(self, markdown: str) -> dict[str, Any]: ...
 
 
 class StructuredExtractor(Protocol):
@@ -89,7 +82,7 @@ class DocumentWorkflow:
         self,
         input_path: str,
         run_id: RunId | None = None,
-        options: LayoutOptions = LayoutOptions(),
+        options: OcrRuntimeOptions = OcrRuntimeOptions(),
     ) -> WorkflowResult:
         workspace = self._run_store.start_run(input_path, run_id)
         try:
@@ -113,7 +106,7 @@ class DocumentWorkflow:
     def run_reviewed_ocr(
         self,
         run_id: RunId,
-        options: OcrOptions = OcrOptions(),
+        options: OcrRuntimeOptions = OcrRuntimeOptions(),
     ) -> WorkflowResult:
         snapshot = self._run_store.open_run(run_id)
         if not snapshot.pages:
@@ -140,7 +133,7 @@ class DocumentWorkflow:
         self,
         run_id: RunId,
         page_number: int,
-        options: LayoutOptions = LayoutOptions(),
+        options: OcrRuntimeOptions = OcrRuntimeOptions(),
     ) -> WorkflowResult:
         snapshot = self._run_store.open_run(run_id)
         page = snapshot.page(page_number)
@@ -161,7 +154,7 @@ class DocumentWorkflow:
         self,
         run_id: RunId,
         page_number: int,
-        options: OcrOptions = OcrOptions(),
+        options: OcrRuntimeOptions = OcrRuntimeOptions(),
     ) -> WorkflowResult:
         snapshot = self._run_store.open_run(run_id)
         page = snapshot.page(page_number)
@@ -184,7 +177,7 @@ class DocumentWorkflow:
         snapshot = self._run_store.open_run(run_id)
         if snapshot.ocr_result is None or not snapshot.ocr_result.markdown.strip():
             raise OcrFailed("Rules extraction requires OCR markdown.")
-        prediction = self._rules_extractor.extract(snapshot.ocr_result.markdown)
+        prediction = self._rules_extractor(snapshot.ocr_result.markdown)
         snapshot = self._run_store.write_rules_extraction(run_id, prediction)
         return WorkflowResult(snapshot=snapshot)
 
@@ -225,8 +218,8 @@ class DocumentWorkflow:
         self,
         input_path: str,
         run_id: RunId | None = None,
-        layout_options: LayoutOptions = LayoutOptions(),
-        ocr_options: OcrOptions = OcrOptions(),
+        layout_options: OcrRuntimeOptions = OcrRuntimeOptions(),
+        ocr_options: OcrRuntimeOptions = OcrRuntimeOptions(),
     ) -> WorkflowResult:
         prepared = self.prepare_review(
             input_path=input_path,

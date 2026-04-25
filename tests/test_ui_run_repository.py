@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from my_ocr.storage import FilesystemRunReadModel
-from my_ocr.storage import FilesystemRunStore
-from my_ocr.models import ProviderArtifacts
-from my_ocr.models import (
+from my_ocr.runs.store import FilesystemRunReadModel
+from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.domain import ProviderArtifacts
+from my_ocr.domain import (
     LayoutBlock,
     PageRef,
     ReviewLayout,
@@ -15,7 +15,7 @@ from my_ocr.models import (
 from my_ocr.ui.mappers import pages_from_snapshot, recent_run_summary
 
 
-def test_read_model_lists_v3_and_unsupported_runs(tmp_path: Path) -> None:
+def test_read_model_lists_only_valid_v3_runs(tmp_path: Path) -> None:
     store = FilesystemRunStore(tmp_path)
     workspace = store.start_run("input.pdf", RunId("v3"))
     store.publish_prepared_run(
@@ -24,14 +24,14 @@ def test_read_model_lists_v3_and_unsupported_runs(tmp_path: Path) -> None:
         ReviewLayout(pages=[], status="prepared"),
         ProviderArtifacts.empty(),
     )
-    (tmp_path / "v1").mkdir()
-    (tmp_path / "v1" / "meta.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "not-a-run").mkdir()
+    (tmp_path / "not-a-run" / "meta.json").write_text("{}", encoding="utf-8")
 
     records = FilesystemRunReadModel(tmp_path).list_recent_runs()
     statuses = {record.run_id: record.status for record in records}
 
     assert statuses["v3"] == "review_ready"
-    assert statuses["v1"] == "unsupported"
+    assert "not-a-run" not in statuses
 
 
 def test_ui_mappers_convert_snapshot_pages_and_boxes(tmp_path: Path) -> None:

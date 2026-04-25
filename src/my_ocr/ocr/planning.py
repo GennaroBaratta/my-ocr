@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Literal
 
-from my_ocr.text import normalize_table_html
+from my_ocr.support.text import normalize_table_html
 
 TEXT_RECOGNITION_PROMPT = "Text Recognition:"
 TABLE_RECOGNITION_PROMPT = "Table Recognition:"

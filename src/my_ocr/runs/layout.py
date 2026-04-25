@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from my_ocr.filesystem import read_json, read_text, write_json, write_text
-from my_ocr.models import OcrRunResult, ReviewLayout
+from my_ocr.support.filesystem import read_json, read_text, write_json, write_text
+from my_ocr.domain import OcrRunResult, ReviewLayout
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,10 @@ class RunLayoutPaths:
         return self.extraction_dir / "structured_meta.json"
 
     @property
+    def structured_extraction_raw(self) -> Path:
+        return self.extraction_dir / "structured_raw.json"
+
+    @property
     def canonical_extraction(self) -> Path:
         return self.extraction_dir / "canonical.json"
 
@@ -99,6 +103,7 @@ def load_extraction(run_dir: Path) -> dict[str, Any]:
         ("rules", paths.rules_extraction),
         ("structured", paths.structured_extraction),
         ("structured_meta", paths.structured_extraction_meta),
+        ("structured_raw", paths.structured_extraction_raw),
         ("canonical", paths.canonical_extraction),
     ):
         if path.exists():

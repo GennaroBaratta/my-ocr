@@ -21,13 +21,9 @@ from my_ocr.ocr.planning import (
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
 )
-from my_ocr.text import normalize_table_html
-from my_ocr.models import LayoutBlock, PageRef, ReviewLayout, ReviewPage
-from my_ocr.models import LayoutOptions, OcrOptions
-from tests.support import (
-    build_reviewed_layout_block,
-    build_reviewed_layout_page,
-)
+from my_ocr.support.text import normalize_table_html
+from my_ocr.domain import LayoutBlock, PageRef, ReviewLayout, ReviewPage
+from my_ocr.domain import OcrRuntimeOptions
 
 
 class FakeResult:
@@ -126,37 +122,13 @@ def _page_refs(
         refs.append(
             PageRef(
                 page_number=page_numbers[index - 1] if page_numbers else inferred_number,
-                image_path=str(path),
+                image_path=f"pages/{path.name}",
                 width=width,
                 height=height,
                 resolved_path=path,
             )
         )
     return refs
-
-
-def _review_layout_from_file(path: str | Path | None) -> ReviewLayout | None:
-    if path is None:
-        return None
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    pages: list[ReviewPage] = []
-    for index, page in enumerate(payload.get("pages", []), start=1):
-        size = page.get("image_size", {})
-        pages.append(
-            ReviewPage(
-                page_number=page.get("page_number", index),
-                image_path=page.get("image_path", page.get("page_path", "")),
-                image_width=size.get("width", 0),
-                image_height=size.get("height", 0),
-                coord_space=page.get("coord_space", "pixel"),
-                blocks=[
-                    LayoutBlock.model_validate(block)
-                    for block in page.get("blocks", [])
-                    if isinstance(block, dict)
-                ],
-            )
-        )
-    return ReviewLayout(pages=pages, status=payload.get("status", "reviewed"))
 
 
 def run_ocr(
@@ -166,14 +138,14 @@ def run_ocr(
     config_path: str = "config/local.yaml",
     layout_device: str = "cuda",
     layout_profile: str | None = "auto",
-    reviewed_layout_path=None,
+    review_layout: ReviewLayout | None = None,
     page_numbers=None,
 ):
     result = _run_ocr(
         _page_refs(page_paths, page_numbers=page_numbers),
         run_dir,
-        review=_review_layout_from_file(reviewed_layout_path),
-        options=OcrOptions(
+        review=review_layout,
+        options=OcrRuntimeOptions(
             config_path=config_path,
             layout_device=layout_device,
             layout_profile=layout_profile,
@@ -182,17 +154,11 @@ def run_ocr(
     pages = []
     for page in result.result.pages:
         payload = page.model_dump(mode="json")
-        payload["page_path"] = page.image_path
         payload.update(page.raw_payload)
         pages.append(payload)
     summary = result.result.summary
-    if reviewed_layout_path is not None:
-        review = _review_layout_from_file(reviewed_layout_path)
-        summary["reviewed_layout"] = {
-            "path": str(reviewed_layout_path),
-            "page_count": len(review.pages) if review else 0,
-            "apply_mode": "reviewed_layout_primary",
-        }
+    if review_layout is not None:
+        summary["review_layout"] = {"page_count": len(review_layout.pages)}
     return {
         "markdown": result.result.markdown,
         "json": {"pages": pages, "summary": summary},
@@ -216,7 +182,7 @@ def prepare_review_artifacts(
     result = _prepare_review_artifacts(
         _page_refs(page_paths, page_numbers=page_numbers),
         run_dir,
-        options=LayoutOptions(
+        options=OcrRuntimeOptions(
             config_path=config_path,
             layout_device=layout_device,
             layout_profile=layout_profile,
@@ -224,20 +190,49 @@ def prepare_review_artifacts(
     )
     payload = result.layout.model_dump(mode="json")
     payload["summary"] = result.layout.summary
-    for page in payload["pages"]:
-        page_number = page["page_number"]
-        source_dir = Path(run_dir) / "ocr_raw" / f"page-{page_number:04d}"
-        model_paths = sorted(source_dir.glob("*_model.json"))
-        page["page_path"] = page["image_path"]
-        page["source_sdk_json_path"] = str(model_paths[0]) if model_paths else ""
     return {
-        "reviewed_layout": payload,
+        "review_layout": payload,
         "raw_dir": str(Path(run_dir) / "ocr_raw"),
         "config_path": config_path,
         "layout_device": layout_device,
         "layout_diagnostics": result.diagnostics.payload,
         "_dto": result,
     }
+
+
+def _review_layout(*, blocks: list[LayoutBlock]) -> ReviewLayout:
+    return ReviewLayout(
+        pages=[
+            ReviewPage(
+                page_number=1,
+                image_path="pages/page-0001.png",
+                image_width=100,
+                image_height=100,
+                coord_space="pixel",
+                blocks=blocks,
+            )
+        ],
+        status="reviewed",
+    )
+
+
+def _review_block(
+    *,
+    block_id: str = "p0-b0",
+    index: int = 0,
+    label: str = "text",
+    content: str = "",
+    bbox: list[int] | None = None,
+    confidence: float = 1.0,
+) -> LayoutBlock:
+    return LayoutBlock(
+        id=block_id,
+        index=index,
+        label=label,
+        content=content,
+        confidence=confidence,
+        bbox=bbox or [1, 2, 10, 20],
+    )
 
 
 def test_lazy_parser_wrapper_defers_pipeline_start_until_first_parse() -> None:
@@ -667,7 +662,10 @@ def test_run_ocr_aggregates_pages_in_order_and_tracks_sources(tmp_path, monkeypa
         "page_count": 2,
         "sources": {"sdk_markdown": 1, "layout_json": 1},
     }
-    assert [page["page_path"] for page in result["json"]["pages"]] == [str(page_one), str(page_two)]
+    assert [page["image_path"] for page in result["json"]["pages"]] == [
+        "pages/page-0001.png",
+        "pages/page-0002.png",
+    ]
 
 
 def test_run_ocr_raises_on_sdk_error_field(tmp_path, monkeypatch) -> None:
@@ -792,7 +790,6 @@ def test_run_ocr_reconstructs_markdown_from_layout_json(tmp_path, monkeypatch) -
 
     assert result["markdown"] == "Recovered text"
     assert result["json"]["pages"][0]["markdown_source"] == "layout_json"
-    assert not (tmp_path / "run" / "ocr_fallback.json").exists()
 
 
 def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
@@ -995,7 +992,7 @@ def test_run_ocr_persists_normalized_table_markdown(tmp_path, monkeypatch) -> No
     assert result["markdown"] == "Intro\n\nX | Y\n1 | 2"
 
 
-def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, monkeypatch) -> None:
+def test_run_ocr_consumes_review_layout_for_planning_and_fallback(tmp_path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_crop_fallback(**kwargs):
@@ -1004,41 +1001,26 @@ def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, mo
         return "review-driven text", []
 
     def fail_parser_load():
-        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+        raise AssertionError("review-layout OCR should not load the GLM-OCR parser")
 
     monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
     monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fake_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
-    reviewed_layout_path = tmp_path / "reviewed_layout.json"
-    reviewed_layout_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "status": "reviewed",
-                "pages": [
-                    build_reviewed_layout_page(
-                        page_path=str(source),
-                        source_sdk_json_path=str(tmp_path / "raw.json"),
-                        blocks=[
-                            build_reviewed_layout_block(
-                                label="table",
-                                bbox=[2, 3, 9, 10],
-                            )
-                        ],
-                    )
-                ],
-                "summary": {"page_count": 1},
-            }
-        ),
-        encoding="utf-8",
+    review_layout = _review_layout(
+        blocks=[
+            _review_block(
+                label="table",
+                bbox=[2, 3, 9, 10],
+            )
+        ],
     )
 
     result = run_ocr(
         [str(source)],
         tmp_path / "run",
-        reviewed_layout_path=reviewed_layout_path,
+        review_layout=review_layout,
     )
 
     assert captured["page_json"] == {
@@ -1046,70 +1028,51 @@ def test_run_ocr_consumes_reviewed_layout_for_planning_and_fallback(tmp_path, mo
     }
     assert captured["coord_space"] == "pixel"
     assert result["markdown"] == "review-driven text"
-    assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
+    assert result["json"]["pages"][0]["layout_source"] == "review_layout"
     expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
     assert "sdk_json_path" not in result["json"]["pages"][0]
     assert json.loads(expected_model_path.read_text(encoding="utf-8")) == {
         "blocks": [{"index": 0, "label": "table", "content": "", "bbox_2d": [2, 3, 9, 10]}]
     }
-    assert result["json"]["summary"]["reviewed_layout"] == {
-        "path": str(reviewed_layout_path),
-        "page_count": 1,
-        "apply_mode": "reviewed_layout_primary",
-    }
+    assert result["json"]["summary"]["review_layout"] == {"page_count": 1}
     assert result["json"]["pages"][0]["markdown"] == "review-driven text"
 
 
-def test_run_ocr_uses_nonempty_reviewed_layout_as_canonical_layout(
+def test_run_ocr_uses_nonempty_review_layout_as_canonical_layout(
     tmp_path, monkeypatch
 ) -> None:
     def fail_parser_load():
-        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+        raise AssertionError("review-layout OCR should not load the GLM-OCR parser")
 
     def fail_crop_fallback(**_kwargs):
-        raise AssertionError("non-empty reviewed layout should not use crop fallback")
+        raise AssertionError("non-empty review layout should not use crop fallback")
 
     monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
     monkeypatch.setattr(ocr, "run_crop_fallback_for_page", fail_crop_fallback)
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
-    reviewed_layout_path = tmp_path / "reviewed_layout.json"
-    reviewed_layout_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "status": "reviewed",
-                "pages": [
-                    build_reviewed_layout_page(
-                        page_path=str(source),
-                        source_sdk_json_path=str(tmp_path / "sdk_layout.json"),
-                        blocks=[
-                            build_reviewed_layout_block(
-                                content="Reviewed block text",
-                                bbox=[2, 3, 9, 10],
-                            )
-                        ],
-                    )
-                ],
-                "summary": {"page_count": 1},
-            }
-        ),
-        encoding="utf-8",
+    review_layout = _review_layout(
+        blocks=[
+            _review_block(
+                content="Reviewed block text",
+                bbox=[2, 3, 9, 10],
+            )
+        ],
     )
 
     result = run_ocr(
         [str(source)],
         tmp_path / "run",
-        reviewed_layout_path=reviewed_layout_path,
+        review_layout=review_layout,
     )
 
     page = result["json"]["pages"][0]
-    assert page["layout_source"] == "reviewed_layout"
+    assert page["layout_source"] == "review_layout"
     assert page["sdk_markdown"] == ""
     assert page["markdown"] == "Reviewed block text"
     assert page["markdown_source"] == "layout_json"
-    assert result["json"]["summary"]["reviewed_layout"]["apply_mode"] == "reviewed_layout_primary"
+    assert result["json"]["summary"]["review_layout"] == {"page_count": 1}
     expected_model_path = tmp_path / "run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
     assert "sdk_json_path" not in page
     assert json.loads(expected_model_path.read_text(encoding="utf-8")) == {
@@ -1124,11 +1087,11 @@ def test_run_ocr_uses_nonempty_reviewed_layout_as_canonical_layout(
     }
 
 
-def test_run_ocr_uses_reviewed_layout_without_loading_glm_parser(
+def test_run_ocr_uses_review_layout_without_loading_glm_parser(
     tmp_path, monkeypatch
 ) -> None:
     def fail_parser_load():
-        raise AssertionError("reviewed-layout OCR should not load the GLM-OCR parser")
+        raise AssertionError("review-layout OCR should not load the GLM-OCR parser")
 
     monkeypatch.setattr(ocr, "_load_glmocr_parser", fail_parser_load)
     monkeypatch.setattr(
@@ -1139,50 +1102,25 @@ def test_run_ocr_uses_reviewed_layout_without_loading_glm_parser(
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
-    reviewed_layout_path = tmp_path / "reviewed_layout.json"
-    reviewed_layout_path.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "status": "reviewed",
-                "pages": [
-                    {
-                        "page_number": 1,
-                        "page_path": str(source),
-                        "image_size": {"width": 100, "height": 100},
-                        "source_sdk_json_path": None,
-                        "coord_space": "pixel",
-                        "blocks": [
-                            {
-                                "id": "p0-b0",
-                                "index": 0,
-                                "label": "text",
-                                "content": "Reviewed text",
-                                "confidence": 1.0,
-                                "bbox": [1, 2, 40, 30],
-                            }
-                        ],
-                    }
-                ],
-                "summary": {"page_count": 1},
-            }
-        ),
-        encoding="utf-8",
+    review_layout = _review_layout(
+        blocks=[
+            _review_block(
+                content="Reviewed text",
+                bbox=[1, 2, 40, 30],
+            )
+        ],
     )
 
     result = run_ocr(
         [str(source)],
         tmp_path / "run",
-        reviewed_layout_path=reviewed_layout_path,
+        review_layout=review_layout,
     )
 
     assert result["markdown"] == "Reviewed text"
-    assert result["json"]["pages"][0]["layout_source"] == "reviewed_layout"
+    assert result["json"]["pages"][0]["layout_source"] == "review_layout"
     assert result["json"]["pages"][0]["markdown_source"] == "layout_json"
-    assert (
-        result["json"]["summary"]["reviewed_layout"]["apply_mode"]
-        == "reviewed_layout_primary"
-    )
+    assert result["json"]["summary"]["review_layout"] == {"page_count": 1}
 
 
 def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> None:
@@ -1196,10 +1134,8 @@ def test_subset_runs_preserve_original_page_numbers(tmp_path, monkeypatch) -> No
     assert ocr_result["json"]["pages"][0]["page_number"] == 5
     assert ocr_result["json"]["pages"][0]["provider_path"] == "ocr/provider/page-0005"
     assert "sdk_json_path" not in ocr_result["json"]["pages"][0]
-    assert review_result["reviewed_layout"]["pages"][0]["page_number"] == 5
-    assert review_result["reviewed_layout"]["pages"][0]["source_sdk_json_path"] == str(
-        tmp_path / "review-run" / "ocr_raw" / "page-0005" / "page-0005_model.json"
-    )
+    assert review_result["review_layout"]["pages"][0]["page_number"] == 5
+    assert review_result["review_layout"]["pages"][0]["provider_path"] == "layout/provider/page-0005"
 
 
 def test_run_ocr_canonicalizes_raw_dir_for_explicit_page_number(tmp_path, monkeypatch) -> None:
@@ -1258,9 +1194,9 @@ def test_prepare_review_canonicalizes_raw_dir_for_explicit_page_number(
     result = prepare_review_artifacts([str(source)], tmp_path / "review", page_numbers=[5])
 
     expected_model_path = tmp_path / "review" / "ocr_raw" / "page-0005" / "scan_model.json"
-    page = result["reviewed_layout"]["pages"][0]
+    page = result["review_layout"]["pages"][0]
     assert page["page_number"] == 5
-    assert page["source_sdk_json_path"] == str(expected_model_path)
+    assert page["provider_path"] == "layout/provider/page-0005"
     assert expected_model_path.exists()
     assert not (tmp_path / "review" / "ocr_raw" / "scan").exists()
 
@@ -1295,7 +1231,7 @@ def test_prepare_review_artifacts_preserves_saved_block_text(tmp_path, monkeypat
 
     assert ReviewPrepParser.parse_calls == []
     assert ReviewPrepParser.layout_only_calls == [str(source)]
-    assert result["reviewed_layout"]["pages"][0]["blocks"][0]["content"] == "Recovered text"
+    assert result["review_layout"]["pages"][0]["blocks"][0]["content"] == "Recovered text"
 
 
 def test_prepare_review_artifacts_retries_same_page_once_on_cpu_after_cuda_oom(
@@ -1344,10 +1280,8 @@ def test_prepare_review_artifacts_retries_same_page_once_on_cpu_after_cuda_oom(
     assert ReviewCudaOomGlmOcr.layout_only_devices == [("cuda", str(source)), ("cpu", str(source))]
     assert empty_cache_calls == ["called"]
     assert result["layout_device"] == "cuda"
-    assert result["reviewed_layout"]["summary"] == {"page_count": 1}
-    assert result["reviewed_layout"]["pages"][0]["source_sdk_json_path"] == str(
-        tmp_path / "review-run" / "ocr_raw" / "page-0001" / "page-0001_model.json"
-    )
+    assert result["review_layout"]["summary"] == {"page_count": 1}
+    assert result["review_layout"]["pages"][0]["provider_path"] == "layout/provider/page-0001"
 
 
 def test_run_ocr_closes_failed_parser_before_cpu_retry(tmp_path, monkeypatch) -> None:
@@ -1479,7 +1413,7 @@ def test_prepare_review_artifacts_closes_failed_parser_before_cpu_retry(tmp_path
 
     assert ReviewCudaOomGlmOcr.close_devices == ["cuda"]
     assert empty_cache_calls == ["called"]
-    assert result["reviewed_layout"]["summary"] == {"page_count": 1}
+    assert result["review_layout"]["summary"] == {"page_count": 1}
 
 
 def test_prepare_review_artifacts_reopens_cuda_parser_after_cpu_retry_for_later_pages(
@@ -1547,7 +1481,7 @@ def test_prepare_review_artifacts_reopens_cuda_parser_after_cpu_retry_for_later_
         ("cuda", str(page_two)),
     ]
     assert empty_cache_calls == ["called"]
-    assert [page["blocks"][0]["content"] for page in result["reviewed_layout"]["pages"]] == [
+    assert [page["blocks"][0]["content"] for page in result["review_layout"]["pages"]] == [
         "cpu page-0001",
         "cuda page-0002",
     ]

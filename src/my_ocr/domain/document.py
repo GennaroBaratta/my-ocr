@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field as dataclass_field
 from typing import Any
 
-from my_ocr.text import collapse_whitespace
+from my_ocr.support.text import collapse_whitespace
 
 FIELD_NAMES = (
     "document_type",

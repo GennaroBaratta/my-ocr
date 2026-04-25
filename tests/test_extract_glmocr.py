@@ -12,7 +12,6 @@ from my_ocr.extraction.structured import (
     build_structured_prompt,
     _parse_response_json,
     extract_structured,
-    save_structured_result,
 )
 
 
@@ -312,20 +311,3 @@ def test_extract_structured_rejects_missing_response_field(tmp_path, monkeypatch
         extract_structured([str(image)])
 
 
-def test_save_structured_result_writes_prediction_files(tmp_path) -> None:
-    save_structured_result(
-        tmp_path,
-        {"title": "Sample"},
-        {"model": DEFAULT_OLLAMA_MODEL, "_raw_body": {"response": '{"title":"Sample"}'}},
-    )
-
-    pred_dir = tmp_path / "extraction"
-    assert json.loads((pred_dir / "structured.json").read_text(encoding="utf-8")) == {
-        "title": "Sample"
-    }
-    assert json.loads((pred_dir / "structured_meta.json").read_text(encoding="utf-8")) == {
-        "model": DEFAULT_OLLAMA_MODEL
-    }
-    assert json.loads((pred_dir / "structured_raw.json").read_text(encoding="utf-8")) == {
-        "response": '{"title":"Sample"}'
-    }

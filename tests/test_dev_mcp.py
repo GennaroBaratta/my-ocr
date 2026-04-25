@@ -78,10 +78,10 @@ def test_read_run_state_collects_expected_artifacts(tmp_path) -> None:
     assert result["ok"] is True
     assert result["page_count"] == 1
     assert result["meta"]["input_path"] == "data/raw/demo.pdf"
-    assert result["reviewed_layout"]["status"] == "reviewed"
+    assert result["review_layout"]["status"] == "reviewed"
     assert result["ocr"]["page_count"] == 1
-    assert result["predictions"][0]["name"] == "rules.json"
-    assert result["predictions"][0]["top_level_keys"] == ["document_type"]
+    assert result["extraction_outputs"][0]["name"] == "rules.json"
+    assert result["extraction_outputs"][0]["top_level_keys"] == ["document_type"]
     assert (
         result["artifact_paths"]["ocr_json"]["repo_relative_path"]
         == "data/runs/demo-ui/ocr/pages.json"
@@ -483,7 +483,7 @@ def seed_run(run_dir: Path) -> Path:
     (run_dir / "run.json").write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "run_id": run_dir.name,
                 "input": {"path": "data/raw/demo.pdf", "name": "demo.pdf", "kind": "pdf"},
                 "created_at": "2026-01-01T00:00:00Z",
@@ -506,7 +506,7 @@ def seed_run(run_dir: Path) -> Path:
     (run_dir / "layout" / "review.json").write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": 3,
                 "status": "reviewed",
                 "pages": [{"page_number": 1, "image_path": "pages/page-0001.png", "blocks": []}],
                 "summary": {"page_count": 1},

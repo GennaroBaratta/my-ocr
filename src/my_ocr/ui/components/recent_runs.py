@@ -80,8 +80,6 @@ def build_recent_runs(page: ft.Page, state: AppState) -> ft.Column:
 
 
 def _run_destination(run_id: str, status: str) -> tuple[str, str, str]:
-    if status == "unsupported":
-        return f"/results/{run_id}", "Unsupported", theme.ERROR
     if status in {"ocr_complete", "extracted"}:
         return f"/results/{run_id}", "OCR Complete", theme.SUCCESS
     if status == "review_ready":

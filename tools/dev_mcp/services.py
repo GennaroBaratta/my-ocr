@@ -15,7 +15,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from typing import Any
 
-from my_ocr.models import RunId
+from my_ocr.domain import RunId
 from my_ocr.bootstrap import build_backend_services
 
 from .config import DevMcpConfig
@@ -392,7 +392,7 @@ class RunStateReader:
         artifact_paths = {
             "run_dir": _safe_file_info(run_dir, self.repo_paths),
             "run_json": _safe_file_info(run_dir / "run.json", self.repo_paths),
-            "reviewed_layout_json": _safe_file_info(
+            "review_layout_json": _safe_file_info(
                 run_dir / "layout" / "review.json", self.repo_paths
             ),
             "ocr_json": _safe_file_info(run_dir / "ocr" / "pages.json", self.repo_paths),
@@ -409,11 +409,11 @@ class RunStateReader:
             "page_paths": [],
             "page_count": 0,
             "meta": None,
-            "reviewed_layout": None,
+            "review_layout": None,
             "ocr": None,
-            "predictions": [],
+            "extraction_outputs": [],
             "next_suggested_actions": [
-                "Inspect reviewed_layout and predictions before capturing UX feedback.",
+                "Inspect review_layout and extraction_outputs before capturing UX feedback.",
                 "Attach any external screenshot paths with save_feedback_bundle.",
             ],
         }
@@ -437,16 +437,16 @@ class RunStateReader:
                     "status": manifest.get("status"),
                 }
 
-        reviewed_layout_path = run_dir / "layout" / "review.json"
-        if reviewed_layout_path.exists():
-            reviewed_layout = _try_read_json(reviewed_layout_path)
-            if isinstance(reviewed_layout, dict):
-                pages = reviewed_layout.get("pages")
-                result["reviewed_layout"] = {
-                    "status": reviewed_layout.get("status"),
+        review_layout_path = run_dir / "layout" / "review.json"
+        if review_layout_path.exists():
+            review_layout = _try_read_json(review_layout_path)
+            if isinstance(review_layout, dict):
+                pages = review_layout.get("pages")
+                result["review_layout"] = {
+                    "status": review_layout.get("status"),
                     "page_count": len(pages) if isinstance(pages, list) else 0,
-                    "summary": reviewed_layout.get("summary"),
-                    "path": self.repo_paths.rel_to_repo(reviewed_layout_path),
+                    "summary": review_layout.get("summary"),
+                    "path": self.repo_paths.rel_to_repo(review_layout_path),
                 }
 
         ocr_path = run_dir / "ocr" / "pages.json"
@@ -461,11 +461,11 @@ class RunStateReader:
                 }
 
         if extraction_dir.exists():
-            predictions = []
+            extraction_outputs = []
             for path in sorted(extraction_dir.iterdir()):
                 if not path.is_file():
                     continue
-                prediction: dict[str, Any] = {
+                extraction_output: dict[str, Any] = {
                     "name": path.name,
                     "path": self.repo_paths.rel_to_repo(path),
                     "size_bytes": path.stat().st_size,
@@ -473,11 +473,11 @@ class RunStateReader:
                 if path.suffix == ".json":
                     payload = _try_read_json(path)
                     if isinstance(payload, dict):
-                        prediction["top_level_keys"] = sorted(payload.keys())
+                        extraction_output["top_level_keys"] = sorted(payload.keys())
                     elif payload is None:
-                        prediction["warning"] = "invalid_json"
-                predictions.append(prediction)
-            result["predictions"] = predictions
+                        extraction_output["warning"] = "invalid_json"
+                extraction_outputs.append(extraction_output)
+            result["extraction_outputs"] = extraction_outputs
 
         return result
 

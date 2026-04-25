@@ -129,7 +129,7 @@ ollama serve
 
 Default OCR model: `glm-ocr-8k:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
 
-The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, which defaults to `PaddlePaddle/PP-DocLayoutV3_safetensors`. Transformers may fetch that checkpoint on the first run if your Hugging Face cache is empty; after that, layout recognition reuses the local cache and keeps the loaded detector in memory across pages for the current run. Review-first OCR uses the saved `reviewed_layout.json` directly, so the Run OCR step does not start the layout detector again. To pin storage explicitly, set `pipeline.layout.model_dir` to a local checkpoint directory.
+The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, which defaults to `PaddlePaddle/PP-DocLayoutV3_safetensors`. Transformers may fetch that checkpoint on the first run if your Hugging Face cache is empty; after that, layout recognition reuses the local cache and keeps the loaded detector in memory across pages for the current run. Review-first OCR uses the saved `layout/review.json` model directly, so the Run OCR step does not start the layout detector again. To pin storage explicitly, set `pipeline.layout.model_dir` to a local checkpoint directory.
 
 ### Launch the UI
 
@@ -200,19 +200,20 @@ data/runs/demo001/
     rules.json
     structured.json
     structured_meta.json
+    structured_raw.json
     canonical.json
 ```
 
 Key files:
 
-- `run.json` — v2 manifest with input metadata, immutable page identities, status, and diagnostics
+- `run.json` — v3 manifest with input metadata, immutable page identities, status, and diagnostics
 - `layout/review.json` — page-by-page layout state used by the review step
 - `ocr/markdown.md` — merged markdown output for the run
 - `ocr/pages.json` — project-owned OCR payload with page records and relative artifact references
 - `layout/provider/` and `ocr/provider/` — saved GLM-OCR provider payloads per page
-- `extraction/` — rules, structured, and canonical extraction outputs
+- `extraction/` — rules, structured, raw structured metadata, and canonical extraction outputs
 
-Committed run payloads use paths relative to the run folder. Runs without `run.json` are treated as unsupported v1 artifacts; re-run the source document to create a v2 run.
+Committed run payloads use paths relative to the run folder. Recent-run discovery only lists folders with a valid v3 `run.json`.
 
 ## Design Decisions & Trade-offs
 
@@ -237,23 +238,29 @@ Choices that shaped this codebase, and what they cost:
 
 ```text
 src/my_ocr/
+  cli.py
+  bootstrap.py
+  models.py
+  workflow.py
+  storage.py
+  normalize.py
+  run_layout.py
+  run_manifest.py
+  artifact_store.py
   domain/
     document.py
-    layout.py
-    page_identity.py
+  extraction/
+    rules.py
+    structured.py
+    evaluation.py
+  ocr/
+    glmocr.py
+    glmocr_parser.py
+    glmocr_retry.py
+    glmocr_artifacts.py
+    fallback.py
+    planning.py
     review_layout.py
-    text.py
-  application/
-    ports.py
-    services/
-    use_cases/
-  adapters/
-    inbound/cli.py
-    outbound/
-      config/
-      filesystem/
-      llm/
-      ocr/
   ui/
 
 data/

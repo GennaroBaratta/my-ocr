@@ -90,10 +90,25 @@ def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     return failures
 
 
-def test_old_architecture_packages_are_gone() -> None:
+def test_old_architecture_packages_and_root_modules_are_gone() -> None:
     assert not (SRC_ROOT / "adapters").exists()
     assert not (SRC_ROOT / "pipeline").exists()
+    assert not (SRC_ROOT / "application").exists()
     assert not (SRC_ROOT / "domain" / "layout.py").exists()
+    assert not (SRC_ROOT / "ocr" / "review_layout.py").exists()
+    for filename in (
+        "artifact_store.py",
+        "filesystem.py",
+        "layout_profile.py",
+        "models.py",
+        "normalize.py",
+        "page_identity.py",
+        "run_layout.py",
+        "run_manifest.py",
+        "storage.py",
+        "text.py",
+    ):
+        assert not (SRC_ROOT / filename).exists()
 
 
 def test_source_tests_and_tools_do_not_import_old_architecture_packages() -> None:
@@ -102,7 +117,11 @@ def test_source_tests_and_tools_do_not_import_old_architecture_packages() -> Non
     blocked_prefixes = (
         "my_ocr.adapters",
         "my_ocr.pipeline",
+        "my_ocr.application",
         "my_ocr.domain.layout",
+        "my_ocr.models",
+        "my_ocr.storage",
+        "my_ocr.normalize",
     )
     for root in roots:
         for path in root.rglob("*.py"):
@@ -130,7 +149,7 @@ def test_source_tests_and_tools_do_not_import_application_package() -> None:
 def test_ui_does_not_import_filesystem_run_store_directly() -> None:
     assert not _violations(
         "ui",
-        ("my_ocr.storage.FilesystemRunStore",),
+        ("my_ocr.runs.store.FilesystemRunStore",),
     )
 
 
@@ -154,17 +173,27 @@ def test_ui_does_not_open_run_transactions_directly() -> None:
 
 def test_review_layout_saves_are_coordinated_by_workflow() -> None:
     workflow_path = SRC_ROOT / "workflow.py"
-    storage_path = SRC_ROOT / "storage.py"
+    storage_path = SRC_ROOT / "runs" / "store.py"
+    review_controller_path = SRC_ROOT / "ui" / "review_controller.py"
     roots = (
         SRC_ROOT,
     )
     failures = [
         f"{path.relative_to(SRC_ROOT)}:{line}"
         for path, line in _attribute_call_sites(roots, "write_review_layout")
-        if path not in {workflow_path, storage_path}
+        if path not in {workflow_path, storage_path, review_controller_path}
     ]
 
     assert not failures
+
+
+def test_app_state_does_not_persist_review_layout_directly() -> None:
+    state_path = SRC_ROOT / "ui" / "state.py"
+    defined = _defined_function_names(state_path)
+    calls = _attribute_call_lines(state_path, "save_review_layout")
+
+    assert "save_review_layout" not in defined
+    assert not calls
 
 
 def test_source_tests_and_tools_do_not_define_removed_ocr_legacy_helpers() -> None:
@@ -189,8 +218,43 @@ def test_source_tests_and_tools_do_not_define_removed_ocr_legacy_helpers() -> No
     assert not failures
 
 
+def test_structured_extraction_has_single_persistence_path() -> None:
+    structured_path = SRC_ROOT / "extraction" / "structured.py"
+    storage_path = SRC_ROOT / "runs" / "store.py"
+
+    assert "save_structured_result" not in _defined_function_names(structured_path)
+    assert "write_structured_extraction" in _defined_function_names(storage_path)
+
+
+def test_no_unsupported_old_run_path_remains() -> None:
+    roots = (REPO_ROOT / "src",)
+    failures: list[str] = []
+    blocked = {
+        "UnsupportedRunSchema",
+        "unsupported_run_message",
+        "UNSUPPORTED_V3_MESSAGE",
+    }
+    for root in roots:
+        for path in root.rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            for token in blocked:
+                if token in source:
+                    failures.append(f"{path.relative_to(REPO_ROOT)} contains {token}")
+
+    assert not failures
+
+
+def test_runtime_options_do_not_keep_old_aliases() -> None:
+    options_path = SRC_ROOT / "domain" / "options.py"
+    source = options_path.read_text(encoding="utf-8")
+
+    assert "class OcrRuntimeOptions" in source
+    assert "LayoutOptions =" not in source
+    assert "OcrOptions =" not in source
+
+
 def test_normalization_exposes_only_page_ref_api() -> None:
-    normalize_path = SRC_ROOT / "normalize.py"
+    normalize_path = SRC_ROOT / "ingest" / "normalize.py"
 
     removed_functions = {
         "normalize_into_run",
@@ -210,4 +274,3 @@ def test_source_tests_and_tools_do_not_call_removed_run_transaction_methods() ->
     ]
 
     assert not failures
-

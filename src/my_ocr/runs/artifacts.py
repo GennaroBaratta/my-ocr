@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from my_ocr.models import ArtifactCopy, ProviderArtifacts
+from my_ocr.domain import ArtifactCopy, ProviderArtifacts
 
 
 def copy_provider_artifacts(artifacts: ProviderArtifacts, run_dir: Path) -> None:

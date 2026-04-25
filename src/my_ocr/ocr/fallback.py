@@ -15,7 +15,7 @@ from my_ocr.ocr.planning import (
     build_ocr_chunks,
     clean_recognized_text,
 )
-from my_ocr.filesystem import ensure_dir, write_text
+from my_ocr.support.filesystem import ensure_dir, write_text
 
 
 def run_crop_fallback_for_page(

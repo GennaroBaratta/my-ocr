@@ -4,13 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-from my_ocr.models import RunId
+from my_ocr.domain import RunId
 from my_ocr.extraction.evaluation import (
     evaluate_directories,
     evaluate_workflow,
     write_markdown_report,
 )
-from my_ocr.models import LayoutOptions, OcrOptions, StructuredExtractionOptions
+from my_ocr.domain import OcrRuntimeOptions, StructuredExtractionOptions
 from my_ocr.bootstrap import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,
@@ -151,16 +151,16 @@ def _optional_run_id(run: str | None) -> RunId | None:
     return RunId(run) if run else None
 
 
-def _layout_options(args: argparse.Namespace) -> LayoutOptions:
-    return LayoutOptions(
+def _layout_options(args: argparse.Namespace) -> OcrRuntimeOptions:
+    return OcrRuntimeOptions(
         config_path=args.config,
         layout_device=args.layout_device,
         layout_profile=args.layout_profile,
     )
 
 
-def _ocr_options(args: argparse.Namespace) -> OcrOptions:
-    return OcrOptions(
+def _ocr_options(args: argparse.Namespace) -> OcrRuntimeOptions:
+    return OcrRuntimeOptions(
         config_path=args.config,
         layout_device=args.layout_device,
         layout_profile=args.layout_profile,

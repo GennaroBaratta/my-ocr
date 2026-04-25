@@ -5,7 +5,7 @@ import shutil
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from my_ocr.filesystem import write_json
+from my_ocr.support.filesystem import write_json
 
 
 def save_result_to_raw_dir(

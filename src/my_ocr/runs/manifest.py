@@ -2,22 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from my_ocr.filesystem import read_json, write_json
-from my_ocr.models import (
+from my_ocr.support.filesystem import read_json, write_json
+from my_ocr.domain import (
     RunManifest,
     RunNotFound,
-    SCHEMA_VERSION,
-    UnsupportedRunSchema,
 )
-from my_ocr.run_layout import RunLayoutPaths
-
-
-UNSUPPORTED_V3_MESSAGE = (
-    "Unsupported run schema: this run was created before v3. "
-    "Re-run the document to create a v3 run."
-)
+from my_ocr.runs.layout import RunLayoutPaths
 
 
 def write_manifest(run_dir: Path, manifest: RunManifest) -> None:
@@ -29,14 +19,9 @@ def load_manifest(run_dir: Path) -> RunManifest:
         raise RunNotFound(f"Run not found: {run_dir.name}")
     manifest_path = RunLayoutPaths(run_dir).manifest
     if not manifest_path.exists():
-        raise UnsupportedRunSchema(UNSUPPORTED_V3_MESSAGE)
+        raise RunNotFound(f"Run manifest not found: {run_dir.name}")
     payload = read_json(manifest_path)
-    if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA_VERSION:
-        raise UnsupportedRunSchema(UNSUPPORTED_V3_MESSAGE)
-    try:
-        manifest = RunManifest.model_validate(payload)
-    except ValidationError as exc:
-        raise UnsupportedRunSchema(f"Unsupported run schema: {exc}") from exc
+    manifest = RunManifest.model_validate(payload)
     return manifest.model_copy(
         update={
             "pages": [

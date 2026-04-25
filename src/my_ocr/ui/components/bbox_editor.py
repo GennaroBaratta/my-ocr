@@ -171,7 +171,9 @@ def _build_editor_stack(
         state.session.is_adding_box = False
         
         if w > 5 and h > 5:
-            new_id = state.add_box_to_current_page(label="text", x=x, y=y, width=w, height=h)
+            new_id = state.review_controller.add_box_to_current_page(
+                label="text", x=x, y=y, width=w, height=h
+            )
             if new_id:
                 state.select_box(new_id)
                 on_box_selected(new_id)

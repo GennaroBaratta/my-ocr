@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from my_ocr.models import UnsupportedRunSchema
-from my_ocr.models import RunId
 from my_ocr.bootstrap import (
     BackendServices,
     DEFAULT_OLLAMA_ENDPOINT,
@@ -12,8 +10,7 @@ from my_ocr.bootstrap import (
     build_backend_services,
 )
 
-from .image_utils import get_image_size
-from .mappers import page_data_to_review_layout, pages_from_snapshot, recent_run_summary
+from .mappers import pages_from_snapshot, recent_run_summary
 from .session import BoundingBox, PageData, UiSessionState
 
 
@@ -26,8 +23,10 @@ class AppState:
         self.services = services or build_backend_services(self._run_root)
         self.layout_profile: str = "auto"
         from .controller import WorkflowController
+        from .review_controller import ReviewController
 
         self.controller = WorkflowController(self)
+        self.review_controller = ReviewController(self)
 
     @property
     def run_root(self) -> str:
@@ -38,6 +37,7 @@ class AppState:
         self._run_root = value
         self.services = build_backend_services(value)
         self.controller = type(self.controller)(self)
+        self.review_controller = type(self.review_controller)(self)
 
     def load_recent_runs(self) -> None:
         self.session.recent_runs = [
@@ -45,18 +45,7 @@ class AppState:
         ]
 
     def load_run(self, run_id: str) -> None:
-        try:
-            snapshot = self.services.read_model.load_run(run_id)
-        except UnsupportedRunSchema as exc:
-            self.session.run_id = run_id
-            self.session.unsupported_run_message = str(exc)
-            self.session.pages = []
-            self.session.current_input_path = ""
-            self.session.ocr_markdown = ""
-            self.session.ocr_json = {}
-            self.session.extraction_json = {}
-            return
-        self.session.unsupported_run_message = None
+        snapshot = self.services.read_model.load_run(run_id)
         self.session.run_id = str(snapshot.run_id)
         self.session.current_input_path = snapshot.manifest.input.path
         self.session.pages = pages_from_snapshot(snapshot)
@@ -88,69 +77,6 @@ class AppState:
                 if box.id == self.session.selected_box_id:
                     return box
         return None
-
-    def add_box_to_current_page(
-        self,
-        label: str = "text",
-        x: float | None = None,
-        y: float | None = None,
-        width: float | None = None,
-        height: float | None = None,
-    ) -> str | None:
-        page = self.current_page
-        if not page:
-            return None
-        image_width, image_height = get_image_size(page.image_path)
-        default_w, default_h = 240, 80
-        if image_width:
-            default_w = min(default_w, image_width)
-        if image_height:
-            default_h = min(default_h, image_height)
-
-        final_x = x if x is not None else (max(0, (image_width - default_w) // 2) if image_width else 0)
-        final_y = y if y is not None else (max(0, (image_height - default_h) // 2) if image_height else 0)
-        final_w = width if width is not None else default_w
-        final_h = height if height is not None else default_h
-
-        box_id = self._next_box_id(page.index)
-        page.boxes.append(
-            BoundingBox(
-                id=box_id,
-                page_index=page.index,
-                x=final_x,
-                y=final_y,
-                width=final_w,
-                height=final_h,
-                label=label,
-                confidence=1.0,
-            )
-        )
-        self.save_reviewed_layout()
-        return box_id
-
-    def _next_box_id(self, page_index: int) -> str:
-        existing = {box.id for page in self.session.pages for box in page.boxes}
-        index = len(self.session.pages[page_index].boxes)
-        while True:
-            candidate = f"p{page_index}-u{index}"
-            if candidate not in existing:
-                return candidate
-            index += 1
-
-    def remove_box(self, box_id: str) -> None:
-        for page in self.session.pages:
-            page.boxes = [box for box in page.boxes if box.id != box_id]
-        if self.session.selected_box_id == box_id:
-            self.session.selected_box_id = None
-        self.save_reviewed_layout()
-
-    def save_reviewed_layout(self) -> None:
-        if not self.session.run_id:
-            return
-        self.services.workflow.save_review_layout(
-            RunId(self.session.run_id),
-            page_data_to_review_layout(self.session.pages),
-        )
 
     @property
     def current_page(self) -> PageData | None:

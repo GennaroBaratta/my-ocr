@@ -13,12 +13,11 @@ from my_ocr.settings import (
     DEFAULT_OLLAMA_NUM_CTX,
     resolve_ocr_api_client,
 )
-from my_ocr.models import PageRef
-from my_ocr.models import StructuredExtractionOptions
+from my_ocr.domain import PageRef
+from my_ocr.domain import StructuredExtractionOptions
 from my_ocr.ocr.ollama_client import encode_image_file, post_json
 from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
-from my_ocr.text import replace_html_tables
-from my_ocr.filesystem import write_json
+from my_ocr.support.text import replace_html_tables
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL
 RAW_BODY_METADATA_KEY = "_raw_body"
@@ -109,18 +108,6 @@ def extract_structured(
         RAW_BODY_METADATA_KEY: body,
     }
     return parsed, metadata
-
-
-def save_structured_result(
-    run_dir: str | Path, prediction: dict[str, Any], metadata: dict[str, Any]
-) -> None:
-    run_dir = Path(run_dir)
-    metadata_payload = dict(metadata)
-    raw_body = metadata_payload.pop(RAW_BODY_METADATA_KEY, None)
-    write_json(run_dir / "extraction" / "structured.json", prediction)
-    write_json(run_dir / "extraction" / "structured_meta.json", metadata_payload)
-    if raw_body is not None:
-        write_json(run_dir / "extraction" / "structured_raw.json", raw_body)
 
 
 class OllamaStructuredExtractor:

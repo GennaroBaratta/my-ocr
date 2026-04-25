@@ -4,8 +4,8 @@ import asyncio
 from dataclasses import dataclass
 import functools
 
-from my_ocr.models import RunId
-from my_ocr.models import LayoutOptions, OcrOptions
+from my_ocr.domain import RunId
+from my_ocr.domain import OcrRuntimeOptions
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,9 +96,9 @@ class WorkflowController:
         return UiActionResult(run_id=str(result.snapshot.run_id), route=f"/results/{run_id}")
 
 
-def _layout_options(state: object) -> LayoutOptions:
-    return LayoutOptions(layout_profile=state.layout_profile)
+def _layout_options(state: object) -> OcrRuntimeOptions:
+    return OcrRuntimeOptions(layout_profile=state.layout_profile)
 
 
-def _ocr_options(state: object) -> OcrOptions:
-    return OcrOptions(layout_profile=state.layout_profile)
+def _ocr_options(state: object) -> OcrRuntimeOptions:
+    return OcrRuntimeOptions(layout_profile=state.layout_profile)

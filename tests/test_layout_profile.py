@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from my_ocr.cli import build_parser
-from my_ocr.layout_profile import resolve_layout_profile
+from my_ocr.ocr.layout_profile import resolve_layout_profile
 from my_ocr.ui.state import AppState
 
 

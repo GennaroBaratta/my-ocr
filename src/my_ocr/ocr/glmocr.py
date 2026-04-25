@@ -6,9 +6,9 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from my_ocr import layout_profile as _layout_profile_mod
 from my_ocr.settings import resolve_ocr_api_client
-from my_ocr.normalize import IMAGE_SUFFIXES
+from my_ocr.ingest.normalize import IMAGE_SUFFIXES
+from my_ocr.ocr import layout_profile as _layout_profile_mod
 from my_ocr.ocr.run_paths import RunPaths
 from my_ocr.ocr.glmocr_artifacts import (
     publish_saved_model_json_path as _publish_saved_model_json_path_impl,
@@ -30,7 +30,7 @@ from my_ocr.ocr.fallback import (
     recognize_full_page,
     run_crop_fallback_for_page,
 )
-from my_ocr.models import (
+from my_ocr.domain import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
@@ -40,14 +40,11 @@ from my_ocr.ocr.planning import (
     detect_bbox_coord_space,
     extract_layout_blocks,
     has_meaningful_text,
+    normalize_bbox,
     plan_page_ocr,
 )
-from my_ocr.ocr.review_layout import (
-    build_review_page_from_layout,
-    review_page_to_layout_payload,
-)
-from my_ocr.filesystem import load_json
-from my_ocr.models import (
+from my_ocr.support.filesystem import load_json
+from my_ocr.domain import (
     LayoutBlock,
     LayoutDiagnostics,
     OcrPageResult,
@@ -56,7 +53,7 @@ from my_ocr.models import (
     ReviewLayout,
     ReviewPage,
 )
-from my_ocr.models import LayoutOptions, OcrOptions
+from my_ocr.domain import OcrRuntimeOptions
 
 
 def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
@@ -68,7 +65,7 @@ def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
 
 class GlmOcrLayoutDetector:
     def detect_layout(
-        self, pages: list[PageRef], run_dir: Path, options: LayoutOptions
+        self, pages: list[PageRef], run_dir: Path, options: OcrRuntimeOptions
     ) -> LayoutDetectionResult:
         return prepare_review_artifacts(
             pages,
@@ -83,7 +80,7 @@ class GlmOcrEngine:
         pages: list[PageRef],
         run_dir: Path,
         review: ReviewLayout | None,
-        options: OcrOptions,
+        options: OcrRuntimeOptions,
     ) -> OcrRecognitionResult:
         return run_ocr(
             pages,
@@ -98,7 +95,7 @@ def run_ocr(
     run_dir: str | Path,
     *,
     review: ReviewLayout | None = None,
-    options: OcrOptions = OcrOptions(),
+    options: OcrRuntimeOptions = OcrRuntimeOptions(),
 ) -> OcrRecognitionResult:
     page_inputs = _normalize_page_refs(pages)
 
@@ -111,7 +108,7 @@ def run_ocr(
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
     model, endpoint, num_ctx = resolve_ocr_api_client(options.config_path)
-    reviewed_layout_pages = {
+    review_pages = {
         page.page_number: page for page in review.pages
     } if review is not None else {}
 
@@ -122,16 +119,16 @@ def run_ocr(
         for page_ref in page_inputs:
             page_number = page_ref.page_number
             page_path = str(page_ref.path_for_io)
-            reviewed_layout_page = reviewed_layout_pages.get(page_number)
-            if reviewed_layout_page is not None:
-                page_result, fallback_result = _run_page_ocr_from_reviewed_layout(
+            review_page = review_pages.get(page_number)
+            if review_page is not None:
+                page_result, fallback_result = _run_page_ocr_from_review_layout(
                     page_path,
                     page_number,
                     paths,
                     model=model,
                     endpoint=endpoint,
                     num_ctx=num_ctx,
-                    reviewed_layout_page=reviewed_layout_page,
+                    review_page=review_page,
                 )
             else:
                 if parser_cls is None:
@@ -155,7 +152,7 @@ def run_ocr(
                     model=model,
                     endpoint=endpoint,
                     num_ctx=num_ctx,
-                    reviewed_layout_page=None,
+                    review_page=None,
                 )
                 if parser_retired:
                     parser = None
@@ -188,7 +185,7 @@ def prepare_review_artifacts(
     pages: Sequence[PageRef],
     run_dir: str | Path,
     *,
-    options: LayoutOptions = LayoutOptions(),
+    options: OcrRuntimeOptions = OcrRuntimeOptions(),
 ) -> LayoutDetectionResult:
     page_inputs = _normalize_page_refs(pages)
 
@@ -246,7 +243,6 @@ def prepare_review_artifacts(
             review_pages.append(
                 _review_page_from_provider_layout(
                     page_ref=page_ref,
-                    source_sdk_json_path=str(sdk_json_path),
                     layout=sdk_json,
                     coord_space=coord_space,
                     image_width=image_width,
@@ -302,7 +298,7 @@ def _run_page_ocr(
     model: str,
     endpoint: str,
     num_ctx: int,
-    reviewed_layout_page: ReviewPage | None,
+    review_page: ReviewPage | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, bool]:
     outcome = _parse_page_with_cpu_fallback(
         parser,
@@ -326,14 +322,14 @@ def _run_page_ocr(
     sdk_json = load_json(sdk_json_path)
     blocks = extract_layout_blocks(sdk_json)
     coord_space = _detect_coord_space(blocks, page_path)
-    reviewed_layout = _resolve_reviewed_layout_page(reviewed_layout_page)
-    if reviewed_layout is None:
+    review_layout = _resolve_review_layout_page(review_page)
+    if review_layout is None:
         page_layout = sdk_json
         page_coord_space = coord_space
         layout_source = "sdk_json"
     else:
-        page_layout, page_coord_space = reviewed_layout
-        layout_source = "reviewed_layout"
+        page_layout, page_coord_space = review_layout
+        layout_source = "review_layout"
 
     page_result, fallback_result = _finalize_page_ocr(
         page_path=page_path,
@@ -351,7 +347,7 @@ def _run_page_ocr(
     return page_result, fallback_result, outcome.parser_retired
 
 
-def _run_page_ocr_from_reviewed_layout(
+def _run_page_ocr_from_review_layout(
     page_path: str,
     page_number: int,
     paths: RunPaths,
@@ -359,12 +355,12 @@ def _run_page_ocr_from_reviewed_layout(
     model: str,
     endpoint: str,
     num_ctx: int,
-    reviewed_layout_page: ReviewPage,
+    review_page: ReviewPage,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    reviewed_layout = _resolve_reviewed_layout_page(reviewed_layout_page)
-    if reviewed_layout is None:
-        raise RuntimeError(f"Reviewed layout is missing page {page_number}.")
-    page_layout, page_coord_space = reviewed_layout
+    review_layout = _resolve_review_layout_page(review_page)
+    if review_layout is None:
+        raise RuntimeError(f"Review layout is missing page {page_number}.")
+    page_layout, page_coord_space = review_layout
     sdk_json_path = _write_page_layout_to_raw_dir(
         page_layout,
         paths.raw_dir,
@@ -379,7 +375,7 @@ def _run_page_ocr_from_reviewed_layout(
         sdk_json_path=sdk_json_path,
         page_layout=page_layout,
         page_coord_space=page_coord_space,
-        layout_source="reviewed_layout",
+        layout_source="review_layout",
         model=model,
         endpoint=endpoint,
         num_ctx=num_ctx,
@@ -605,45 +601,92 @@ def _get_image_size(page_path: str | Path) -> tuple[int, int]:
         return image.size
 
 
-def _resolve_reviewed_layout_page(
-    reviewed_layout_page: ReviewPage | None,
+def _resolve_review_layout_page(
+    review_page: ReviewPage | None,
 ) -> tuple[dict[str, Any], str] | None:
-    if reviewed_layout_page is None:
+    if review_page is None:
         return None
-    return review_page_to_layout_payload(reviewed_layout_page.model_dump(mode="json"))
+    blocks = [
+        {
+            "index": block.index,
+            "label": block.label,
+            "content": block.content,
+            "bbox_2d": block.bbox,
+        }
+        for block in review_page.blocks
+    ]
+    return {"blocks": blocks}, review_page.coord_space
 
 
 def _review_page_from_provider_layout(
     *,
     page_ref: PageRef,
-    source_sdk_json_path: str,
     layout: Any,
     coord_space: str,
     image_width: int,
     image_height: int,
 ) -> ReviewPage:
-    payload = build_review_page_from_layout(
-        page_number=page_ref.page_number,
-        page_path=str(page_ref.path_for_io),
-        source_sdk_json_path=source_sdk_json_path,
-        layout=layout,
-        coord_space=coord_space,
-        image_width=image_width,
-        image_height=image_height,
-    )
     return ReviewPage(
         page_number=page_ref.page_number,
         image_path=page_ref.image_path,
         image_width=image_width,
         image_height=image_height,
-        coord_space=str(payload.get("coord_space", "pixel")),
+        coord_space="pixel",
         provider_path=f"layout/provider/page-{page_ref.page_number:04d}",
-        blocks=[
-            LayoutBlock.model_validate(block)
-            for block in payload.get("blocks", [])
-            if isinstance(block, dict)
-        ],
+        blocks=_review_blocks_from_provider_layout(
+            page_number=page_ref.page_number,
+            layout=layout,
+            coord_space=coord_space,
+            image_width=image_width,
+            image_height=image_height,
+        ),
     )
+
+
+def _review_blocks_from_provider_layout(
+    *,
+    page_number: int,
+    layout: Any,
+    coord_space: str,
+    image_width: int,
+    image_height: int,
+) -> list[LayoutBlock]:
+    blocks: list[LayoutBlock] = []
+    for fallback_index, block in enumerate(extract_layout_blocks(layout)):
+        bbox = normalize_bbox(
+            block.get("bbox_2d"),
+            image_width,
+            image_height,
+            coord_space=coord_space,
+        )
+        if bbox is None:
+            continue
+        block_index = _coerce_block_index(block.get("index"), fallback=fallback_index)
+        blocks.append(
+            LayoutBlock(
+                id=f"p{page_number - 1}-b{block_index}",
+                index=block_index,
+                label=str(block.get("label", "unknown")),
+                content=str(block.get("content", "")),
+                confidence=_coerce_confidence(block.get("confidence")),
+                bbox=bbox,
+            )
+        )
+    return blocks
+
+
+def _coerce_block_index(value: Any, *, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _coerce_confidence(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def _ocr_page_from_provider_payload(
@@ -712,4 +755,3 @@ def _relative_raw_payload(
         payload["fallback_path"] = fallback_path
     payload["provider_path"] = f"ocr/provider/page-{page_number:04d}"
     return payload
-

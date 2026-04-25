@@ -2,7 +2,16 @@ import pytest
 from pydantic import ValidationError
 
 from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
-from my_ocr.models import LayoutBlock, PageRef, RunId, RunManifest, SCHEMA_VERSION
+from my_ocr.domain import (
+    LayoutBlock,
+    OcrPageResult,
+    PageRef,
+    ReviewPage,
+    RunId,
+    RunManifest,
+    RunStatus,
+    SCHEMA_VERSION,
+)
 
 
 def test_document_fields_normalizes_mapping() -> None:
@@ -68,3 +77,54 @@ def test_run_manifest_uses_schema_v3() -> None:
 
     assert SCHEMA_VERSION == 3
     assert manifest.model_dump(mode="json")["schema_version"] == 3
+
+
+def test_run_manifest_rejects_wrong_schema_version() -> None:
+    payload = RunManifest.new(RunId("demo"), "input.pdf").model_dump(mode="json")
+    payload["schema_version"] = 2
+
+    with pytest.raises(ValidationError):
+        RunManifest.model_validate(payload)
+
+
+def test_persisted_paths_must_be_run_relative() -> None:
+    with pytest.raises(ValidationError):
+        PageRef(page_number=1, image_path="/tmp/page-0001.png", width=10, height=10)
+
+    with pytest.raises(ValidationError):
+        PageRef(page_number=1, image_path="../page-0001.png", width=10, height=10)
+
+    with pytest.raises(ValidationError):
+        PageRef(page_number=1, image_path="C:page-0001.png", width=10, height=10)
+
+    with pytest.raises(ValidationError):
+        PageRef(page_number=1, image_path=r"\pages\page-0001.png", width=10, height=10)
+
+    with pytest.raises(ValidationError):
+        ReviewPage(
+            page_number=1,
+            image_path="pages/page-0001.png",
+            image_width=10,
+            image_height=10,
+            provider_path="../provider",
+            blocks=[],
+        )
+
+    with pytest.raises(ValidationError):
+        OcrPageResult(
+            page_number=1,
+            image_path="pages/page-0001.png",
+            markdown="text",
+            fallback_path="/tmp/fallback",
+        )
+
+
+def test_run_status_rejects_unknown_values() -> None:
+    with pytest.raises(ValidationError):
+        RunStatus(layout="complete")
+
+    with pytest.raises(ValidationError):
+        RunStatus(ocr="done")
+
+    with pytest.raises(ValidationError):
+        RunStatus(extraction="finished")

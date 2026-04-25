@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
-from typing import Awaitable
 
 import flet as ft
 
-from my_ocr.filesystem import write_text
-
 from .. import theme
-from ..actions import run_workflow_action
 from ..components.code_display import build_code_display
 from ..components.doc_viewer import build_doc_viewer, refresh_doc_viewer_available_width
 from ..components.split_pane import SplitPane
 from ..components.stepper import build_stepper
 from ..ocr_result_text import current_page_ocr_markdown_for_state, ocr_json_text_for_state
 from ..state import AppState
+from .results_actions import page_label_text, save_json, save_markdown, start_page_rerun
 
 
 def build_results_view(
@@ -33,7 +29,7 @@ def build_results_view(
     document_viewer_width = 500.0
 
     page_label = ft.Text(
-        _page_label_text(state),
+        page_label_text(state),
         size=13,
         color=theme.TEXT_PRIMARY,
         width=80,
@@ -82,7 +78,7 @@ def build_results_view(
         )
 
     def rebuild() -> None:
-        page_label.value = _page_label_text(state)
+        page_label.value = page_label_text(state)
         sync_toolbar_state()
         content_host.controls = [build_content_split_pane()]
         page.update()
@@ -114,7 +110,7 @@ def build_results_view(
             allowed_extensions=["json"],
         )
         if save_path:
-            _save_json(save_path, ocr_json_text)
+            save_json(save_path, ocr_json_text)
 
     async def download_markdown() -> None:
         ocr_markdown_text = current_ocr_markdown_text()
@@ -126,7 +122,7 @@ def build_results_view(
             allowed_extensions=["md"],
         )
         if save_path:
-            _save_markdown(save_path, ocr_markdown_text)
+            save_markdown(save_path, ocr_markdown_text)
 
     async def download_page_markdown() -> None:
         page_markdown_text = current_page_export_markdown_text()
@@ -139,7 +135,7 @@ def build_results_view(
             allowed_extensions=["md"],
         )
         if save_path:
-            _save_markdown(save_path, page_markdown_text)
+            save_markdown(save_path, page_markdown_text)
 
     def reload_state(page_index: int) -> None:
         if not state.session.run_id:
@@ -161,7 +157,7 @@ def build_results_view(
             reload_state(page_index)
             page.go(f"/review/{run_id}")
 
-        _start_page_rerun(
+        start_page_rerun(
             page,
             action=lambda: state.controller.rerun_page_layout(run_id, page_number),
             set_rerun_in_progress=set_rerun_in_progress,
@@ -180,7 +176,7 @@ def build_results_view(
             reload_state(page_index)
             rebuild()
 
-        _start_page_rerun(
+        start_page_rerun(
             page,
             action=lambda: state.controller.rerun_page_ocr(run_id, page_number),
             set_rerun_in_progress=set_rerun_in_progress,
@@ -340,27 +336,7 @@ def build_results_view(
         border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
     )
 
-    if state.session.unsupported_run_message:
-        content_host.controls = [
-            ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Icon(ft.Icons.ERROR_OUTLINE, size=42, color=theme.ERROR),
-                        ft.Text(
-                            state.session.unsupported_run_message,
-                            color=theme.TEXT_PRIMARY,
-                            size=14,
-                            text_align=ft.TextAlign.CENTER,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                expand=True,
-            )
-        ]
-    else:
-        content_host.controls = [build_content_split_pane()]
+    content_host.controls = [build_content_split_pane()]
 
     return ft.View(
         route=f"/results/{state.session.run_id}",
@@ -377,38 +353,3 @@ def build_results_view(
         bgcolor=theme.BG_PAGE,
         padding=0,
     )
-
-
-def _save_markdown(path: str, content: str) -> None:
-    write_text(path, content)
-
-
-def _save_json(path: str, content: str) -> None:
-    write_text(path, content)
-
-
-def _start_page_rerun(
-    page: ft.Page,
-    *,
-    action: Callable[[], Awaitable[object]],
-    set_rerun_in_progress: Callable[[bool], None],
-    on_success: Callable[[], None],
-    error_prefix: str,
-) -> None:
-    set_rerun_in_progress(True)
-    run_workflow_action(
-        page,
-        action=action,
-        error_prefix=error_prefix,
-        on_success=lambda _result: on_success(),
-        on_complete=lambda: set_rerun_in_progress(False),
-    )
-
-
-def _page_label_text(state: AppState) -> str:
-    page_count = len(state.session.pages)
-    if page_count == 0:
-        return "Page 0 / 0"
-    page_number = state.current_page_number
-    return f"Page {page_number} / {page_count}"
-

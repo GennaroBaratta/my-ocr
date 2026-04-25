@@ -6,14 +6,14 @@ from typing import Any
 
 import pytest
 
-from my_ocr.storage import FilesystemRunStore
-from my_ocr.models import (
+from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.domain import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
 )
-from my_ocr.models import (
+from my_ocr.domain import (
     LayoutDiagnostics,
     LayoutBlock,
     OcrPageResult,
@@ -24,8 +24,7 @@ from my_ocr.models import (
     RunId,
 )
 from my_ocr.workflow import DocumentWorkflow
-from my_ocr.models import UnsupportedRunSchema
-from my_ocr.models import StructuredExtractionOptions
+from my_ocr.domain import StructuredExtractionOptions
 
 
 def test_prepare_layout_review_writes_v3_manifest_and_relative_payloads(tmp_path: Path) -> None:
@@ -100,7 +99,7 @@ def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path
     workflow.run_reviewed_ocr(RunId(run_id))
 
     workflow.extract_rules(RunId(run_id))
-    workflow.extract_structured(
+    result = workflow.extract_structured(
         RunId(run_id),
         options=StructuredExtractionOptions(model="demo-model"),
     )
@@ -115,6 +114,50 @@ def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path
     assert json.loads((run_dir / "extraction" / "canonical.json").read_text()) == {
         "document_type": "structured"
     }
+    assert json.loads((run_dir / "extraction" / "structured_meta.json").read_text()) == {
+        "model": "demo-model",
+        "canonical_source": "structured",
+        "validation": {"ok": True, "reasons": []},
+    }
+    assert json.loads((run_dir / "extraction" / "structured_raw.json").read_text()) == {
+        "response": '{"document_type":"structured"}'
+    }
+    assert "_raw_body" not in json.dumps(result.snapshot.extraction)
+
+
+def test_implicit_run_ids_do_not_collide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = FilesystemRunStore(tmp_path / "runs")
+    monkeypatch.setattr("my_ocr.runs.store._timestamp_id", lambda: "20260425T120000Z")
+    suffixes = iter(("abc123", "def456"))
+    monkeypatch.setattr("my_ocr.runs.store.secrets.token_hex", lambda _size: next(suffixes))
+    input_path = _image(tmp_path / "invoice.png")
+
+    first = store.start_run(str(input_path))
+    second = store.start_run(str(input_path))
+
+    try:
+        assert first.run_id != second.run_id
+        assert str(first.run_id) == "invoice-20260425T120000Z-abc123"
+        assert str(second.run_id) == "invoice-20260425T120000Z-def456"
+        assert not first.target_dir.exists()
+        assert not second.target_dir.exists()
+    finally:
+        store.discard_workspace(first)
+        store.discard_workspace(second)
+
+
+def test_explicit_run_id_still_replaces_existing_run(tmp_path: Path) -> None:
+    input_path = _image(tmp_path / "input.png")
+    store = FilesystemRunStore(tmp_path / "runs")
+    workflow = _workflow(store)
+
+    workflow.prepare_review(str(input_path), run_id=RunId("demo"))
+    marker = tmp_path / "runs" / "demo" / "marker.txt"
+    marker.write_text("old", encoding="utf-8")
+    workflow.prepare_review(str(input_path), run_id=RunId("demo"))
+
+    assert not marker.exists()
+    assert (tmp_path / "runs" / "demo" / "run.json").exists()
 
 
 def test_run_automatic_prepares_ocr_and_extracts_rules(tmp_path: Path) -> None:
@@ -130,15 +173,6 @@ def test_run_automatic_prepares_ocr_and_extracts_rules(tmp_path: Path) -> None:
     assert json.loads((run_dir / "extraction" / "rules.json").read_text()) == {
         "document_type": "rules"
     }
-
-
-def test_v1_run_folders_are_explicitly_unsupported(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs" / "old"
-    run_dir.mkdir(parents=True)
-    (run_dir / "meta.json").write_text("{}", encoding="utf-8")
-
-    with pytest.raises(UnsupportedRunSchema, match="created before v3"):
-        FilesystemRunStore(tmp_path / "runs").open_run("old")
 
 
 def test_discard_workspace_removes_work_dir_without_publishing(tmp_path: Path) -> None:
@@ -254,7 +288,7 @@ class FakeOcrEngine:
 
 
 class FakeRulesExtractor:
-    def extract(self, _markdown: str) -> dict[str, Any]:
+    def __call__(self, _markdown: str) -> dict[str, Any]:
         return {"document_type": "rules"}
 
 
@@ -267,7 +301,13 @@ class FakeStructuredExtractor:
         options: StructuredExtractionOptions,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         assert markdown_text
-        return {"document_type": "structured"}, {"model": options.model}
+        return (
+            {"document_type": "structured"},
+            {
+                "model": options.model,
+                "_raw_body": {"response": '{"document_type":"structured"}'},
+            },
+        )
 
 
 def _prepared_run(tmp_path: Path, *, page_count: int = 1) -> tuple[FilesystemRunStore, str]:

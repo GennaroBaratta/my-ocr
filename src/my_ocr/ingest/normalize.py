@@ -5,8 +5,8 @@ import re
 import shutil
 from pathlib import Path
 
-from my_ocr.filesystem import ensure_dir as _ensure_dir
-from my_ocr.models import MissingInputDocument, PageRef
+from my_ocr.support.filesystem import ensure_dir as _ensure_dir
+from my_ocr.domain import MissingInputDocument, PageRef
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 PDF_RENDER_DPI = 200
@@ -47,14 +47,14 @@ def _normalize_pages(input_path: str | Path, pages_dir: str | Path) -> list[_Nor
 
     suffix = source.suffix.lower()
     if suffix == ".pdf":
-        return _render_pdf_to_images(source, output_dir)
+        return _render_pdf_pages(source, output_dir)
     if suffix in IMAGE_SUFFIXES:
         return [_copy_page(source, output_dir, 1)]
 
     raise ValueError(f"Unsupported input type: {source.suffix}")
 
 
-def _render_pdf_to_images(pdf_path: str | Path, output_dir: str | Path) -> list[_NormalizedPage]:
+def _render_pdf_pages(pdf_path: str | Path, output_dir: str | Path) -> list[_NormalizedPage]:
     pdf_path = Path(pdf_path)
     output_dir = _ensure_dir(output_dir)
 

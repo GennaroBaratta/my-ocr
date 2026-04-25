@@ -4,9 +4,9 @@ from pathlib import Path
 
 import flet as ft
 
-from my_ocr.storage import FilesystemRunStore
-from my_ocr.models import ProviderArtifacts
-from my_ocr.models import OcrPageResult, OcrRunResult, PageRef, ReviewLayout, RunId
+from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.domain import ProviderArtifacts
+from my_ocr.domain import OcrPageResult, OcrRunResult, PageRef, ReviewLayout, RunId
 from my_ocr.ui.components.code_display import build_code_display
 from my_ocr.ui.ocr_result_text import ocr_json_text_for_state
 from my_ocr.ui.state import AppState
@@ -23,19 +23,6 @@ def test_code_display_uses_loaded_v3_ocr_payload(tmp_path: Path) -> None:
 
     assert '"pages"' in text
     assert isinstance(display, ft.Column)
-
-
-def test_unsupported_run_message_is_loaded_for_v1_folder(tmp_path: Path) -> None:
-    run_dir = tmp_path / "runs" / "old"
-    run_dir.mkdir(parents=True)
-    (run_dir / "meta.json").write_text("{}", encoding="utf-8")
-    state = AppState()
-    state.run_root = str(tmp_path / "runs")
-
-    state.load_run("old")
-
-    assert state.session.unsupported_run_message
-    assert "created before v3" in state.session.unsupported_run_message
 
 
 def _seed_ocr_run(run_root: Path, run_id: str) -> None:

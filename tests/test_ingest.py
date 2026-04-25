@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from my_ocr.normalize import normalize_document
+from my_ocr.ingest.normalize import normalize_document
 
 
 def test_normalize_document_copies_directory_images_in_natural_order(tmp_path) -> None:

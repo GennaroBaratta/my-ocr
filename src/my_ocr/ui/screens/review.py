@@ -8,14 +8,14 @@ from typing import Callable, cast
 import flet as ft
 
 from .. import theme
-from ..actions import go_to_result_route, run_workflow_action, show_error, show_layout_warning
 from ..components.bbox_editor import build_bbox_editor, refresh_bbox_editor
 from ..components.inspector import build_inspector
-from ..components.loading_overlay import LoadingOverlay, build_loading_overlay
+from ..components.loading_overlay import build_loading_overlay
 from ..components.page_strip import build_page_strip
 from ..components.stepper import build_stepper
 from ..image_utils import get_image_size
 from ..state import AppState
+from .review_actions import start_redetect_layout, start_reviewed_ocr
 from ..zoom import (
     ZOOM_MODE_FIT_WIDTH,
     effective_zoom_level,
@@ -169,8 +169,8 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         rebuild()
 
     def run_ocr() -> None:
-        state.save_reviewed_layout()
-        _start_reviewed_ocr(page, state, loading_overlay)
+        state.review_controller.save_review_layout()
+        start_reviewed_ocr(page, state, loading_overlay)
 
     def on_add_box() -> None:
         state.session.is_adding_box = not state.session.is_adding_box
@@ -181,7 +181,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         rebuild()
 
     def on_redetect_layout() -> None:
-        _start_redetect_layout(page, state, loading_overlay, rebuild)
+        start_redetect_layout(page, state, loading_overlay, rebuild)
 
     def on_page_select(idx: int) -> None:
         state.session.current_page_index = idx
@@ -194,7 +194,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         refresh_selection()
 
     def on_box_changed() -> None:
-        state.save_reviewed_layout()
+        state.review_controller.save_review_layout()
         refresh_selection()
 
     def on_box_live_change() -> None:
@@ -213,7 +213,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         refresh_selection()
 
     def on_remove(box_id: str) -> None:
-        state.remove_box(box_id)
+        state.review_controller.remove_box(box_id)
         refresh_selection()
 
     pagination_controls: list[ft.Control] = [
@@ -450,96 +450,4 @@ def _sync_add_box_button(
     except RuntimeError:
         pass
 
-
-def _start_reviewed_ocr(
-    page: ft.Page,
-    state: AppState,
-    loading_overlay: LoadingOverlay,
-) -> None:
-    if not state.session.run_id:
-        return
-
-    run_id = state.session.run_id
-    run_workflow_action(
-        page,
-        action=lambda: state.controller.run_reviewed_ocr(run_id),
-        loading=loading_overlay,
-        loading_message="Running OCR...",
-        error_prefix="OCR failed",
-        on_success=lambda result: (
-            show_layout_warning(page, state),
-            go_to_result_route(page, result),
-        ),
-    )
-
-
-def _start_redetect_layout(
-    page: ft.Page,
-    state: AppState,
-    loading_overlay: LoadingOverlay,
-    rebuild: Callable[[], None],
-) -> None:
-    if not state.session.run_id:
-        return
-
-    input_path = state.session.current_input_path
-    if not input_path:
-        show_error(page, "Cannot re-detect: original input path is missing.")
-        return
-
-    has_prior_review = bool(state.session.pages)
-
-    def start_redetect() -> None:
-        run_id = state.session.run_id
-
-        async def redetect() -> None:
-            if run_id is None:
-                return
-            await state.controller.redetect_review(input_path, run_id)
-
-        def on_success(_result: None) -> None:
-            loading_overlay.set_active(False, "Running OCR...")
-            if run_id:
-                state.load_run(run_id)
-            show_layout_warning(page, state)
-            rebuild()
-
-        def on_error(exc: Exception) -> None:
-            loading_overlay.set_active(False, "Running OCR...")
-            show_error(page, f"Re-detect failed: {exc}")
-
-        run_workflow_action(
-            page,
-            action=redetect,
-            loading=loading_overlay,
-            loading_message="Re-detecting layout…",
-            error_prefix="Re-detect failed",
-            on_success=on_success,
-            on_error=on_error,
-        )
-
-    if not has_prior_review:
-        start_redetect()
-        return
-
-    dialog = ft.AlertDialog(modal=True)
-
-    def close_dialog() -> None:
-        dialog.open = False
-        page.update()
-
-    def confirm() -> None:
-        close_dialog()
-        start_redetect()
-
-    dialog.title = ft.Text("Re-detect layout?")
-    dialog.content = ft.Text(
-        "Re-detecting will replace the current layout boxes on all pages. Continue?"
-    )
-    dialog.actions = [
-        ft.TextButton("Cancel", on_click=lambda _e=None: close_dialog()),
-        ft.FilledButton("Re-detect", on_click=lambda _e=None: confirm()),
-    ]
-    page.show_dialog(dialog)
-    page.update()
 

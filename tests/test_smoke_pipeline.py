@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from my_ocr import cli
-from my_ocr.models import RunId, RunInput, RunManifest, RunSnapshot
+from my_ocr.domain import RunId, RunInput, RunManifest, RunSnapshot
 
 
 def test_cli_run_uses_v3_workflow_service(tmp_path: Path, monkeypatch) -> None:

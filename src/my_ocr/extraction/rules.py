@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from my_ocr.domain.document import DocumentFields
-from my_ocr.text import collapse_whitespace
+from my_ocr.support.text import collapse_whitespace
 
 DATE_PATTERNS = [
     re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),

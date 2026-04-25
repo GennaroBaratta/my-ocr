@@ -5,7 +5,7 @@ resolver so that tests do not need a real Hugging Face connection or a
 downloaded model checkpoint.
 
 Tests in ``test_layout_profile.py`` bypass this by patching
-``my_ocr.layout_profile._load_model_labels`` directly inside each
+``my_ocr.ocr.layout_profile._load_model_labels`` directly inside each
 test case.
 """
 
@@ -54,6 +54,6 @@ def _stub_resolve_layout_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     Direct tests of layout_profile logic patch ``_load_model_labels`` inside
     the layout_profile module, which this fixture does not interfere with.
     """
-    import my_ocr.layout_profile as _lp_mod
+    import my_ocr.ocr.layout_profile as _lp_mod
 
     monkeypatch.setattr(_lp_mod, "resolve_layout_profile", _stub_resolve)

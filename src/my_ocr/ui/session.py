@@ -35,6 +35,7 @@ class PageData:
     index: int
     page_number: int
     image_path: str
+    relative_image_path: str | None = None
     boxes: list[BoundingBox] = field(default_factory=list)
 
 
@@ -43,7 +44,6 @@ class UiSessionState:
     recent_runs: list[RecentRunSummary] = field(default_factory=list)
     run_id: str | None = None
     current_input_path: str = ""
-    unsupported_run_message: str | None = None
     pages: list[PageData] = field(default_factory=list)
     current_page_index: int = 0
     selected_box_id: str | None = None

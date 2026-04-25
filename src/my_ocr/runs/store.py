@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+import secrets
 import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.artifact_store import copy_provider_artifacts
-from my_ocr.artifact_store import remove_path
-from my_ocr.filesystem import write_json as _write_json
-from my_ocr.models import (
+from my_ocr.runs.artifacts import copy_provider_artifacts
+from my_ocr.runs.artifacts import remove_path
+from my_ocr.support.filesystem import write_json as _write_json
+from my_ocr.domain import (
     LayoutDiagnostics,
     MissingPage,
     OcrPageResult,
@@ -27,9 +28,8 @@ from my_ocr.models import (
     RunNotFound,
     RunSnapshot,
     RunStatus,
-    UnsupportedRunSchema,
 )
-from my_ocr.run_layout import (
+from my_ocr.runs.layout import (
     RunLayoutPaths,
     load_extraction,
     load_ocr_result,
@@ -37,9 +37,10 @@ from my_ocr.run_layout import (
     write_ocr_result_payload,
     write_review_layout_payload,
 )
-from my_ocr.run_manifest import load_manifest, write_manifest
+from my_ocr.runs.manifest import load_manifest, write_manifest
 
 DEFAULT_RUN_ROOT = "data/runs"
+STRUCTURED_RAW_BODY_METADATA_KEY = "_raw_body"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +136,7 @@ class FilesystemRunStore:
 
     def start_run(self, input_path: str | Path, run_id: RunId | None = None) -> RunWorkspace:
         self.run_root.mkdir(parents=True, exist_ok=True)
-        resolved_run_id = run_id or RunId(f"{_slugify(Path(input_path).stem)}-{_timestamp_id()}")
+        resolved_run_id = run_id or self._new_run_id(input_path)
         target_dir = self._run_dir(resolved_run_id)
         work_dir = Path(
             tempfile.mkdtemp(prefix=f".{resolved_run_id}-work-", dir=str(self.run_root))
@@ -328,8 +329,12 @@ class FilesystemRunStore:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
         paths = RunLayoutPaths(run_dir)
+        metadata_payload = dict(metadata)
+        raw_body = metadata_payload.pop(STRUCTURED_RAW_BODY_METADATA_KEY, None)
         _write_json(paths.structured_extraction, prediction)
-        _write_json(paths.structured_extraction_meta, metadata)
+        _write_json(paths.structured_extraction_meta, metadata_payload)
+        if raw_body is not None:
+            _write_json(paths.structured_extraction_raw, raw_body)
         _write_json(paths.canonical_extraction, canonical_prediction)
         write_manifest(
             run_dir,
@@ -342,7 +347,7 @@ class FilesystemRunStore:
                 diagnostics=RunDiagnostics(
                     layout=snapshot.manifest.diagnostics.layout,
                     ocr=snapshot.manifest.diagnostics.ocr,
-                    extraction=dict(metadata),
+                    extraction=metadata_payload,
                 ),
             ),
         )
@@ -367,6 +372,14 @@ class FilesystemRunStore:
 
     def _run_dir(self, run_id: RunId | str) -> Path:
         return self.run_root / str(run_id)
+
+    def _new_run_id(self, input_path: str | Path) -> RunId:
+        stem = _slugify(Path(input_path).stem)
+        for _attempt in range(100):
+            candidate = RunId(f"{stem}-{_timestamp_id()}-{secrets.token_hex(3)}")
+            if not self._run_dir(candidate).exists():
+                return candidate
+        raise RunCommitFailed(f"Could not allocate a unique run id for {input_path}")
 
     def _existing_run_dir(self, run_id: RunId | str) -> Path:
         run_dir = self._run_dir(run_id)
@@ -446,7 +459,6 @@ class RecentRunRecord:
     input_path: str
     mtime: float
     status: str
-    unsupported: bool = False
 
 
 class FilesystemRunReadModel:
@@ -465,18 +477,11 @@ class FilesystemRunReadModel:
         ):
             if run_dir.name.startswith("."):
                 continue
+            if not RunLayoutPaths(run_dir).manifest.exists():
+                continue
             try:
                 snapshot = self.store.open_run(run_dir.name)
-            except UnsupportedRunSchema:
-                records.append(
-                    RecentRunRecord(
-                        run_id=run_dir.name,
-                        input_path="",
-                        mtime=run_dir.stat().st_mtime,
-                        status="unsupported",
-                        unsupported=True,
-                    )
-                )
+            except Exception:
                 continue
             records.append(
                 RecentRunRecord(

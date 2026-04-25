@@ -3,26 +3,30 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from my_ocr.storage import FilesystemRunStore
-from my_ocr.models import PageRef, ReviewLayout, RunId
-from my_ocr.models import ProviderArtifacts
+from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.domain import PageRef, ReviewLayout, RunId
+from my_ocr.domain import ProviderArtifacts
 from my_ocr.ui.state import AppState
 
 
-def test_app_state_loads_v3_run_and_saves_reviewed_layout(tmp_path: Path) -> None:
+def test_app_state_loads_v3_run_and_saves_review_layout(tmp_path: Path) -> None:
     _seed_run(tmp_path / "runs", "demo")
     state = AppState()
     state.run_root = str(tmp_path / "runs")
 
     state.load_run("demo")
-    box_id = state.add_box_to_current_page(label="table", x=1, y=2, width=3, height=4)
+    box_id = state.review_controller.add_box_to_current_page(
+        label="table", x=1, y=2, width=3, height=4
+    )
 
     persisted = json.loads(
         (tmp_path / "runs" / "demo" / "layout" / "review.json").read_text(encoding="utf-8")
     )
     assert box_id
     assert state.session.run_id == "demo"
+    assert state.session.pages[0].relative_image_path == "pages/page-0001.png"
     assert persisted["status"] == "reviewed"
+    assert persisted["pages"][0]["image_path"] == "pages/page-0001.png"
     assert persisted["pages"][0]["blocks"][0]["label"] == "table"
 
 
