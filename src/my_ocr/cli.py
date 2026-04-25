@@ -5,12 +5,12 @@ import json
 from pathlib import Path
 
 from my_ocr.models import RunId
-from my_ocr.pipeline.evaluation import (
+from my_ocr.extraction.evaluation import (
     evaluate_directories,
     evaluate_workflow,
     write_markdown_report,
 )
-from my_ocr.pipeline.options import LayoutOptions, OcrOptions, StructuredExtractionOptions
+from my_ocr.models import LayoutOptions, OcrOptions, StructuredExtractionOptions
 from my_ocr.bootstrap import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,

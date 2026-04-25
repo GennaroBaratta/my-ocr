@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from my_ocr.pipeline.errors import UnsupportedRunSchema
+from my_ocr.models import UnsupportedRunSchema
 from my_ocr.models import RunId
 from my_ocr.bootstrap import (
     BackendServices,

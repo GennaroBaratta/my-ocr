@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from my_ocr.adapters.outbound.filesystem.ingestion import normalize_document
+from my_ocr.normalize import normalize_document
 
 
 def test_normalize_document_copies_directory_images_in_natural_order(tmp_path) -> None:
@@ -12,19 +12,24 @@ def test_normalize_document_copies_directory_images_in_natural_order(tmp_path) -
     source.mkdir()
     for name in ["page-10.png", "page-2.png", "notes.txt", "page-1.jpg"]:
         path = source / name
-        path.write_bytes(b"fake")
+        if path.suffix.lower() in {".jpg", ".png"}:
+            _image(path)
+        else:
+            path.write_text("not an image", encoding="utf-8")
 
-    run_dir = tmp_path / "run"
-    pages = normalize_document(source, run_dir)
+    pages_dir = tmp_path / "run" / "pages"
+    pages = normalize_document(source, pages_dir)
 
-    assert [Path(path).name for path in pages] == [
+    assert [Path(page.image_path).name for page in pages] == [
         "page-0001.jpg",
         "page-0002.png",
         "page-0003.png",
     ]
-    assert (run_dir / "pages" / "page-0001.jpg").exists()
-    assert (run_dir / "pages" / "page-0002.png").exists()
-    assert (run_dir / "pages" / "page-0003.png").exists()
+    assert [page.width for page in pages] == [10, 10, 10]
+    assert [page.height for page in pages] == [10, 10, 10]
+    assert (pages_dir / "page-0001.jpg").exists()
+    assert (pages_dir / "page-0002.png").exists()
+    assert (pages_dir / "page-0003.png").exists()
 
 
 def test_normalize_document_rejects_empty_directory(tmp_path) -> None:
@@ -32,4 +37,10 @@ def test_normalize_document_rejects_empty_directory(tmp_path) -> None:
     source.mkdir()
 
     with pytest.raises(ValueError, match="No supported images"):
-        normalize_document(source, tmp_path / "run")
+        normalize_document(source, tmp_path / "run" / "pages")
+
+
+def _image(path: Path) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (10, 10), "white").save(path)

@@ -20,6 +20,7 @@ def _imported_modules(path: Path) -> set[str]:
             modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
+            modules.update(f"{node.module}.{alias.name}" for alias in node.names)
     return modules
 
 
@@ -74,6 +75,11 @@ def _defined_function_names(path: Path) -> set[str]:
     }
 
 
+def _defined_class_names(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
+
+
 def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     failures: list[str] = []
     for path in _py_files(package):
@@ -84,25 +90,28 @@ def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
     return failures
 
 
-def test_domain_does_not_import_outer_layers() -> None:
-    assert not _violations(
-        "domain",
-        (
-            "my_ocr.pipeline",
-            "my_ocr.adapters",
-            "my_ocr.ui",
-        ),
-    )
+def test_old_architecture_packages_are_gone() -> None:
+    assert not (SRC_ROOT / "adapters").exists()
+    assert not (SRC_ROOT / "pipeline").exists()
+    assert not (SRC_ROOT / "domain" / "layout.py").exists()
 
 
-def test_pipeline_does_not_import_adapters_or_ui_even_dynamically() -> None:
-    assert not _violations(
-        "pipeline",
-        (
-            "my_ocr.adapters",
-            "my_ocr.ui",
-        ),
+def test_source_tests_and_tools_do_not_import_old_architecture_packages() -> None:
+    roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
+    failures: list[str] = []
+    blocked_prefixes = (
+        "my_ocr.adapters",
+        "my_ocr.pipeline",
+        "my_ocr.domain.layout",
     )
+    for root in roots:
+        for path in root.rglob("*.py"):
+            modules = _imported_modules(path) | _dynamic_import_strings(path)
+            for module in modules:
+                if module.startswith(blocked_prefixes):
+                    failures.append(f"{path.relative_to(REPO_ROOT)} imports {module}")
+
+    assert not failures
 
 
 def test_source_tests_and_tools_do_not_import_application_package() -> None:
@@ -121,7 +130,7 @@ def test_source_tests_and_tools_do_not_import_application_package() -> None:
 def test_ui_does_not_import_filesystem_run_store_directly() -> None:
     assert not _violations(
         "ui",
-        ("my_ocr.adapters.outbound.filesystem.run_store",),
+        ("my_ocr.storage.FilesystemRunStore",),
     )
 
 
@@ -144,16 +153,15 @@ def test_ui_does_not_open_run_transactions_directly() -> None:
 
 
 def test_review_layout_saves_are_coordinated_by_workflow() -> None:
-    workflow_path = SRC_ROOT / "pipeline" / "workflow.py"
+    workflow_path = SRC_ROOT / "workflow.py"
+    storage_path = SRC_ROOT / "storage.py"
     roots = (
-        SRC_ROOT / "pipeline",
-        SRC_ROOT / "adapters" / "inbound",
-        SRC_ROOT / "ui",
+        SRC_ROOT,
     )
     failures = [
         f"{path.relative_to(SRC_ROOT)}:{line}"
         for path, line in _attribute_call_sites(roots, "write_review_layout")
-        if path != workflow_path
+        if path not in {workflow_path, storage_path}
     ]
 
     assert not failures
@@ -179,6 +187,18 @@ def test_source_tests_and_tools_do_not_define_removed_ocr_legacy_helpers() -> No
                 )
 
     assert not failures
+
+
+def test_normalization_exposes_only_page_ref_api() -> None:
+    normalize_path = SRC_ROOT / "normalize.py"
+
+    removed_functions = {
+        "normalize_into_run",
+        "render_pdf_into_images",
+        "render_pdf_to_images",
+    }
+    assert not (removed_functions & _defined_function_names(normalize_path))
+    assert "FilesystemDocumentNormalizer" not in _defined_class_names(normalize_path)
 
 
 def test_source_tests_and_tools_do_not_call_removed_run_transaction_methods() -> None:

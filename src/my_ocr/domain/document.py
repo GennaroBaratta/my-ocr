@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field as dataclass_field
 from typing import Any
 
-from .text import collapse_whitespace
-
+from my_ocr.text import collapse_whitespace
 
 FIELD_NAMES = (
     "document_type",
@@ -15,7 +14,6 @@ FIELD_NAMES = (
     "language",
     "summary_line",
 )
-
 
 JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -36,7 +34,7 @@ JSON_SCHEMA: dict[str, Any] = {
 class DocumentFields:
     document_type: str = ""
     title: str = ""
-    authors: list[str] = field(default_factory=list)
+    authors: list[str] = dataclass_field(default_factory=list)
     institution: str = ""
     date: str = ""
     language: str = ""

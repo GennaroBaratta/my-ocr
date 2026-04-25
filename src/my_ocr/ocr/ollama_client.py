@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from my_ocr.adapters.outbound.config.settings import DEFAULT_OLLAMA_TIMEOUT_SECONDS
+from my_ocr.settings import DEFAULT_OLLAMA_TIMEOUT_SECONDS
 
 ALLOWED_URL_SCHEMES = {"http", "https"}
 

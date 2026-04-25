@@ -6,7 +6,7 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
@@ -15,26 +15,25 @@ from my_ocr.filesystem import read_text as _read_text
 from my_ocr.filesystem import write_json as _write_json
 from my_ocr.filesystem import write_text as _write_text
 from my_ocr.models import (
+    ArtifactCopy,
     LayoutDiagnostics,
+    MissingPage,
     OcrPageResult,
     OcrRunResult,
     PageRef,
+    ProviderArtifacts,
     ReviewLayout,
     ReviewPage,
+    RunCommitFailed,
     RunDiagnostics,
     RunId,
     RunManifest,
+    RunNotFound,
     RunSnapshot,
     RunStatus,
     SCHEMA_VERSION,
-)
-from my_ocr.models import (
-    MissingPage,
-    RunCommitFailed,
-    RunNotFound,
     UnsupportedRunSchema,
 )
-from my_ocr.models import ArtifactCopy, ProviderArtifacts
 
 DEFAULT_RUN_ROOT = "data/runs"
 
@@ -44,6 +43,71 @@ class RunWorkspace:
     run_id: RunId
     target_dir: Path
     work_dir: Path
+
+
+class RunStorage(Protocol):
+    def start_run(
+        self, input_path: str | Path, run_id: RunId | None = None
+    ) -> RunWorkspace: ...
+
+    def publish_prepared_run(
+        self,
+        workspace: RunWorkspace,
+        pages: list[PageRef],
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot: ...
+
+    def discard_workspace(self, workspace: RunWorkspace) -> None: ...
+
+    def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
+
+    def write_review_layout(
+        self,
+        run_id: RunId | str,
+        layout: ReviewLayout,
+        artifacts: ProviderArtifacts,
+        diagnostics: LayoutDiagnostics | None = None,
+    ) -> RunSnapshot: ...
+
+    def write_ocr_result(
+        self,
+        run_id: RunId | str,
+        result: OcrRunResult,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot: ...
+
+    def replace_page_layout(
+        self,
+        run_id: RunId | str,
+        page_number: int,
+        page: ReviewPage,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot: ...
+
+    def replace_page_ocr(
+        self,
+        run_id: RunId | str,
+        page_number: int,
+        page: OcrPageResult,
+        artifacts: ProviderArtifacts,
+    ) -> RunSnapshot: ...
+
+    def write_rules_extraction(
+        self, run_id: RunId | str, prediction: dict[str, Any]
+    ) -> RunSnapshot: ...
+
+    def write_structured_extraction(
+        self,
+        run_id: RunId | str,
+        prediction: dict[str, Any],
+        metadata: dict[str, Any],
+        *,
+        canonical_prediction: dict[str, Any],
+    ) -> RunSnapshot: ...
+
+    def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot: ...
 
 
 class FilesystemRunStore:
@@ -440,3 +504,65 @@ def _slugify(value: str) -> str:
 
 def _timestamp_id() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+@dataclass(frozen=True, slots=True)
+class RecentRunRecord:
+    run_id: str
+    input_path: str
+    mtime: float
+    status: str
+    unsupported: bool = False
+
+
+class FilesystemRunReadModel:
+    def __init__(self, run_root: str | Path = DEFAULT_RUN_ROOT) -> None:
+        self.run_root = Path(run_root)
+        self.store = FilesystemRunStore(self.run_root)
+
+    def list_recent_runs(self) -> list[RecentRunRecord]:
+        if not self.run_root.exists():
+            return []
+        records: list[RecentRunRecord] = []
+        for run_dir in sorted(
+            (path for path in self.run_root.iterdir() if path.is_dir()),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        ):
+            if run_dir.name.startswith("."):
+                continue
+            try:
+                snapshot = self.store.open_run(run_dir.name)
+            except UnsupportedRunSchema:
+                records.append(
+                    RecentRunRecord(
+                        run_id=run_dir.name,
+                        input_path="",
+                        mtime=run_dir.stat().st_mtime,
+                        status="unsupported",
+                        unsupported=True,
+                    )
+                )
+                continue
+            records.append(
+                RecentRunRecord(
+                    run_id=str(snapshot.run_id),
+                    input_path=snapshot.manifest.input.path,
+                    mtime=run_dir.stat().st_mtime,
+                    status=_status_for_snapshot(snapshot),
+                )
+            )
+        return records
+
+    def load_run(self, run_id: str) -> RunSnapshot:
+        return self.store.open_run(run_id)
+
+
+def _status_for_snapshot(snapshot: RunSnapshot) -> str:
+    if snapshot.manifest.status.extraction != "pending":
+        return "extracted"
+    if snapshot.manifest.status.ocr == "complete":
+        return "ocr_complete"
+    if snapshot.review_layout is not None:
+        return "review_ready"
+    return "pending"

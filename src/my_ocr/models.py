@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field as dataclass_field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,79 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_serializer, field_validator
 
 SCHEMA_VERSION = 3
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactCopy:
+    source: Path
+    relative_target: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderArtifacts:
+    copies: tuple[ArtifactCopy, ...] = ()
+    cleanup_paths: tuple[Path, ...] = ()
+
+    @classmethod
+    def empty(cls) -> "ProviderArtifacts":
+        return cls(())
+
+
+@dataclass(frozen=True, slots=True)
+class LayoutOptions:
+    config_path: str = "config/local.yaml"
+    layout_device: str = "cuda"
+    layout_profile: str | None = "auto"
+
+
+@dataclass(frozen=True, slots=True)
+class OcrOptions:
+    config_path: str = "config/local.yaml"
+    layout_device: str = "cuda"
+    layout_profile: str | None = "auto"
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredExtractionOptions:
+    config_path: str = "config/local.yaml"
+    model: str | None = None
+    endpoint: str | None = None
+
+
+class ApplicationError(Exception):
+    """Base class for user-facing workflow failures."""
+
+
+class RunNotFound(ApplicationError):
+    pass
+
+
+class UnsupportedRunSchema(ApplicationError):
+    pass
+
+
+class MissingInputDocument(ApplicationError):
+    pass
+
+
+class MissingPage(ApplicationError):
+    pass
+
+
+class LayoutDetectionFailed(ApplicationError):
+    pass
+
+
+class OcrFailed(ApplicationError):
+    pass
+
+
+class StructuredExtractionFailed(ApplicationError):
+    pass
+
+
+class RunCommitFailed(ApplicationError):
+    pass
 
 
 def utc_now_iso() -> str:
@@ -210,3 +284,22 @@ class RunSnapshot(StrictModel):
             if page.page_number == page_number:
                 return page
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class LayoutDetectionResult:
+    layout: ReviewLayout
+    artifacts: ProviderArtifacts = dataclass_field(default_factory=ProviderArtifacts.empty)
+    diagnostics: LayoutDiagnostics = dataclass_field(default_factory=LayoutDiagnostics)
+
+
+@dataclass(frozen=True, slots=True)
+class OcrRecognitionResult:
+    result: OcrRunResult
+    artifacts: ProviderArtifacts = dataclass_field(default_factory=ProviderArtifacts.empty)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowResult:
+    snapshot: RunSnapshot
+    warning: str | None = None

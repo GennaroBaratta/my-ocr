@@ -6,43 +6,43 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from my_ocr.adapters.outbound.config import layout_profile as _layout_profile_mod
-from my_ocr.adapters.outbound.config.settings import resolve_ocr_api_client
-from my_ocr.adapters.outbound.filesystem.ingestion import IMAGE_SUFFIXES
-from my_ocr.adapters.outbound.filesystem.run_paths import RunPaths
-from my_ocr.adapters.outbound.ocr._glmocr_artifacts import (
+from my_ocr import layout_profile as _layout_profile_mod
+from my_ocr.settings import resolve_ocr_api_client
+from my_ocr.normalize import IMAGE_SUFFIXES
+from my_ocr.ocr.run_paths import RunPaths
+from my_ocr.ocr.glmocr_artifacts import (
     publish_saved_model_json_path as _publish_saved_model_json_path_impl,
     save_result_to_raw_dir as _save_result_to_raw_dir_impl,
     write_page_layout_to_raw_dir as _write_page_layout_to_raw_dir_impl,
 )
-from my_ocr.adapters.outbound.ocr._glmocr_parser import (
+from my_ocr.ocr.glmocr_parser import (
     build_lazy_glmocr_parser as _build_lazy_glmocr_parser_impl,
     build_raw_json as _build_raw_json_impl,
     load_glmocr_parser as _load_glmocr_parser_impl,
 )
-from my_ocr.adapters.outbound.ocr._glmocr_retry import (
+from my_ocr.ocr.glmocr_retry import (
     cleanup_after_cuda_oom as _cleanup_after_cuda_oom_impl,
     is_cuda_oom_error as _is_cuda_oom_error_impl,
     parse_page_with_cpu_fallback as _parse_page_with_cpu_fallback_impl,
     should_retry_parse_on_cpu as _should_retry_parse_on_cpu_impl,
 )
-from my_ocr.adapters.outbound.ocr.fallback_ocr import (
+from my_ocr.ocr.fallback import (
     recognize_full_page,
     run_crop_fallback_for_page,
 )
-from my_ocr.pipeline.types import (
+from my_ocr.models import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
 )
-from my_ocr.domain.layout import (
+from my_ocr.ocr.planning import (
     detect_bbox_coord_space,
     extract_layout_blocks,
     has_meaningful_text,
     plan_page_ocr,
 )
-from my_ocr.domain.review_layout import (
+from my_ocr.ocr.review_layout import (
     build_review_page_from_layout,
     review_page_to_layout_payload,
 )
@@ -56,7 +56,7 @@ from my_ocr.models import (
     ReviewLayout,
     ReviewPage,
 )
-from my_ocr.pipeline.options import LayoutOptions, OcrOptions
+from my_ocr.models import LayoutOptions, OcrOptions
 
 
 def _emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:

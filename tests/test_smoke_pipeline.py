@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from my_ocr.adapters.inbound import cli
+from my_ocr import cli
 from my_ocr.models import RunId, RunInput, RunManifest, RunSnapshot
 
 

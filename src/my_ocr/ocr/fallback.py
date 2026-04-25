@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from my_ocr.adapters.outbound.config.settings import (
+from my_ocr.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
 )
-from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
-from my_ocr.domain.layout import (
+from my_ocr.ocr.ollama_client import encode_image_file, post_json
+from my_ocr.ocr.planning import (
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
     clean_recognized_text,

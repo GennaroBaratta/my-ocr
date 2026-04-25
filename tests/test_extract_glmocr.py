@@ -5,8 +5,8 @@ from urllib.error import URLError
 
 import pytest
 
-from my_ocr.adapters.outbound.config.settings import DEFAULT_OLLAMA_MODEL
-from my_ocr.adapters.outbound.llm.structured_extractor import (
+from my_ocr.settings import DEFAULT_OLLAMA_MODEL
+from my_ocr.extraction.structured import (
     _build_structured_markdown_payload,
     _clean_structured_input_text,
     build_structured_prompt,
@@ -56,7 +56,7 @@ def test_extract_structured_parses_response_and_returns_metadata(tmp_path, monke
         captured["timeout"] = timeout
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     parsed, metadata = extract_structured(
         [str(image1), str(image2)], endpoint="http://ollama.test/api/generate"
@@ -96,7 +96,7 @@ def test_extract_structured_uses_markdown_text_when_provided(tmp_path, monkeypat
         captured["body"] = json.loads(request.data.decode("utf-8"))
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     parsed, metadata = extract_structured([str(image)], markdown_text="# OCR\nSome text")
 
@@ -161,7 +161,7 @@ def test_extract_structured_ignores_separator_only_markdown(tmp_path, monkeypatc
         captured["body"] = json.loads(request.data.decode("utf-8"))
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     _, metadata = extract_structured([str(image)], markdown_text="\n\n---\n\n")
 
@@ -191,7 +191,7 @@ def test_extract_structured_ignores_html_only_markdown_after_cleanup(tmp_path, m
         captured["body"] = json.loads(request.data.decode("utf-8"))
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     _, metadata = extract_structured([str(image)], markdown_text="<div><br/></div><table></table>")
 
@@ -227,7 +227,7 @@ def test_extract_structured_defaults_model_and_endpoint_from_config(tmp_path, mo
         captured["endpoint"] = request.full_url
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     extract_structured([str(image)], config_path=config)
 
@@ -263,7 +263,7 @@ def test_extract_structured_prefers_explicit_over_config(tmp_path, monkeypatch) 
         captured["endpoint"] = request.full_url
         return FakeResponse()
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     extract_structured(
         [str(image)],
@@ -283,7 +283,7 @@ def test_extract_structured_surfaces_request_errors(tmp_path, monkeypatch) -> No
     def fake_urlopen(request, timeout):
         raise URLError("offline")
 
-    monkeypatch.setattr("my_ocr.adapters.outbound.llm.structured_extractor.urlopen", fake_urlopen)
+    monkeypatch.setattr("my_ocr.extraction.structured.urlopen", fake_urlopen)
 
     with pytest.raises(RuntimeError, match="Could not reach Ollama"):
         extract_structured([str(image)])
@@ -304,7 +304,7 @@ def test_extract_structured_rejects_missing_response_field(tmp_path, monkeypatch
             return json.dumps({"model": DEFAULT_OLLAMA_MODEL}).encode("utf-8")
 
     monkeypatch.setattr(
-        "my_ocr.adapters.outbound.llm.structured_extractor.urlopen",
+        "my_ocr.extraction.structured.urlopen",
         lambda request, timeout: FakeResponse(),
     )
 

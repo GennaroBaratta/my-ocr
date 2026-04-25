@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.pipeline.types import (
+from my_ocr.storage import FilesystemRunStore
+from my_ocr.models import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
@@ -23,9 +23,9 @@ from my_ocr.models import (
     ReviewPage,
     RunId,
 )
-from my_ocr.pipeline.workflow import DocumentWorkflow
-from my_ocr.pipeline.errors import UnsupportedRunSchema
-from my_ocr.pipeline.options import StructuredExtractionOptions
+from my_ocr.workflow import DocumentWorkflow
+from my_ocr.models import UnsupportedRunSchema
+from my_ocr.models import StructuredExtractionOptions
 
 
 def test_prepare_layout_review_writes_v3_manifest_and_relative_payloads(tmp_path: Path) -> None:
@@ -153,7 +153,7 @@ def test_discard_workspace_removes_work_dir_without_publishing(tmp_path: Path) -
 
 
 class FakeNormalizer:
-    def normalize(self, _input_path: str | Path, pages_dir: str | Path) -> list[PageRef]:
+    def __call__(self, _input_path: str | Path, pages_dir: str | Path) -> list[PageRef]:
         pages_dir = Path(pages_dir)
         pages_dir.mkdir(parents=True, exist_ok=True)
         source = _image(pages_dir / "source.png")

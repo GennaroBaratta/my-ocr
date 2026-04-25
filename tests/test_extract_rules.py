@@ -1,4 +1,4 @@
-from my_ocr.pipeline.extraction import extract_from_markdown
+from my_ocr.extraction.rules import extract_from_markdown
 
 
 def test_extract_from_markdown_returns_expected_baseline_fields() -> None:

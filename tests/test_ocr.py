@@ -8,22 +8,22 @@ from types import SimpleNamespace
 
 import pytest
 
-from my_ocr.adapters.outbound.ocr import glmocr_engine as ocr
-from my_ocr.adapters.outbound.ocr import fallback_ocr as ocr_fallback
-from my_ocr.adapters.outbound.ocr.glmocr_engine import (
+from my_ocr.ocr import glmocr as ocr
+from my_ocr.ocr import fallback as ocr_fallback
+from my_ocr.ocr.glmocr import (
     prepare_review_artifacts as _prepare_review_artifacts,
 )
-from my_ocr.adapters.outbound.ocr.glmocr_engine import run_ocr as _run_ocr
-from my_ocr.adapters.outbound.ocr.fallback_ocr import run_crop_fallback_for_page
-from my_ocr.domain.layout import (
+from my_ocr.ocr.glmocr import run_ocr as _run_ocr
+from my_ocr.ocr.fallback import run_crop_fallback_for_page
+from my_ocr.ocr.planning import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
 )
-from my_ocr.domain.text import normalize_table_html
+from my_ocr.text import normalize_table_html
 from my_ocr.models import LayoutBlock, PageRef, ReviewLayout, ReviewPage
-from my_ocr.pipeline.options import LayoutOptions, OcrOptions
+from my_ocr.models import LayoutOptions, OcrOptions
 from tests.support import (
     build_reviewed_layout_block,
     build_reviewed_layout_page,

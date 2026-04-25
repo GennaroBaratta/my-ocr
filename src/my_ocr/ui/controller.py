@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import functools
 
 from my_ocr.models import RunId
-from my_ocr.pipeline.options import LayoutOptions, OcrOptions
+from my_ocr.models import LayoutOptions, OcrOptions
 
 
 @dataclass(frozen=True, slots=True)

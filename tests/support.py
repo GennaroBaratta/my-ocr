@@ -55,18 +55,6 @@ def build_fallback_page(
     }
 
 
-def write_normalized_page(run_dir: Path, *, content: bytes = b"replacement image") -> str:
-    pages_dir = run_dir / "pages"
-    pages_dir.mkdir(parents=True, exist_ok=True)
-    page = pages_dir / "page-0001.png"
-    page.write_bytes(content)
-    return str(page)
-
-
-def normalize_to_single_page(_input_path: str, run_dir_arg: str | Path) -> list[str]:
-    return [write_normalized_page(Path(run_dir_arg))]
-
-
 def write_basic_ocr_outputs(
     run_dir: Path,
     *,

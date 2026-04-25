@@ -6,13 +6,14 @@ import shutil
 from pathlib import Path
 
 from my_ocr.filesystem import ensure_dir as _ensure_dir
+from my_ocr.models import MissingInputDocument, PageRef
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 PDF_RENDER_DPI = 200
 
 
 @dataclass(frozen=True, slots=True)
-class NormalizedPage:
+class _NormalizedPage:
     page_number: int
     path: Path
     width: int
@@ -20,11 +21,16 @@ class NormalizedPage:
 
 
 def normalize_document(
-    input_path: str | Path, pages_dir: str | Path, *, measure_images: bool = True
-) -> list[NormalizedPage]:
+    input_path: str | Path, pages_dir: str | Path
+) -> list[PageRef]:
+    pages = _normalize_pages(input_path, pages_dir)
+    return [_page_ref(page) for page in pages]
+
+
+def _normalize_pages(input_path: str | Path, pages_dir: str | Path) -> list[_NormalizedPage]:
     source = Path(input_path)
     if not source.exists():
-        raise FileNotFoundError(f"Input not found: {source}")
+        raise MissingInputDocument(f"Input not found: {source}")
 
     output_dir = _reset_pages_dir(Path(pages_dir))
     if source.is_dir():
@@ -35,22 +41,20 @@ def normalize_document(
         if not sources:
             raise ValueError(f"No supported images found in directory: {source}")
         return [
-            _copy_page(path, output_dir, index, measure_image=measure_images)
+            _copy_page(path, output_dir, index)
             for index, path in enumerate(sources, 1)
         ]
 
     suffix = source.suffix.lower()
     if suffix == ".pdf":
-        return render_pdf_to_images(source, output_dir, measure_images=measure_images)
+        return _render_pdf_to_images(source, output_dir)
     if suffix in IMAGE_SUFFIXES:
-        return [_copy_page(source, output_dir, 1, measure_image=measure_images)]
+        return [_copy_page(source, output_dir, 1)]
 
     raise ValueError(f"Unsupported input type: {source.suffix}")
 
 
-def render_pdf_to_images(
-    pdf_path: str | Path, output_dir: str | Path, *, measure_images: bool = True
-) -> list[NormalizedPage]:
+def _render_pdf_to_images(pdf_path: str | Path, output_dir: str | Path) -> list[_NormalizedPage]:
     pdf_path = Path(pdf_path)
     output_dir = _ensure_dir(output_dir)
 
@@ -61,28 +65,36 @@ def render_pdf_to_images(
             "PDF rendering requires PyMuPDF. Install with `pip install -e .[pdf]`."
         ) from exc
 
-    rendered: list[NormalizedPage] = []
+    rendered: list[_NormalizedPage] = []
     with fitz.open(pdf_path) as document:
         for index in range(document.page_count):
             page = document.load_page(index)
             pixmap = page.get_pixmap(dpi=PDF_RENDER_DPI)
             destination = output_dir / f"page-{index + 1:04d}.png"
             pixmap.save(destination)
-            rendered.append(_normalized_page(destination, index + 1, measure_image=measure_images))
+            rendered.append(_normalized_page(destination, index + 1))
     return rendered
 
 
-def _copy_page(
-    source: Path, output_dir: Path, page_number: int, *, measure_image: bool
-) -> NormalizedPage:
+def _copy_page(source: Path, output_dir: Path, page_number: int) -> _NormalizedPage:
     destination = output_dir / f"page-{page_number:04d}{source.suffix.lower()}"
     shutil.copy2(source, destination)
-    return _normalized_page(destination, page_number, measure_image=measure_image)
+    return _normalized_page(destination, page_number)
 
 
-def _normalized_page(path: Path, page_number: int, *, measure_image: bool) -> NormalizedPage:
-    width, height = _image_size(path) if measure_image else (0, 0)
-    return NormalizedPage(page_number=page_number, path=path, width=width, height=height)
+def _page_ref(page: _NormalizedPage) -> PageRef:
+    return PageRef(
+        page_number=page.page_number,
+        image_path=f"pages/{page.path.name}",
+        width=page.width,
+        height=page.height,
+        resolved_path=page.path,
+    )
+
+
+def _normalized_page(path: Path, page_number: int) -> _NormalizedPage:
+    width, height = _image_size(path)
+    return _NormalizedPage(page_number=page_number, path=path, width=width, height=height)
 
 
 def _image_size(path: Path) -> tuple[int, int]:

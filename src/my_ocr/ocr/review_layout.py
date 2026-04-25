@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from .layout import extract_layout_blocks, normalize_bbox
+from my_ocr.ocr.planning import extract_layout_blocks, normalize_bbox
 
 REVIEW_LAYOUT_VERSION = 1
 REVIEWED_LAYOUT_APPLY_MODE = "reviewed_layout_primary"

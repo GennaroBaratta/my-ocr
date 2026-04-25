@@ -4,8 +4,8 @@ from pathlib import Path
 
 import flet as ft
 
-from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
-from my_ocr.pipeline.types import ProviderArtifacts
+from my_ocr.storage import FilesystemRunStore
+from my_ocr.models import ProviderArtifacts
 from my_ocr.models import OcrPageResult, OcrRunResult, PageRef, ReviewLayout, RunId
 from my_ocr.ui.components.code_display import build_code_display
 from my_ocr.ui.ocr_result_text import ocr_json_text_for_state

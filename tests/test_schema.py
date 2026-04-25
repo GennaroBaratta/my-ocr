@@ -1,7 +1,7 @@
-from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
 import pytest
 from pydantic import ValidationError
 
+from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
 from my_ocr.models import LayoutBlock, PageRef, RunId, RunManifest, SCHEMA_VERSION
 
 

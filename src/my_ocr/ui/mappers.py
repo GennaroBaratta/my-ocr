@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from my_ocr.adapters.outbound.filesystem.run_read_model import RecentRunRecord
+from my_ocr.storage import RecentRunRecord
 from my_ocr.models import LayoutBlock, ReviewLayout, ReviewPage, RunSnapshot
 
 from .session import BoundingBox, PageData, RecentRunSummary

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from my_ocr.domain.document import FIELD_NAMES, DocumentFields
+from my_ocr.domain.document import DocumentFields, FIELD_NAMES
 from my_ocr.filesystem import ensure_dir, read_json as load_json, write_text
 
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from my_ocr.adapters.outbound.filesystem.run_store import FilesystemRunStore
+from my_ocr.storage import FilesystemRunStore
 from my_ocr.models import PageRef, ReviewLayout, RunId
-from my_ocr.pipeline.types import ProviderArtifacts
+from my_ocr.models import ProviderArtifacts
 from my_ocr.ui.state import AppState
 
 

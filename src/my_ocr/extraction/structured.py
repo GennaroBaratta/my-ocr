@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from my_ocr.adapters.outbound.config.settings import (
+from my_ocr.settings import (
     DEFAULT_OLLAMA_ENDPOINT,
     DEFAULT_OLLAMA_KEEP_ALIVE,
     DEFAULT_OLLAMA_MODEL,
@@ -14,10 +14,10 @@ from my_ocr.adapters.outbound.config.settings import (
     resolve_ocr_api_client,
 )
 from my_ocr.models import PageRef
-from my_ocr.pipeline.options import StructuredExtractionOptions
-from my_ocr.adapters.outbound.llm.ollama_client import encode_image_file, post_json
-from my_ocr.domain.document import JSON_SCHEMA, DocumentFields
-from my_ocr.domain.text import replace_html_tables
+from my_ocr.models import StructuredExtractionOptions
+from my_ocr.ocr.ollama_client import encode_image_file, post_json
+from my_ocr.domain.document import DocumentFields, JSON_SCHEMA
+from my_ocr.text import replace_html_tables
 from my_ocr.filesystem import write_json
 
 DEFAULT_MODEL = DEFAULT_OLLAMA_MODEL

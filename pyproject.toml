@@ -68,7 +68,7 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [project.scripts]
-my-ocr = "my_ocr.adapters.inbound.cli:main"
+my-ocr = "my_ocr.cli:main"
 my-ocr-ui = "my_ocr.ui:main"
 
 [tool.setuptools]

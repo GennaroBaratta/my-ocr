@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from my_ocr.pipeline.types import (
+from my_ocr.models import (
     LayoutDetectionResult,
     OcrRecognitionResult,
     ProviderArtifacts,
     WorkflowResult,
 )
-from my_ocr.pipeline.errors import (
+from my_ocr.models import (
     LayoutDetectionFailed,
     MissingPage,
     OcrFailed,
@@ -20,20 +20,20 @@ from my_ocr.models import (
     ReviewLayout,
     RunId,
 )
-from my_ocr.pipeline.options import (
+from my_ocr.models import (
     LayoutOptions,
     OcrOptions,
     StructuredExtractionOptions,
 )
-from my_ocr.pipeline.extraction import validate_structured_prediction
-from my_ocr.pipeline.storage import RunStorage
+from my_ocr.extraction.rules import validate_structured_prediction
+from my_ocr.storage import RunStorage
 
 
 RunStore = RunStorage
 
 
 class DocumentNormalizer(Protocol):
-    def normalize(self, input_path: str | Path, pages_dir: str | Path) -> list[PageRef]: ...
+    def __call__(self, input_path: str | Path, pages_dir: str | Path) -> list[PageRef]: ...
 
 
 class LayoutDetector(Protocol):
@@ -93,7 +93,7 @@ class DocumentWorkflow:
     ) -> WorkflowResult:
         workspace = self._run_store.start_run(input_path, run_id)
         try:
-            pages = self._normalizer.normalize(input_path, workspace.work_dir / "pages")
+            pages = self._normalizer(input_path, workspace.work_dir / "pages")
             try:
                 result = self._layout_detector.detect_layout(pages, workspace.work_dir, options)
             except Exception as exc:
