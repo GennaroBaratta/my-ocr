@@ -26,7 +26,7 @@ from my_ocr.domain import (
     RunSnapshot,
     RunStatus,
 )
-from my_ocr.runs.layout import (
+from my_ocr.runs.artifact_io import (
     RunLayoutPaths,
     load_extraction,
     load_ocr_result,

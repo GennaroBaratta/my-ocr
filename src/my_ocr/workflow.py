@@ -23,7 +23,7 @@ from my_ocr.domain import (
     OcrRuntimeOptions,
     StructuredExtractionOptions,
 )
-from my_ocr.extraction.validation import validate_structured_prediction
+from my_ocr.extraction.canonical import choose_canonical_prediction
 
 
 class RunWorkspace(Protocol):
@@ -256,14 +256,13 @@ class DocumentWorkflow:
         except Exception as exc:
             raise StructuredExtractionFailed(f"Structured extraction failed: {exc}") from exc
 
-        validation = validate_structured_prediction(prediction, source_text=markdown)
-        canonical = prediction
-        canonical_source = "structured"
         rules_prediction = snapshot.extraction.get("rules")
-        if not validation["ok"] and isinstance(rules_prediction, dict):
-            canonical = rules_prediction
-            canonical_source = "rules"
-        metadata = {**metadata, "canonical_source": canonical_source, "validation": validation}
+        canonical, canonical_metadata = choose_canonical_prediction(
+            structured_prediction=prediction,
+            rules_prediction=rules_prediction if isinstance(rules_prediction, dict) else None,
+            source_text=markdown,
+        )
+        metadata = {**metadata, **canonical_metadata}
 
         snapshot = self._run_store.write_structured_extraction(
             run_id,

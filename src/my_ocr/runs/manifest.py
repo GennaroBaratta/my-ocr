@@ -7,7 +7,7 @@ from my_ocr.domain import (
     RunManifest,
     RunNotFound,
 )
-from my_ocr.runs.layout import RunLayoutPaths
+from my_ocr.runs.artifact_io import RunLayoutPaths
 
 
 def write_manifest(run_dir: Path, manifest: RunManifest) -> None:
