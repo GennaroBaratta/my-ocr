@@ -124,13 +124,13 @@ class DocumentWorkflow:
             )
         except Exception as exc:
             raise OcrFailed(f"OCR failed: {exc}") from exc
-        snapshot = self._run_store.write_ocr_result(
+        snapshot = self._run_store.write_ocr_result_and_invalidate_extraction(
             run_id, recognition.result, recognition.artifacts
         )
         return WorkflowResult(snapshot=snapshot)
 
     def save_review_layout(self, run_id: RunId, layout: ReviewLayout) -> WorkflowResult:
-        snapshot = self._run_store.write_review_layout(
+        snapshot = self._run_store.save_review_layout_and_invalidate_downstream(
             run_id, layout, ProviderArtifacts.empty()
         )
         assert snapshot is not None
