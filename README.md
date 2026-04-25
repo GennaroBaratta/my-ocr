@@ -240,28 +240,61 @@ Choices that shaped this codebase, and what they cost:
 src/my_ocr/
   cli.py
   bootstrap.py
-  models.py
+  settings.py
   workflow.py
-  storage.py
-  normalize.py
-  run_layout.py
-  run_manifest.py
-  artifact_store.py
   domain/
+    __init__.py
+    _base.py
+    artifacts.py
     document.py
+    errors.py
+    ocr.py
+    options.py
+    results.py
+    review.py
+    run.py
   extraction/
+    canonical.py
+    __init__.py
+    evaluation.py
     rules.py
     structured.py
-    evaluation.py
+    validation.py
+  ingest/
+    __init__.py
+    normalize.py
+    page_identity.py
   ocr/
-    glmocr.py
-    glmocr_parser.py
-    glmocr_retry.py
-    glmocr_artifacts.py
+    __init__.py
     fallback.py
-    planning.py
-    review_layout.py
+    glmocr.py
+    glmocr_artifacts.py
+    glmocr_retry.py
+    glmocr_runtime.py
+    glmocr_sdk.py
+    layout_profile.py
+    ollama_client.py
+    ocr_policy.py
+    review_mapping.py
+    scratch_paths.py
+  runs/
+    __init__.py
+    artifact_io.py
+    artifacts.py
+    manifest.py
+    store.py
+  support/
+    __init__.py
+    filesystem.py
+    text.py
   ui/
+    app.py
+    controller.py
+    review_controller.py
+    session.py
+    state.py
+    screens/
+    components/
 
 data/
   raw/

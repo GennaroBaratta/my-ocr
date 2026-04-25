@@ -10,13 +10,13 @@ import pytest
 
 from my_ocr.ocr import glmocr as ocr
 from my_ocr.ocr import fallback as ocr_fallback
-from my_ocr.ocr import glmocr_parser as ocr_parser
+from my_ocr.ocr import glmocr_sdk as ocr_parser
 from my_ocr.ocr.glmocr import (
     prepare_review_artifacts as _prepare_review_artifacts,
 )
 from my_ocr.ocr.glmocr import run_ocr as _run_ocr
 from my_ocr.ocr.fallback import run_crop_fallback_for_page
-from my_ocr.ocr.planning import (
+from my_ocr.ocr.ocr_policy import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,

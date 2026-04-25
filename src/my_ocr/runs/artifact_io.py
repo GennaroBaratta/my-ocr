@@ -9,7 +9,7 @@ from my_ocr.domain import OcrRunResult, ReviewLayout
 
 
 @dataclass(frozen=True, slots=True)
-class RunLayoutPaths:
+class RunArtifactPaths:
     run_dir: Path
 
     @property
@@ -65,25 +65,29 @@ class RunLayoutPaths:
         return self.extraction_dir / "canonical.json"
 
 
+# Backwards-compatible alias during class rename.
+RunLayoutPaths = RunArtifactPaths
+
+
 def write_review_layout_payload(run_dir: Path, layout: ReviewLayout) -> None:
-    write_json(RunLayoutPaths(run_dir).review_layout, layout.model_dump(mode="json"))
+    write_json(RunArtifactPaths(run_dir).review_layout, layout.model_dump(mode="json"))
 
 
 def write_ocr_result_payload(run_dir: Path, result: OcrRunResult) -> None:
-    paths = RunLayoutPaths(run_dir)
+    paths = RunArtifactPaths(run_dir)
     write_text(paths.ocr_markdown, result.markdown)
     write_json(paths.ocr_pages, result.model_dump(mode="json"))
 
 
 def load_review_layout(run_dir: Path) -> ReviewLayout | None:
-    path = RunLayoutPaths(run_dir).review_layout
+    path = RunArtifactPaths(run_dir).review_layout
     if not path.exists():
         return None
     return ReviewLayout.model_validate(read_json(path))
 
 
 def load_ocr_result(run_dir: Path) -> OcrRunResult | None:
-    paths = RunLayoutPaths(run_dir)
+    paths = RunArtifactPaths(run_dir)
     if not paths.ocr_pages.exists():
         return None
     payload = read_json(paths.ocr_pages)
@@ -95,7 +99,7 @@ def load_ocr_result(run_dir: Path) -> OcrRunResult | None:
 
 
 def load_extraction(run_dir: Path) -> dict[str, Any]:
-    paths = RunLayoutPaths(run_dir)
+    paths = RunArtifactPaths(run_dir)
     if not paths.extraction_dir.exists():
         return {}
     payload: dict[str, Any] = {}
