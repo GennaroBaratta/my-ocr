@@ -1,5 +1,3 @@
-"""Compatibility exports for Ollama helpers moved to my_ocr.inference.ollama."""
-
 from __future__ import annotations
 
 from my_ocr.inference.ollama import encode_image_file, post_json

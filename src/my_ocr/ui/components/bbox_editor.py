@@ -45,7 +45,7 @@ def build_bbox_editor(
         scroll=ft.ScrollMode.AUTO,
     )
 
-    def on_editor_size_change(e: ft.PageResizeEvent) -> None:
+    def on_editor_size_change(e: ft.LayoutSizeChangeEvent[ft.LayoutControl]) -> None:
         set_zoom_available_width(state, e.width)
         refresh_bbox_editor(
             editor_container,
@@ -168,7 +168,7 @@ def _build_editor_stack(
         x = float(drawing_box.left or 0) / scale
         y = float(drawing_box.top or 0) / scale
         
-        state.session.is_adding_box = False
+        state.set_add_box_mode(False)
         
         if w > 5 and h > 5:
             new_id = state.review_controller.add_box_to_current_page(
@@ -453,4 +453,3 @@ def _clamp_box(box: BoundingBox, max_width: int, max_height: int) -> None:
 
 def _overlay_colors(box: BoundingBox) -> tuple[str, str]:
     return overlay_colors_for_label(box.label, box.selected)
-

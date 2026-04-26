@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from my_ocr.domain import RunId
 
 from .image_utils import get_image_size
 from .mappers import page_data_to_review_layout
 from .session import BoundingBox
 
+if TYPE_CHECKING:
+    from .state import AppState
+
 
 class ReviewController:
-    def __init__(self, state: object) -> None:
+    def __init__(self, state: AppState) -> None:
         self._state = state
 
     def add_box_to_current_page(
@@ -54,7 +59,7 @@ class ReviewController:
         for page in self._state.session.pages:
             page.boxes = [box for box in page.boxes if box.id != box_id]
         if self._state.session.selected_box_id == box_id:
-            self._state.session.selected_box_id = None
+            self._state.select_box(None)
         self.save_review_layout()
 
     def save_review_layout(self) -> None:

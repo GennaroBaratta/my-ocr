@@ -9,7 +9,7 @@ from my_ocr.settings import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
 )
-from my_ocr.ocr.ollama_client import encode_image_file, post_json
+from my_ocr.inference.ollama import encode_image_file, post_json
 from my_ocr.ocr.ocr_policy import (
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,

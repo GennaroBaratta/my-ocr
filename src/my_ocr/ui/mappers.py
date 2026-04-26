@@ -8,10 +8,17 @@ from .session import BoundingBox, PageData, RecentRunSummary
 
 
 class RecentRunRecordLike(Protocol):
-    run_id: str
-    input_path: str
-    mtime: float
-    status: str
+    @property
+    def run_id(self) -> str: ...
+
+    @property
+    def input_path(self) -> str: ...
+
+    @property
+    def mtime(self) -> float: ...
+
+    @property
+    def status(self) -> str: ...
 
 
 def recent_run_summary(record: RecentRunRecordLike) -> RecentRunSummary:

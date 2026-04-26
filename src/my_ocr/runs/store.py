@@ -34,6 +34,10 @@ from my_ocr.runs.artifact_io import (
     write_ocr_result_payload,
     write_review_layout_payload,
 )
+from my_ocr.runs.invalidation import InvalidatedArtifactGroup
+from my_ocr.runs.invalidation import extraction_outputs_cleared_policy
+from my_ocr.runs.invalidation import ocr_result_updated_policy
+from my_ocr.runs.invalidation import review_layout_updated_policy
 from my_ocr.runs.manifest import load_manifest, write_manifest
 
 DEFAULT_RUN_ROOT = "data/runs"
@@ -105,20 +109,15 @@ class FilesystemRunStore:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
         _write_review_layout_to_dir(run_dir, layout, artifacts)
-        paths = RunArtifactPaths(run_dir)
-        remove_path(paths.ocr_dir)
-        remove_path(paths.extraction_dir)
+        plan = review_layout_updated_policy(
+            snapshot.manifest,
+            layout_status=layout.status,
+            diagnostics=diagnostics,
+        )
+        _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
         manifest = snapshot.manifest.with_updates(
-            status=RunStatus(layout=layout.status or "prepared", ocr="pending", extraction="pending"),
-            diagnostics=(
-                snapshot.manifest.diagnostics
-                if diagnostics is None
-                else RunDiagnostics(
-                    layout=diagnostics,
-                    ocr=snapshot.manifest.diagnostics.ocr,
-                    extraction=snapshot.manifest.diagnostics.extraction,
-                )
-            ),
+            status=plan.status,
+            diagnostics=plan.diagnostics,
         )
         write_manifest(run_dir, manifest)
         return _load_snapshot(run_dir)
@@ -129,20 +128,13 @@ class FilesystemRunStore:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
         _write_ocr_result_to_dir(run_dir, result, artifacts)
-        remove_path(RunArtifactPaths(run_dir).extraction_dir)
+        plan = ocr_result_updated_policy(snapshot.manifest, diagnostics=result.diagnostics)
+        _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
         write_manifest(
             run_dir,
             snapshot.manifest.with_updates(
-                status=RunStatus(
-                    layout=snapshot.manifest.status.layout,
-                    ocr="complete",
-                    extraction="pending",
-                ),
-                diagnostics=RunDiagnostics(
-                    layout=snapshot.manifest.diagnostics.layout,
-                    ocr=dict(result.diagnostics),
-                    extraction={},
-                ),
+                status=plan.status,
+                diagnostics=plan.diagnostics,
             ),
         )
         return _load_snapshot(run_dir)
@@ -205,16 +197,14 @@ class FilesystemRunStore:
     def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
         snapshot = _load_snapshot(run_dir)
-        remove_path(RunArtifactPaths(run_dir).extraction_dir)
-        if snapshot.manifest.status.extraction != "pending":
+        plan = extraction_outputs_cleared_policy(snapshot.manifest)
+        _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
+        if plan.updates_manifest:
             write_manifest(
                 run_dir,
                 snapshot.manifest.with_updates(
-                    status=RunStatus(
-                        layout=snapshot.manifest.status.layout,
-                        ocr=snapshot.manifest.status.ocr,
-                        extraction="pending",
-                    )
+                    status=plan.status,
+                    diagnostics=plan.diagnostics,
                 ),
             )
         return _load_snapshot(run_dir)
@@ -277,6 +267,17 @@ def _write_ocr_result_to_dir(
 ) -> None:
     write_ocr_result_payload(run_dir, result)
     copy_provider_artifacts(artifacts, run_dir)
+
+
+def _remove_invalidated_artifacts(
+    run_dir: Path, artifact_groups: tuple[InvalidatedArtifactGroup, ...]
+) -> None:
+    paths = RunArtifactPaths(run_dir)
+    for group in artifact_groups:
+        if group == "ocr":
+            remove_path(paths.ocr_dir)
+        elif group == "extraction":
+            remove_path(paths.extraction_dir)
 
 
 def _load_snapshot(run_dir: Path) -> RunSnapshot:

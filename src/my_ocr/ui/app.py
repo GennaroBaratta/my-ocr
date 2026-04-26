@@ -5,6 +5,9 @@ from __future__ import annotations
 import flet as ft
 
 from . import theme
+from .features.results import build_results_view
+from .features.review import build_review_view
+from .features.upload import build_upload_view
 from .state import AppState
 
 
@@ -28,10 +31,6 @@ def create_app(page: ft.Page) -> None:
     page.services.append(file_picker)
 
     def render_route() -> None:
-        from .screens.results import build_results_view
-        from .screens.review import build_review_view
-        from .screens.upload import build_upload_view
-
         route = page.route or "/"
         if page.route != route:
             page.route = route

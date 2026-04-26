@@ -236,6 +236,10 @@ Choices that shaped this codebase, and what they cost:
 
 ## Repository Layout
 
+The code is organized around product boundaries: `workflow.py` is the stable facade,
+`use_cases/` owns orchestration behind ports, runtime integrations live in their feature
+packages, and `runs/` owns run-folder persistence mechanics.
+
 ```text
 src/my_ocr/
   cli.py
@@ -253,12 +257,24 @@ src/my_ocr/
     results.py
     review.py
     run.py
-  extraction/
-    canonical.py
+  use_cases/
     __init__.py
+    ports.py
+    review.py
+    ocr.py
+    extraction.py
+  inference/
+    __init__.py
+    ollama.py
+  extraction/
+    __init__.py
+    canonical.py
     evaluation.py
+    ollama_structured.py
+    parse_json.py
     rules.py
     structured.py
+    structured_prompt.py
     validation.py
   ingest/
     __init__.py
@@ -266,21 +282,27 @@ src/my_ocr/
     page_identity.py
   ocr/
     __init__.py
+    bbox.py
     fallback.py
     glmocr.py
     glmocr_artifacts.py
     glmocr_retry.py
     glmocr_runtime.py
     glmocr_sdk.py
+    labels.py
+    layout_blocks.py
     layout_profile.py
     ollama_client.py
     ocr_policy.py
+    page_processor.py
     review_mapping.py
     scratch_paths.py
+    text_cleanup.py
   runs/
     __init__.py
     artifact_io.py
     artifacts.py
+    invalidation.py
     manifest.py
     store.py
   support/
@@ -293,6 +315,10 @@ src/my_ocr/
     review_controller.py
     session.py
     state.py
+    features/
+      upload/
+      review/
+      results/
     screens/
     components/
 

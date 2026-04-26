@@ -12,6 +12,7 @@ from my_ocr.bootstrap import (
 
 from .mappers import pages_from_snapshot, recent_run_summary
 from .session import BoundingBox, PageData, UiSessionState
+from .zoom import ZOOM_MODE_MANUAL, clamp_zoom
 
 
 class AppState:
@@ -56,9 +57,44 @@ class AppState:
         canonical = snapshot.extraction.get("canonical")
         self.session.extraction_json = canonical if isinstance(canonical, dict) else {}
         self.session.layout_warning = snapshot.manifest.diagnostics.layout.warning
-        self.session.current_page_index = 0
-        self.session.selected_box_id = None
-        self.session.is_adding_box = False
+        self.set_current_page_index(0)
+        self.select_box(None)
+        self.set_add_box_mode(False)
+
+    def load_run_preserving_page_index(self, run_id: str, page_index: int) -> None:
+        self.load_run(run_id)
+        self.set_current_page_index(page_index)
+
+    def set_current_page_index(self, index: int) -> bool:
+        previous = self.session.current_page_index
+        if not self.session.pages:
+            self.session.current_page_index = 0
+        else:
+            self.session.current_page_index = min(max(index, 0), len(self.session.pages) - 1)
+        return self.session.current_page_index != previous
+
+    def select_next_page(self) -> bool:
+        return self.set_current_page_index(self.session.current_page_index + 1)
+
+    def select_previous_page(self) -> bool:
+        return self.set_current_page_index(self.session.current_page_index - 1)
+
+    def set_processing(self, active: bool, message: str = "") -> None:
+        self.session.processing = active
+        self.session.progress_message = message if active else ""
+
+    def set_error(self, message: str | None) -> None:
+        self.session.error_message = message
+
+    def set_add_box_mode(self, active: bool) -> None:
+        self.session.is_adding_box = active
+        if active:
+            self.select_box(None)
+
+    def set_zoom_level(self, level: float, mode: str | None = None) -> float:
+        self.session.zoom_mode = mode if mode is not None else ZOOM_MODE_MANUAL
+        self.session.zoom_level = clamp_zoom(level)
+        return self.session.zoom_level
 
     def layout_profile_warning(self) -> str | None:
         return self.session.layout_warning
@@ -92,4 +128,3 @@ class AppState:
     @property
     def current_page_number(self) -> int:
         return self.page_number_for_index(self.session.current_page_index)
-

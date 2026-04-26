@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from my_ocr.runs.invalidation import extraction_outputs_cleared_policy
+from my_ocr.runs.invalidation import ocr_result_updated_policy
+from my_ocr.runs.invalidation import review_layout_updated_policy
 from my_ocr.runs.store import FilesystemRunStore
 from my_ocr.domain import (
     ArtifactCopy,
@@ -21,10 +25,32 @@ from my_ocr.domain import (
     PageRef,
     ReviewLayout,
     ReviewPage,
+    RunDiagnostics,
     RunId,
+    RunManifest,
+    RunStatus,
 )
 from my_ocr.workflow import DocumentWorkflow
 from my_ocr.domain import StructuredExtractionOptions
+
+
+def test_document_workflow_public_facade_methods_are_stable() -> None:
+    expected_methods = {
+        "prepare_review",
+        "run_reviewed_ocr",
+        "save_review_layout",
+        "rerun_page_layout",
+        "rerun_page_ocr",
+        "extract_rules",
+        "extract_structured",
+        "run_automatic",
+    }
+
+    missing_or_non_callable = sorted(
+        name for name in expected_methods if not callable(getattr(DocumentWorkflow, name, None))
+    )
+
+    assert not missing_or_non_callable
 
 
 def test_prepare_layout_review_writes_v3_manifest_and_relative_payloads(tmp_path: Path) -> None:
@@ -91,6 +117,70 @@ def test_page_reruns_replace_only_target_page(tmp_path: Path) -> None:
     assert (run_dir / "ocr" / "markdown.md").read_text(encoding="utf-8") == (
         "# Page 1\n\nUpdated Page 2"
     )
+
+
+def test_run_invalidation_policy_matches_review_and_ocr_status_contracts() -> None:
+    manifest = RunManifest.new(RunId("demo"), "input.pdf").with_updates(
+        status=RunStatus(layout="reviewed", ocr="complete", extraction="structured"),
+        diagnostics=RunDiagnostics(
+            layout=LayoutDiagnostics({"old_layout": True}),
+            ocr={"old_ocr": True},
+            extraction={"old_extraction": True},
+        ),
+    )
+
+    review_plan = review_layout_updated_policy(
+        manifest,
+        layout_status=None,
+        diagnostics=LayoutDiagnostics({"layout_profile_warning": "changed"}),
+    )
+    assert review_plan.artifact_groups == ("ocr", "extraction")
+    assert review_plan.status == RunStatus(
+        layout="prepared",
+        ocr="pending",
+        extraction="pending",
+    )
+    assert review_plan.diagnostics == RunDiagnostics(
+        layout=LayoutDiagnostics({"layout_profile_warning": "changed"}),
+        ocr={"old_ocr": True},
+        extraction={"old_extraction": True},
+    )
+
+    ocr_plan = ocr_result_updated_policy(manifest, diagnostics={"pages": 1})
+    assert ocr_plan.artifact_groups == ("extraction",)
+    assert ocr_plan.status == RunStatus(
+        layout="reviewed",
+        ocr="complete",
+        extraction="pending",
+    )
+    assert ocr_plan.diagnostics == RunDiagnostics(
+        layout=LayoutDiagnostics({"old_layout": True}),
+        ocr={"pages": 1},
+        extraction={},
+    )
+
+
+def test_run_invalidation_policy_clears_extraction_only_when_needed() -> None:
+    extracted_manifest = RunManifest.new(RunId("demo"), "input.pdf").with_updates(
+        status=RunStatus(layout="prepared", ocr="complete", extraction="rules")
+    )
+    pending_manifest = RunManifest.new(RunId("demo"), "input.pdf").with_updates(
+        status=RunStatus(layout="prepared", ocr="complete", extraction="pending")
+    )
+
+    extracted_plan = extraction_outputs_cleared_policy(extracted_manifest)
+    assert extracted_plan.artifact_groups == ("extraction",)
+    assert extracted_plan.status == RunStatus(
+        layout="prepared",
+        ocr="complete",
+        extraction="pending",
+    )
+    assert extracted_plan.updates_manifest
+
+    pending_plan = extraction_outputs_cleared_policy(pending_manifest)
+    assert pending_plan.artifact_groups == ("extraction",)
+    assert pending_plan.status is None
+    assert not pending_plan.updates_manifest
 
 
 def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path) -> None:
@@ -324,19 +414,21 @@ def _workflow(
     ocr_engine: FakeOcrEngine | None = None,
 ) -> DocumentWorkflow:
     return DocumentWorkflow(
-        store,
-        FakeNormalizer(),
-        layout_detector or FakeLayoutDetector(),
-        ocr_engine or FakeOcrEngine(),
-        FakeRulesExtractor(),
-        FakeStructuredExtractor(),
+        cast(Any, store),
+        cast(Any, FakeNormalizer()),
+        cast(Any, layout_detector or FakeLayoutDetector()),
+        cast(Any, ocr_engine or FakeOcrEngine()),
+        cast(Any, FakeRulesExtractor()),
+        cast(Any, FakeStructuredExtractor()),
     )
 
 
 def _image(path: Path) -> Path:
-    from PIL import Image
-
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (10, 10), "white").save(path)
+    path.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAFElEQVR4nGP8z4APMOGV"
+            "R44oAwB3hQET3sE3aAAAAABJRU5ErkJggg=="
+        )
+    )
     return path
-

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 import json
 import sys
 from importlib import import_module
@@ -21,8 +22,10 @@ from my_ocr.ocr.ocr_policy import (
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,
     build_ocr_chunks,
+    normalize_table_html,
+    normalize_bbox,
 )
-from my_ocr.support.text import normalize_table_html
+from my_ocr.support.text import normalize_table_html as support_normalize_table_html
 from my_ocr.domain import LayoutBlock, PageRef, ReviewLayout, ReviewPage
 from my_ocr.domain import OcrRuntimeOptions
 
@@ -229,7 +232,7 @@ def _review_block(
     index: int = 0,
     label: str = "text",
     content: str = "",
-    bbox: list[int] | None = None,
+    bbox: Sequence[float] | None = None,
     confidence: float = 1.0,
 ) -> LayoutBlock:
     return LayoutBlock(
@@ -238,7 +241,7 @@ def _review_block(
         label=label,
         content=content,
         confidence=confidence,
-        bbox=bbox or [1, 2, 10, 20],
+        bbox=list(bbox) if bbox is not None else [1.0, 2.0, 10.0, 20.0],
     )
 
 
@@ -939,10 +942,32 @@ def test_build_ocr_chunks_scales_glmocr_normalized_offsets() -> None:
     assert [chunk["source_indices"] for chunk in chunks] == [[0], [7]]
 
 
+@pytest.mark.parametrize(
+    ("coord_space", "raw_bbox", "width", "height", "expected"),
+    [
+        ("normalized", [100, 100, 500, 500], 200, 100, [20, 10, 100, 50]),
+        ("normalized_unit", [0.1, 0.2, 0.5, 0.6], 200, 100, [20, 20, 100, 60]),
+        ("pixel", [10.2, 20.6, 50.4, 60.5], 200, 100, [10, 21, 50, 60]),
+        (None, [0.1, 0.2, 0.5, 0.6], 200, 100, [20, 20, 100, 60]),
+        (None, [100, 100, 500, 500], 2000, 1000, [200, 100, 1000, 500]),
+        (None, [10, 20, 50, 60], 200, 100, [10, 20, 50, 60]),
+    ],
+)
+def test_normalize_bbox_preserves_supported_coord_space_behavior(
+    coord_space: str | None,
+    raw_bbox: list[float],
+    width: int,
+    height: int,
+    expected: list[int],
+) -> None:
+    assert normalize_bbox(raw_bbox, width, height, coord_space=coord_space) == expected
+
+
 def test_normalize_table_html_uses_plain_rows() -> None:
     html = "<table><tr><th>head1</th><th>head2</th></tr><tr><td>a</td><td>b</td></tr></table>"
 
     assert normalize_table_html(html) == "head1 | head2\na | b"
+    assert normalize_table_html is support_normalize_table_html
 
 
 def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path, monkeypatch) -> None:
