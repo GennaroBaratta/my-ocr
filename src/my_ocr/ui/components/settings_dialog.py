@@ -27,8 +27,8 @@ def open_settings_dialog(page: ft.Page, state: AppState) -> None:
     )
 
     def save() -> None:
-        state.ollama_endpoint = endpoint_field.value or state.ollama_endpoint
-        state.ollama_model = model_field.value or state.ollama_model
+        state.ollama_endpoint = _normalize_ocr_override(endpoint_field.value)
+        state.ollama_model = _normalize_ocr_override(model_field.value)
         state.run_root = run_root_field.value or state.run_root
         state.layout_profile = layout_profile_field.value or state.layout_profile
         state.load_recent_runs()
@@ -60,11 +60,16 @@ def open_settings_dialog(page: ft.Page, state: AppState) -> None:
     page.show_dialog(dialog)
 
 
-def _styled_text_field(label: str, value: str) -> ft.TextField:
+def _styled_text_field(label: str, value: str | None) -> ft.TextField:
     field = ft.TextField()
     field.label = label
-    field.value = value
+    field.value = value or ""
     field.border_color = theme.BORDER
     field.focused_border_color = theme.PRIMARY
     field.text_size = 13
     return field
+
+
+def _normalize_ocr_override(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None

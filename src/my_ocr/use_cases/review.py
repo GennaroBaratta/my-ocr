@@ -12,6 +12,7 @@ from my_ocr.domain import (
     WorkflowResult,
 )
 from .ports import DocumentNormalizer, LayoutDetector, RunRepository
+from .invalidation import review_layout_updated_policy
 
 
 class ReviewUseCase:
@@ -51,9 +52,13 @@ class ReviewUseCase:
             raise
 
     def save_review_layout(self, run_id: RunId, layout: ReviewLayout) -> WorkflowResult:
-        snapshot = self._run_store.save_review_layout_and_invalidate_downstream(
-            run_id, layout, ProviderArtifacts.empty()
+        snapshot = self._run_store.open_run(run_id)
+        plan = review_layout_updated_policy(
+            snapshot.manifest,
+            layout_status=layout.status,
         )
+        self._run_store.save_review_layout(run_id, layout, ProviderArtifacts.empty())
+        snapshot = self._run_store.apply_invalidation_plan(run_id, plan)
         assert snapshot is not None
         return WorkflowResult(snapshot=snapshot)
 
@@ -74,12 +79,13 @@ class ReviewUseCase:
         if not result.layout.pages:
             raise MissingPage(f"Layout detector returned no page {page_number}")
         layout = _replace_review_page(snapshot, page_number, result.layout.pages[0])
-        snapshot = self._run_store.save_review_layout_and_invalidate_downstream(
-            run_id,
-            layout,
-            result.artifacts,
-            result.diagnostics,
+        plan = review_layout_updated_policy(
+            snapshot.manifest,
+            layout_status=layout.status,
+            diagnostics=result.diagnostics,
         )
+        self._run_store.save_review_layout(run_id, layout, result.artifacts)
+        snapshot = self._run_store.apply_invalidation_plan(run_id, plan)
         return WorkflowResult(snapshot=snapshot, warning=result.diagnostics.warning)
 
 

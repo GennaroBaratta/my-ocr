@@ -25,12 +25,17 @@ def effective_zoom_level(state: Any, image_width: int | None) -> float:
 
 
 def set_manual_zoom(state: Any, value: float) -> float:
+    if hasattr(state, "set_manual_zoom"):
+        return state.set_manual_zoom(value)
     state.session.zoom_mode = ZOOM_MODE_MANUAL
     state.session.zoom_level = clamp_zoom(value)
     return state.session.zoom_level
 
 
 def set_fit_width_zoom(state: Any) -> None:
+    if hasattr(state, "set_fit_width_zoom"):
+        state.set_fit_width_zoom()
+        return
     state.session.zoom_mode = ZOOM_MODE_FIT_WIDTH
 
 
@@ -43,6 +48,9 @@ def toggle_fit_width_zoom(state: Any, image_width: int | None) -> float:
 
 
 def set_zoom_available_width(state: Any, width: float | None) -> None:
+    if hasattr(state, "set_zoom_available_width"):
+        state.set_zoom_available_width(width)
+        return
     state.session.zoom_fit_width = max(0.0, float(width or 0))
 
 
@@ -51,4 +59,3 @@ def zoom_label_text(state: Any, scale: float) -> str:
     if state.session.zoom_mode == ZOOM_MODE_FIT_WIDTH:
         return f"Fit {percent}"
     return percent
-

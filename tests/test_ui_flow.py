@@ -6,9 +6,11 @@ from typing import cast
 import flet as ft
 
 from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.use_cases.invalidation import ocr_result_updated_policy
 from my_ocr.domain import ProviderArtifacts
 from my_ocr.domain import OcrPageResult, OcrRunResult, PageRef, ReviewLayout, RunId
 from my_ocr.ui.components.code_display import build_code_display
+from my_ocr.ui.app import resolved_route_for_loaded_run
 from my_ocr.ui.ocr_result_text import current_page_ocr_markdown_for_state, ocr_json_text_for_state
 from my_ocr.ui.features.results.actions import ResultsScreenActions
 from my_ocr.ui.state import AppState
@@ -68,6 +70,28 @@ def test_results_page_rerun_reload_preserves_active_page(tmp_path: Path) -> None
     assert state.current_page_number == 2
 
 
+def test_results_route_for_review_ready_run_resolves_back_to_review(tmp_path: Path) -> None:
+    _seed_review_ready_run(tmp_path / "runs", "demo")
+    state = AppState()
+    state.run_root = str(tmp_path / "runs")
+    state.load_run("demo")
+
+    route = resolved_route_for_loaded_run("/results/demo", state)
+
+    assert route == "/review/demo"
+
+
+def test_results_route_for_ocr_complete_run_stays_on_results(tmp_path: Path) -> None:
+    _seed_ocr_run(tmp_path / "runs", "demo")
+    state = AppState()
+    state.run_root = str(tmp_path / "runs")
+    state.load_run("demo")
+
+    route = resolved_route_for_loaded_run("/results/demo", state)
+
+    assert route == "/results/demo"
+
+
 def _seed_ocr_run(run_root: Path, run_id: str, *, page_count: int = 1) -> None:
     store = FilesystemRunStore(run_root)
     workspace = store.start_run("input.pdf", RunId(run_id))
@@ -75,8 +99,7 @@ def _seed_ocr_run(run_root: Path, run_id: str, *, page_count: int = 1) -> None:
     ocr_pages: list[OcrPageResult] = []
     for page_number in range(1, page_count + 1):
         page_path = workspace.work_dir / "pages" / f"page-{page_number:04d}.png"
-        page_path.parent.mkdir(parents=True, exist_ok=True)
-        page_path.write_bytes(_PNG_BYTES)
+        _write_png(page_path)
         pages.append(
             PageRef(
                 page_number=page_number,
@@ -100,14 +123,42 @@ def _seed_ocr_run(run_root: Path, run_id: str, *, page_count: int = 1) -> None:
         ReviewLayout(pages=[], status="prepared"),
         ProviderArtifacts.empty(),
     )
-    store.write_ocr_result_and_invalidate_extraction(
+    ocr_result = OcrRunResult(
+        pages=ocr_pages,
+        markdown="# OCR",
+    )
+    manifest = store.open_run(RunId(run_id)).manifest
+    store.write_ocr_result(RunId(run_id), ocr_result, ProviderArtifacts.empty())
+    store.apply_invalidation_plan(
         RunId(run_id),
-        OcrRunResult(
-            pages=ocr_pages,
-            markdown="# OCR",
-        ),
+        ocr_result_updated_policy(manifest, diagnostics=ocr_result.diagnostics),
+    )
+
+
+def _seed_review_ready_run(run_root: Path, run_id: str) -> None:
+    store = FilesystemRunStore(run_root)
+    workspace = store.start_run("input.pdf", RunId(run_id))
+    page_path = workspace.work_dir / "pages" / "page-0001.png"
+    _write_png(page_path)
+    store.publish_prepared_run(
+        workspace,
+        [
+            PageRef(
+                page_number=1,
+                image_path="pages/page-0001.png",
+                width=10,
+                height=10,
+                resolved_path=page_path,
+            )
+        ],
+        ReviewLayout(pages=[], status="prepared"),
         ProviderArtifacts.empty(),
     )
+
+
+def _write_png(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_PNG_BYTES)
 
 
 _PNG_BYTES = (

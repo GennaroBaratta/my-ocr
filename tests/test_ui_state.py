@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
+from my_ocr.settings import InferenceProviderConfig
 from my_ocr.runs.store import FilesystemRunReadModel
 from my_ocr.runs.store import FilesystemRunStore
+from my_ocr.use_cases.invalidation import ocr_result_updated_policy
 from my_ocr.domain import ArtifactCopy, LayoutBlock, PageRef, ReviewLayout, ReviewPage, RunId
 from my_ocr.domain import ProviderArtifacts
 from my_ocr.domain import OcrPageResult, OcrRunResult
+from my_ocr.ui.components.ollama_status import OllamaStatus
 from my_ocr.ui.controller import _ocr_options
+from my_ocr.ui.components.settings_dialog import _normalize_ocr_override
+from my_ocr.ui.features.upload.screen import _build_inference_status_badge
 from my_ocr.ui.session import BoundingBox, PageData
 from my_ocr.ui.state import AppState
 
@@ -175,6 +182,30 @@ def test_app_state_loads_ocr_complete_run_without_extraction_as_ocr_first(
     assert state.session.extraction_json == {}
 
 
+def test_app_state_marks_review_ready_runs_as_needing_review_before_results(
+    tmp_path: Path,
+) -> None:
+    _seed_run(tmp_path / "runs", "demo")
+    state = AppState()
+    state.run_root = str(tmp_path / "runs")
+
+    state.load_run("demo")
+
+    assert state.session.run_status == "review_ready"
+    assert state.needs_review_before_results() is True
+
+
+def test_app_state_marks_ocr_complete_runs_as_results_ready(tmp_path: Path) -> None:
+    _seed_ocr_complete_run(tmp_path / "runs", "demo")
+    state = AppState()
+    state.run_root = str(tmp_path / "runs")
+
+    state.load_run("demo")
+
+    assert state.session.run_status == "ocr_complete"
+    assert state.needs_review_before_results() is False
+
+
 def test_run_root_setter_rebuilds_services_for_recent_runs(tmp_path: Path) -> None:
     _seed_run(tmp_path / "runs-a", "a")
     _seed_run(tmp_path / "runs-b", "b")
@@ -202,14 +233,120 @@ def test_ocr_options_include_ui_ollama_settings() -> None:
     assert options.endpoint == "http://manual.example/api/generate"
 
 
-def _seed_run(run_root: Path, run_id: str) -> None:
-    from PIL import Image  # type: ignore[import-not-found]
+def test_app_state_uses_nullable_ollama_override_fields() -> None:
+    state = AppState()
 
+    assert state.ollama_model is None
+    assert state.ollama_endpoint is None
+
+
+def test_fresh_ocr_options_use_default_layout_profile_and_no_overrides() -> None:
+    state = AppState()
+
+    options = _ocr_options(state)
+
+    assert options.layout_profile == "auto"
+    assert options.model is None
+    assert options.endpoint is None
+
+
+def test_ocr_options_preserve_endpoint_only_explicit_override() -> None:
+    state = AppState()
+    state.ollama_endpoint = "http://manual.example/api/generate"
+
+    options = _ocr_options(state)
+
+    assert options.layout_profile == "auto"
+    assert options.model is None
+    assert options.endpoint == "http://manual.example/api/generate"
+
+
+def test_ocr_options_preserve_nullable_explicit_overrides() -> None:
+    state = AppState()
+    state.layout_profile = "pp_doclayout_formula"
+    state.ollama_model = "manual-model"
+
+    options = _ocr_options(state)
+
+    assert options.layout_profile == "pp_doclayout_formula"
+    assert options.model == "manual-model"
+    assert options.endpoint is None
+
+
+def test_normalize_ocr_override_treats_blank_input_as_no_override() -> None:
+    assert _normalize_ocr_override(None) is None
+    assert _normalize_ocr_override("") is None
+    assert _normalize_ocr_override("   ") is None
+    assert _normalize_ocr_override("  http://manual.example/api/generate  ") == (
+        "http://manual.example/api/generate"
+    )
+
+
+def test_upload_status_badge_uses_openai_compatible_config_without_ollama_fallback() -> None:
+    state = cast(
+        AppState,
+        SimpleNamespace(
+            services=SimpleNamespace(
+                inference_config=_inference_config(
+                    provider="openai_compatible",
+                    base_url="http://localhost:8000/v1",
+                    endpoint="http://localhost:8000/v1/chat/completions",
+                )
+            ),
+            ollama_endpoint=None,
+        ),
+    )
+
+    badge = _build_inference_status_badge(state)
+
+    assert isinstance(badge, OllamaStatus)
+    assert badge._endpoint == "http://localhost:8000/v1/chat/completions"
+    assert badge._probe_endpoint == "http://localhost:8000/v1"
+    assert badge._label.value == "OpenAI-compatible: Checking…"
+    assert state.ollama_endpoint is None
+
+
+def test_upload_status_badge_keeps_explicit_endpoint_override_nullable_for_ocr() -> None:
+    state = cast(
+        AppState,
+        SimpleNamespace(
+            services=SimpleNamespace(
+                inference_config=_inference_config(
+                    provider="ollama",
+                    base_url="http://localhost:11434",
+                    endpoint="http://localhost:11434/api/generate",
+                )
+            ),
+            ollama_endpoint="http://manual.example/api/generate",
+        ),
+    )
+
+    badge = _build_inference_status_badge(state)
+
+    assert badge._endpoint == "http://manual.example/api/generate"
+    assert badge._probe_endpoint == "http://manual.example"
+    assert badge._label.value == "Ollama: Checking…"
+    assert state.ollama_endpoint == "http://manual.example/api/generate"
+
+
+def test_inference_status_badge_uses_provider_accurate_ready_and_offline_labels() -> None:
+    badge = OllamaStatus(
+        provider="openai_compatible",
+        endpoint="http://localhost:8000/v1/chat/completions",
+    )
+
+    badge._apply_status(True)
+    assert badge._label.value == "OpenAI-compatible: Ready"
+
+    badge._apply_status(False)
+    assert badge._label.value == "OpenAI-compatible: Offline"
+
+
+def _seed_run(run_root: Path, run_id: str) -> None:
     store = FilesystemRunStore(run_root)
     workspace = store.start_run("input.pdf", RunId(run_id))
     page_path = workspace.work_dir / "pages" / "page-0001.png"
-    page_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (10, 10), "white").save(page_path)
+    _write_png(page_path)
     store.publish_prepared_run(
         workspace,
         [
@@ -226,14 +363,23 @@ def _seed_run(run_root: Path, run_id: str) -> None:
     )
 
 
+def _inference_config(*, provider: str, base_url: str, endpoint: str) -> InferenceProviderConfig:
+    return InferenceProviderConfig(
+        provider=provider,
+        model="test-model",
+        base_url=base_url,
+        endpoint=endpoint,
+        timeout_seconds=3,
+    )
+
+
 def _seed_run_with_pages(run_root: Path, run_id: str, *, page_count: int) -> None:
     store = FilesystemRunStore(run_root)
     workspace = store.start_run("input.pdf", RunId(run_id))
     pages: list[PageRef] = []
     for page_number in range(1, page_count + 1):
         page_path = workspace.work_dir / "pages" / f"page-{page_number:04d}.png"
-        page_path.parent.mkdir(parents=True, exist_ok=True)
-        page_path.write_bytes(_PNG_BYTES)
+        _write_png(page_path)
         pages.append(
             PageRef(
                 page_number=page_number,
@@ -251,6 +397,11 @@ def _seed_run_with_pages(run_root: Path, run_id: str, *, page_count: int) -> Non
     )
 
 
+def _write_png(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_PNG_BYTES)
+
+
 _PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
     b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
@@ -260,13 +411,10 @@ _PNG_BYTES = (
 
 
 def _seed_reviewed_v3_run(run_root: Path, run_id: str) -> None:
-    from PIL import Image  # type: ignore[import-not-found]
-
     store = FilesystemRunStore(run_root)
     workspace = store.start_run("input.pdf", RunId(run_id))
     page_path = workspace.work_dir / "pages" / "page-0001.png"
-    page_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (10, 10), "white").save(page_path)
+    _write_png(page_path)
     provider_dir = workspace.work_dir / "layout-provider" / "page-0001"
     provider_dir.mkdir(parents=True, exist_ok=True)
     (provider_dir / "layout.json").write_text("{}", encoding="utf-8")
@@ -301,19 +449,21 @@ def _seed_reviewed_v3_run(run_root: Path, run_id: str) -> None:
 def _seed_ocr_complete_run(run_root: Path, run_id: str) -> None:
     _seed_run(run_root, run_id)
     store = FilesystemRunStore(run_root)
-    store.write_ocr_result_and_invalidate_extraction(
+    ocr_result = OcrRunResult(
+        pages=[
+            OcrPageResult(
+                page_number=1,
+                image_path="pages/page-0001.png",
+                markdown="# OCR",
+                markdown_source="sdk_markdown",
+                provider_path="ocr/provider/page-0001",
+            )
+        ],
+        markdown="# OCR",
+    )
+    manifest = store.open_run(RunId(run_id)).manifest
+    store.write_ocr_result(RunId(run_id), ocr_result, ProviderArtifacts.empty())
+    store.apply_invalidation_plan(
         RunId(run_id),
-        OcrRunResult(
-            pages=[
-                OcrPageResult(
-                    page_number=1,
-                    image_path="pages/page-0001.png",
-                    markdown="# OCR",
-                    markdown_source="sdk_markdown",
-                    provider_path="ocr/provider/page-0001",
-                )
-            ],
-            markdown="# OCR",
-        ),
-        ProviderArtifacts.empty(),
+        ocr_result_updated_policy(manifest, diagnostics=ocr_result.diagnostics),
     )

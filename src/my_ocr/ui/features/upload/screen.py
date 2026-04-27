@@ -1,4 +1,4 @@
-"""Upload screen — file picker, recent runs, and Ollama status."""
+"""Upload screen — file picker, recent runs, and inference status."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def build_upload_view(
 
     drop_zone = build_drop_zone(browse_files)
     recent_runs = build_recent_runs(page, state)
-    ollama_badge = OllamaStatus(state.ollama_endpoint)
+    inference_badge = _build_inference_status_badge(state)
 
     content = ft.Column(
         [
@@ -101,7 +101,7 @@ def build_upload_view(
                                 right=24,
                             ),
                             ft.Container(
-                                content=ollama_badge,
+                                content=inference_badge,
                                 left=16,
                                 bottom=16,
                             ),
@@ -137,4 +137,13 @@ def _start_review_prep(
         loading_message=f"Preparing layout review for {Path(file_path).name}…",
         error_prefix="Error preparing review",
         on_success=on_success,
+    )
+
+
+def _build_inference_status_badge(state: AppState) -> OllamaStatus:
+    inference_config = state.services.inference_config
+    return OllamaStatus(
+        provider=inference_config.provider,
+        endpoint=inference_config.endpoint,
+        endpoint_override=state.ollama_endpoint,
     )

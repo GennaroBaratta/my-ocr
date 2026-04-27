@@ -29,7 +29,12 @@ __all__ = [
 def build_code_display(state: AppState) -> ft.Column:
     markdown_pages = _markdown_pages_for_state(state)
     current_page_index = _current_page_index(state, markdown_pages)
-    page_detail = _page_detail_text(current_page_index, markdown_pages)
+    page_count = len(markdown_pages)
+    page_detail = (
+        "No pages"
+        if page_count == 0
+        else f"Page {current_page_index + 1} of {page_count}"
+    )
     md_content = markdown_pages[current_page_index] or "_No OCR markdown available for this page._"
 
     ocr_json_text = _ocr_json_text_for_state(state)
@@ -118,7 +123,7 @@ def build_code_display(state: AppState) -> ft.Column:
 
 
 def _on_tab_change(e: ft.Event[ft.Tabs], state: AppState) -> None:
-    state.session.active_result_tab = int(e.data) if e.data else 0
+    state.set_active_result_tab(int(e.data) if e.data else 0)
 
 
 def _build_panel(title: str, detail: str, body: ft.Control) -> ft.Column:
@@ -154,11 +159,3 @@ def _build_panel(title: str, detail: str, body: ft.Control) -> ft.Column:
         spacing=0,
         expand=True,
     )
-
-
-def _page_detail_text(current_page_index: int, markdown_pages: list[str]) -> str:
-    page_count = len(markdown_pages)
-    if page_count == 0:
-        return "No pages"
-    return f"Page {current_page_index + 1} of {page_count}"
-

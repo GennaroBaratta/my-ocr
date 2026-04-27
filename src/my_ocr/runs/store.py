@@ -21,10 +21,12 @@ from my_ocr.domain import (
     RunCommitFailed,
     RunDiagnostics,
     RunId,
+    RunInvalidationPlan,
     RunManifest,
     RunNotFound,
     RunSnapshot,
     RunStatus,
+    InvalidatedArtifactGroup,
 )
 from my_ocr.runs.artifact_io import (
     RunArtifactPaths,
@@ -34,10 +36,6 @@ from my_ocr.runs.artifact_io import (
     write_ocr_result_payload,
     write_review_layout_payload,
 )
-from my_ocr.runs.invalidation import InvalidatedArtifactGroup
-from my_ocr.runs.invalidation import extraction_outputs_cleared_policy
-from my_ocr.runs.invalidation import ocr_result_updated_policy
-from my_ocr.runs.invalidation import review_layout_updated_policy
 from my_ocr.runs.manifest import load_manifest, write_manifest
 
 DEFAULT_RUN_ROOT = "data/runs"
@@ -99,44 +97,37 @@ class FilesystemRunStore:
     def open_run(self, run_id: RunId | str) -> RunSnapshot:
         return _load_snapshot(self._run_dir(run_id))
 
-    def save_review_layout_and_invalidate_downstream(
+    def save_review_layout(
         self,
         run_id: RunId | str,
         layout: ReviewLayout,
         artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
     ) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
-        snapshot = _load_snapshot(run_dir)
         _write_review_layout_to_dir(run_dir, layout, artifacts)
-        plan = review_layout_updated_policy(
-            snapshot.manifest,
-            layout_status=layout.status,
-            diagnostics=diagnostics,
-        )
-        _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
-        manifest = snapshot.manifest.with_updates(
-            status=plan.status,
-            diagnostics=plan.diagnostics,
-        )
-        write_manifest(run_dir, manifest)
         return _load_snapshot(run_dir)
 
-    def write_ocr_result_and_invalidate_extraction(
+    def write_ocr_result(
         self, run_id: RunId | str, result: OcrRunResult, artifacts: ProviderArtifacts
     ) -> RunSnapshot:
         run_dir = self._existing_run_dir(run_id)
-        snapshot = _load_snapshot(run_dir)
         _write_ocr_result_to_dir(run_dir, result, artifacts)
-        plan = ocr_result_updated_policy(snapshot.manifest, diagnostics=result.diagnostics)
+        return _load_snapshot(run_dir)
+
+    def apply_invalidation_plan(
+        self, run_id: RunId | str, plan: RunInvalidationPlan
+    ) -> RunSnapshot:
+        run_dir = self._existing_run_dir(run_id)
+        snapshot = _load_snapshot(run_dir)
         _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
-        write_manifest(
-            run_dir,
-            snapshot.manifest.with_updates(
-                status=plan.status,
-                diagnostics=plan.diagnostics,
-            ),
-        )
+        if plan.updates_manifest:
+            write_manifest(
+                run_dir,
+                snapshot.manifest.with_updates(
+                    status=plan.status,
+                    diagnostics=plan.diagnostics,
+                ),
+            )
         return _load_snapshot(run_dir)
 
     def write_rules_extraction(
@@ -192,21 +183,6 @@ class FilesystemRunStore:
                 ),
             ),
         )
-        return _load_snapshot(run_dir)
-
-    def clear_extraction_outputs(self, run_id: RunId | str) -> RunSnapshot:
-        run_dir = self._existing_run_dir(run_id)
-        snapshot = _load_snapshot(run_dir)
-        plan = extraction_outputs_cleared_policy(snapshot.manifest)
-        _remove_invalidated_artifacts(run_dir, plan.artifact_groups)
-        if plan.updates_manifest:
-            write_manifest(
-                run_dir,
-                snapshot.manifest.with_updates(
-                    status=plan.status,
-                    diagnostics=plan.diagnostics,
-                ),
-            )
         return _load_snapshot(run_dir)
 
     def _run_dir(self, run_id: RunId | str) -> Path:

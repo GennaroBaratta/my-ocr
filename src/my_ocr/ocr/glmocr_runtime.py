@@ -9,8 +9,10 @@ from typing import Any
 from my_ocr.domain import ArtifactCopy, OcrPageResult, PageRef, ProviderArtifacts
 from my_ocr.domain import OcrRuntimeOptions
 from my_ocr.ingest.normalize import IMAGE_SUFFIXES
-from my_ocr.ocr.ocr_policy import detect_bbox_coord_space
+from my_ocr.inference import InferenceClient, OllamaClient, OpenAICompatibleClient
+from my_ocr.ocr.bbox import detect_bbox_coord_space
 from my_ocr.ocr.scratch_paths import ProviderScratchPaths
+from my_ocr.settings import InferenceProviderConfig, resolve_inference_provider_config
 from my_ocr.settings import resolve_ocr_api_client as _resolve_configured_ocr_api_client
 
 
@@ -30,6 +32,35 @@ def resolve_ocr_api_client(options: OcrRuntimeOptions) -> tuple[str, str, int]:
         options.endpoint or config_endpoint,
         options.num_ctx if options.num_ctx is not None else config_num_ctx,
     )
+
+
+def build_fallback_inference_client(
+    options: OcrRuntimeOptions,
+    config: InferenceProviderConfig | None = None,
+) -> InferenceClient:
+    resolved = config or resolve_inference_provider_config(options.config_path)
+    model = options.model or resolved.model
+    endpoint = options.endpoint or resolved.endpoint
+    num_ctx = options.num_ctx if options.num_ctx is not None else resolved.num_ctx
+    if resolved.provider == "ollama":
+        return OllamaClient(
+            endpoint=endpoint,
+            model=model,
+            timeout=resolved.timeout_seconds,
+            default_max_tokens=resolved.max_tokens,
+            default_num_ctx=num_ctx,
+            default_extra=resolved.extra,
+        )
+    if resolved.provider == "openai_compatible":
+        return OpenAICompatibleClient(
+            endpoint=endpoint,
+            model=model,
+            timeout=resolved.timeout_seconds,
+            api_key=resolved.api_key,
+            default_max_tokens=resolved.max_tokens,
+            default_extra=resolved.extra,
+        )
+    raise RuntimeError(f"Unsupported inference provider: {resolved.provider}")
 
 
 def normalize_page_refs(pages: Sequence[PageRef]) -> tuple[PageRef, ...]:

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from my_ocr.domain import ReviewPage
+from my_ocr.inference import InferenceClient
 from my_ocr.ocr import fallback as _fallback_mod
 from my_ocr.ocr import glmocr_artifacts as _artifacts_mod
 from my_ocr.ocr import glmocr_retry as _retry_mod
@@ -21,14 +22,12 @@ class GlmOcrPageProcessor:
         self,
         paths: ProviderScratchPaths,
         *,
-        model: str,
-        endpoint: str,
-        num_ctx: int,
+        recognizer: InferenceClient,
+        model: str | None = None,
     ) -> None:
         self._paths = paths
+        self._recognizer = recognizer
         self._model = model
-        self._endpoint = endpoint
-        self._num_ctx = num_ctx
 
     def process_sdk_page(
         self,
@@ -128,9 +127,8 @@ class GlmOcrPageProcessor:
                 page_json=page_layout,
                 coord_space=page_coord_space,
                 page_fallback_dir=self._paths.fallback_page_dir(page_number),
+                recognizer=self._recognizer,
                 model=self._model,
-                endpoint=self._endpoint,
-                num_ctx=self._num_ctx,
             )
             crop_markdown = crop_markdown.strip()
             if has_meaningful_text(crop_markdown):
@@ -160,7 +158,6 @@ class GlmOcrPageProcessor:
     def _recognize_full_page_markdown(self, page_path: str) -> str:
         return _fallback_mod.recognize_full_page(
             page_path,
+            recognizer=self._recognizer,
             model=self._model,
-            endpoint=self._endpoint,
-            num_ctx=self._num_ctx,
         ).strip()

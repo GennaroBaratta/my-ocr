@@ -7,23 +7,23 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11%20to%203.13-0f172a?style=flat-square" alt="Python 3.11 to 3.13" />
   <img src="https://img.shields.io/badge/runtime-local%20first-0f172a?style=flat-square" alt="Local first" />
-  <img src="https://img.shields.io/badge/OCR-GLM--OCR%20%2B%20Ollama-0f172a?style=flat-square" alt="GLM-OCR and Ollama" />
+  <img src="https://img.shields.io/badge/OCR-GLM--OCR%20%2B%20pluggable%20inference-0f172a?style=flat-square" alt="GLM-OCR and pluggable inference" />
   <img src="https://img.shields.io/badge/UI-Flet-0f172a?style=flat-square" alt="Flet UI" />
   <img src="https://img.shields.io/badge/tests-pytest-0f172a?style=flat-square" alt="pytest" />
 </p>
 
 **A local-first document extraction workbench for PDFs and scanned images.**
 
-Drop a document in, **review and correct the detected layout before OCR runs**, then export markdown, JSON, and structured fields. Everything runs against a local Ollama endpoint — no hosted SaaS, no data leaving the machine.
+Drop in a document, **review and correct the detected layout before OCR runs**, then export markdown, JSON, and structured fields. The default runtime is local Ollama. Through `pipeline.inference`, you can also point my-ocr at an OpenAI-compatible or vLLM server you run yourself. No data leaves the machine unless you configure a remote provider.
 
-What makes it different: most OCR tools treat layout detection as a hidden step. Here it is a first-class, editable stage, because layout errors are the single largest cause of bad OCR output downstream.
+Most OCR tools hide layout detection. my-ocr makes it a first-class, editable step because layout errors are often the root cause of bad OCR output.
 
 The screenshots below are real GUI captures from a local run of [`docs/demo/PublicWaterMassMailing.pdf`](docs/demo/PublicWaterMassMailing.pdf), a public sample document checked into the repo for reproducible demos.
 
 ## Highlights
 
 - **Review-first workflow.** Edit layout boxes per page before OCR becomes canonical.
-- **Local stack.** OCR and structured extraction talk to Ollama on `localhost`.
+- **Local-first stack.** OCR and structured extraction default to Ollama on `localhost`, with OpenAI-compatible/vLLM client support through `pipeline.inference`.
 - **Reproducible runs.** Every run writes pages, raw OCR payloads, markdown, JSON, metadata, predictions, and reports to a single folder.
 - **Two extraction paths.** Compare a deterministic rules baseline against direct structured generation.
 - **Evaluation built in.** Gold labels and markdown reports let you measure changes, not guess.
@@ -56,7 +56,7 @@ The screenshots below are real GUI captures from a local run of [`docs/demo/Publ
 
 ### 1. Upload a document
 
-Focused upload screen with a clear drop zone, lightweight run history, and local Ollama status.
+Focused upload screen with a clear drop zone, lightweight run history, and local inference status.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-05.png" alt="Upload workspace" width="88%" />
@@ -64,7 +64,7 @@ Focused upload screen with a clear drop zone, lightweight run history, and local
 
 ### 2. Review the layout
 
-The core idea of the project: inspect detected regions, page by page, add boxes, remove boxes, and fix the layout *before* OCR becomes canonical.
+Inspect detected regions page by page. Add boxes, remove boxes, and fix the layout *before* OCR becomes canonical.
 
 <p align="center">
   <img src="docs/screenshots/Screenshot From 2026-04-20 23-28-54.png" alt="Document review workspace" width="88%" />
@@ -100,7 +100,7 @@ Clean reading layout for comparing OCR markdown against the page preview before 
 
 - Python `3.11`, `3.12`, or `3.13`
 - [`uv`](https://docs.astral.sh/uv/)
-- [Ollama](https://ollama.com/) running locally
+- [Ollama](https://ollama.com/) running locally for the default setup, or a separately managed OpenAI-compatible/vLLM endpoint configured in `config/local.yaml`
 - NVIDIA driver for CUDA acceleration on Windows or Linux
 
 ### Install
@@ -127,9 +127,51 @@ ollama create glm-ocr-8k:latest -f Modelfile
 ollama serve
 ```
 
-Default OCR model: `glm-ocr-8k:latest`. Default OCR endpoint: `http://localhost:11434/api/generate`.
+Default OCR model: `glm-ocr-8k:latest`. Default inference provider: `ollama` at `http://localhost:11434`.
 
-The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, which defaults to `PaddlePaddle/PP-DocLayoutV3_safetensors`. Transformers may fetch that checkpoint on the first run if your Hugging Face cache is empty; after that, layout recognition reuses the local cache and keeps the loaded detector in memory across pages for the current run. Review-first OCR uses the saved `layout/review.json` model directly, so the Run OCR step does not start the layout detector again. To pin storage explicitly, set `pipeline.layout.model_dir` to a local checkpoint directory.
+### Configure inference
+
+Runtime inference settings live under `pipeline.inference` in `config/local.yaml`:
+
+```yaml
+pipeline:
+  inference:
+    provider: ollama
+    base_url: http://localhost:11434
+    model: glm-ocr-8k:latest
+    num_ctx: 8192
+    max_tokens:
+    api_key:
+    extra:
+      keep_alive: 15m
+```
+
+For an OpenAI-compatible/vLLM server, point `base_url` at the `/v1` root. my-ocr maps it to `/v1/chat/completions` internally and does not probe the server during bootstrap. This is client support only: my-ocr does not launch or manage vLLM, so keep that server running outside the app.
+
+```yaml
+pipeline:
+  inference:
+    provider: openai_compatible
+    base_url: http://localhost:8000/v1
+    model: qwen2-vl
+    api_key: local-token-if-needed
+    max_tokens: 1024
+    extra:
+      top_k: 5
+```
+
+Config field behavior:
+
+- `provider` must be `ollama` or `openai_compatible`.
+- `base_url` is the provider root. Ollama resolves to `/api/generate`; OpenAI-compatible resolves to `/chat/completions` under the `/v1` root.
+- `api_key` is optional. It is sent as a Bearer token for OpenAI-compatible providers and is normally left blank for local Ollama.
+- `max_tokens` maps to Ollama `num_predict` or OpenAI-compatible `max_tokens`.
+- `num_ctx` is an Ollama context option. For OpenAI-compatible servers, put provider-specific context settings in `extra` if that server accepts them.
+- `extra` carries provider-specific request options. For OpenAI-compatible providers, extra fields are merged into the top-level raw HTTP `/chat/completions` JSON body after adapter-owned fields are built. Extras cannot override adapter-owned fields such as `model`, `messages`, `temperature`, `max_tokens`, or `response_format`. Deprecated `guided_*` fields are rejected.
+
+Structured extraction requests JSON through the project-owned `StructuredOutputRequest` contract, then validates the result locally before it can become canonical. The app rejects schema echoes, invalid fields, and values missing from OCR text or images. If structured extraction looks suspicious or fails validation, deterministic `rules.json` stays canonical.
+
+The layout detector uses `pipeline.layout.model_dir` in `config/local.yaml`, defaulting to `PaddlePaddle/PP-DocLayoutV3_safetensors`. If your Hugging Face cache is empty, Transformers may fetch that checkpoint on the first run. Later runs reuse the local cache, and the current run keeps the loaded detector in memory across pages. Review-first OCR reads the saved `layout/review.json` directly, so Run OCR does not start layout detection again. To pin storage, set `pipeline.layout.model_dir` to a local checkpoint directory.
 
 ### Launch the UI
 
@@ -206,23 +248,27 @@ data/runs/demo001/
 
 Key files:
 
-- `run.json` — v3 manifest with input metadata, immutable page identities, status, and diagnostics
-- `layout/review.json` — page-by-page layout state used by the review step
-- `ocr/markdown.md` — merged markdown output for the run
-- `ocr/pages.json` — project-owned OCR payload with page records and relative artifact references
-- `layout/provider/` and `ocr/provider/` — saved GLM-OCR provider payloads per page
-- `extraction/` — rules, structured, raw structured metadata, and canonical extraction outputs
+- `run.json`: v3 manifest with input metadata, immutable page identities, status, and diagnostics
+- `layout/review.json`: page-by-page layout state used by the review step
+- `ocr/markdown.md`: merged markdown output for the run
+- `ocr/pages.json`: project-owned OCR payload with page records and relative artifact references
+- `layout/provider/` and `ocr/provider/`: saved GLM-OCR provider payloads per page
+- `extraction/`: rules, structured, raw structured metadata, and canonical extraction outputs
 
 Committed run payloads use paths relative to the run folder. Recent-run discovery only lists folders with a valid v3 `run.json`.
 
+### Artifact schema and migration stance
+
+No artifact schemas changed during the clean-break `pipeline.inference` refactor. Existing v3 run folders continue to load through the current Pydantic models, and no migration or upgrade step is needed. If a future change updates `run.json`, `layout/review.json`, `ocr/pages.json`, or extraction outputs, that change must ship with migration notes, fixture updates, and schema tests.
+
 ## Design Decisions & Trade-offs
 
-Choices that shaped this codebase, and what they cost:
+Choices that shaped the codebase:
 
 - **Local-first over SaaS OCR.** Keeps documents on the machine and makes runs fully reproducible. Cost: latency on dense pages depends on local hardware.
 - **Review-first layout correction.** OCR quality is bottlenecked by layout detection, so the UI exposes layout boxes as an editable stage instead of a hidden one. Cost: adds a human step; worth it for noisy scans.
 - **Rules baseline alongside LLM extraction.** Gives a deterministic floor and a regression guard when LLM output drifts. Cost: the rules extractor is narrow by design.
-- **Run-folder artifacts over a database.** Every run is a self-contained folder that can be zipped, diffed, or shared. Cost: no built-in query layer — swap in a DB if you need one.
+- **Run-folder artifacts over a database.** Every run is a self-contained folder that can be zipped, diffed, or shared. Cost: no built-in query layer, swap in a DB if you need one.
 - **Flet for the UI.** Python-only stack, no JS toolchain, fast to iterate for a single-machine workbench. Cost: smaller ecosystem than Electron/web stacks.
 - **Intentional scope cuts.** No multi-tenant mode, no hosted deployment, no user management. This is a local workbench, not a product.
 
@@ -230,7 +276,7 @@ Choices that shaped this codebase, and what they cost:
 
 - **UI:** Flet
 - **OCR pipeline:** GLM-OCR
-- **Local inference serving:** Ollama
+- **Inference serving:** Ollama by default; OpenAI-compatible/vLLM endpoints via `pipeline.inference`
 - **PDF / image normalization:** Pillow, PyMuPDF
 - **Evaluation and reporting:** project-native Python utilities
 
@@ -265,12 +311,13 @@ src/my_ocr/
     extraction.py
   inference/
     __init__.py
+    contracts.py
     ollama.py
+    openai_compatible.py
   extraction/
     __init__.py
     canonical.py
     evaluation.py
-    ollama_structured.py
     parse_json.py
     rules.py
     structured.py
@@ -319,7 +366,6 @@ src/my_ocr/
       upload/
       review/
       results/
-    screens/
     components/
 
 data/
@@ -331,7 +377,7 @@ data/
 
 ## Testing
 
-The repo ships with a pytest suite covering CLI workflows, OCR glue code, review artifacts, evaluation, architecture boundaries, and the Flet UI components.
+The repo ships with a pytest suite covering CLI workflows, OCR glue code, review artifacts, evaluation, architecture boundaries, and the Flet UI components. Default tests are offline and deterministic; they don't require a live Ollama, OpenAI, or vLLM server.
 
 ```bash
 make test     # uv run pytest
@@ -351,10 +397,10 @@ make report RUN_ID=demo001   # regenerate evaluation report for a run
 
 - PDF rasterization requires the `pdf` extra.
 - CUDA acceleration requires a compatible NVIDIA driver.
-- OCR and structured extraction both assume a local Ollama setup is available.
+- OCR and structured extraction default to local Ollama. OpenAI-compatible/vLLM support is a client adapter only; run and manage that server separately.
 - The rules extractor is intentionally narrow and should be treated as a baseline.
 - Very large or visually dense pages can stress local inference latency.
-- No CI/CD yet — tests are run locally via `make test`.
+- No CI/CD yet. Tests are run locally via `make test`.
 
 ## Dev Note
 

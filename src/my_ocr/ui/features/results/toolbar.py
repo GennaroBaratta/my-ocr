@@ -64,62 +64,70 @@ def build_results_toolbar(
     )
 
     toolbar = ft.Container(
-        content=ft.Row(
+        content=ft.Column(
             [
-                ft.IconButton(
-                    icon=ft.Icons.ARROW_BACK,
-                    icon_color=theme.TEXT_PRIMARY,
-                    icon_size=20,
-                    tooltip="Back to Layout Review",
-                    on_click=lambda: page.go(f"/review/{state.session.run_id}"),
-                ),
-                ft.VerticalDivider(width=1, color=theme.BORDER),
-                ft.IconButton(
-                    icon=ft.Icons.RESTART_ALT,
-                    icon_color=theme.TEXT_PRIMARY,
-                    icon_size=20,
-                    tooltip="Start New Document",
-                    on_click=lambda: page.go("/"),
-                ),
-                ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.SUCCESS, size=18),
-                ft.Column(
+                ft.Row(
                     [
-                        ft.Text(
-                            f"{filename} — OCR Complete",
-                            size=14,
-                            weight=ft.FontWeight.W_600,
-                            color=theme.TEXT_PRIMARY,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ft.IconButton(
+                            icon=ft.Icons.ARROW_BACK,
+                            icon_color=theme.TEXT_PRIMARY,
+                            icon_size=20,
+                            tooltip="Back to Layout Review",
+                            on_click=lambda: page.go(f"/review/{state.session.run_id}"),
                         ),
-                        ft.Text(
-                            "Review source page alongside OCR markdown and JSON",
-                            size=11,
-                            color=theme.TEXT_MUTED,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ft.VerticalDivider(width=1, color=theme.BORDER),
+                        ft.IconButton(
+                            icon=ft.Icons.RESTART_ALT,
+                            icon_color=theme.TEXT_PRIMARY,
+                            icon_size=20,
+                            tooltip="Start New Document",
+                            on_click=lambda: page.go("/"),
                         ),
+                        ft.Icon(ft.Icons.CHECK_CIRCLE, color=theme.SUCCESS, size=18),
+                        ft.Column(
+                            [
+                                ft.Text(
+                                    f"{filename} — OCR Complete",
+                                    size=14,
+                                    weight=ft.FontWeight.W_600,
+                                    color=theme.TEXT_PRIMARY,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                                ft.Text(
+                                    "Review source page alongside OCR markdown and JSON",
+                                    size=11,
+                                    color=theme.TEXT_MUTED,
+                                    max_lines=1,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                ),
+                            ],
+                            spacing=0,
+                            expand=True,
+                        ),
+                        _page_navigation(actions, page_label),
                     ],
-                    spacing=0,
-                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=8,
                 ),
-                _page_navigation(actions, page_label),
-                ft.Container(expand=True),
-                _action_group(
-                    "Export OCR",
+                _toolbar_action_row(
                     [
-                        copy_json_button,
-                        download_page_markdown_button,
-                        download_markdown_button,
-                        download_json_button,
-                    ],
+                        _action_group(
+                            "Export OCR",
+                            [
+                                copy_json_button,
+                                download_page_markdown_button,
+                                download_markdown_button,
+                                download_json_button,
+                            ],
+                        ),
+                        _action_group("Page tools", [layout_rerun_button, ocr_rerun_button]),
+                    ]
                 ),
-                _action_group("Page tools", [layout_rerun_button, ocr_rerun_button]),
             ],
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=8,
+            spacing=6,
         ),
-        height=56,
+        height=98,
         padding=ft.Padding.symmetric(horizontal=12),
         bgcolor=theme.BG_SURFACE,
         border=ft.Border.only(bottom=ft.BorderSide(1, theme.BORDER)),
@@ -183,6 +191,15 @@ def _action_group(label: str, controls: list[ft.Control]) -> ft.Container:
         border=ft.Border.all(1, theme.BORDER),
         border_radius=6,
         padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+    )
+
+
+def _toolbar_action_row(groups: list[ft.Control]) -> ft.Row:
+    return ft.Row(
+        groups,
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        scroll=ft.ScrollMode.AUTO,
     )
 
 

@@ -26,6 +26,8 @@ from my_ocr.domain import (
     ReviewPage,
 )
 from my_ocr.domain import OcrRuntimeOptions
+from my_ocr.inference import InferenceClient
+from my_ocr.settings import InferenceProviderConfig
 
 
 class GlmOcrLayoutDetector:
@@ -40,6 +42,15 @@ class GlmOcrLayoutDetector:
 
 
 class GlmOcrEngine:
+    def __init__(
+        self,
+        *,
+        inference_client: InferenceClient | None = None,
+        inference_config: InferenceProviderConfig | None = None,
+    ) -> None:
+        self._inference_client = inference_client
+        self._inference_config = inference_config
+
     def recognize(
         self,
         pages: list[PageRef],
@@ -52,6 +63,8 @@ class GlmOcrEngine:
             run_dir,
             review=review,
             options=options,
+            inference_client=self._inference_client,
+            inference_config=self._inference_config,
         )
 
 
@@ -61,6 +74,8 @@ def run_ocr(
     *,
     review: ReviewLayout | None = None,
     options: OcrRuntimeOptions = OcrRuntimeOptions(),
+    inference_client: InferenceClient | None = None,
+    inference_config: InferenceProviderConfig | None = None,
 ) -> OcrRecognitionResult:
     page_inputs = _runtime_mod.normalize_page_refs(pages)
 
@@ -72,15 +87,19 @@ def run_ocr(
     paths = ProviderScratchPaths.from_run_dir(run_dir)
     paths.ensure_run_dir()
     paths.reset_ocr_artifacts()
-    model, endpoint, num_ctx = _runtime_mod.resolve_ocr_api_client(options)
+    recognizer = _select_ocr_recognizer(
+        options=options,
+        inference_client=inference_client,
+        inference_config=inference_config,
+    )
+    request_model = options.model
     review_pages = {
         page.page_number: page for page in review.pages
     } if review is not None else {}
     page_processor = GlmOcrPageProcessor(
         paths,
-        model=model,
-        endpoint=endpoint,
-        num_ctx=num_ctx,
+        recognizer=recognizer,
+        model=request_model,
     )
 
     page_payloads: list[dict[str, Any]] = []
@@ -152,6 +171,21 @@ def run_ocr(
     )
     artifacts = _runtime_mod.with_cleanup(artifacts, _runtime_mod.ocr_cleanup_paths(paths))
     return OcrRecognitionResult(result=result, artifacts=artifacts)
+
+
+def _select_ocr_recognizer(
+    *,
+    options: OcrRuntimeOptions,
+    inference_client: InferenceClient | None,
+    inference_config: InferenceProviderConfig | None,
+) -> InferenceClient:
+    if inference_client is None or _has_endpoint_override(options.endpoint):
+        return _runtime_mod.build_fallback_inference_client(options, inference_config)
+    return inference_client
+
+
+def _has_endpoint_override(endpoint: str | None) -> bool:
+    return bool(endpoint and endpoint.strip())
 
 
 def prepare_review_artifacts(

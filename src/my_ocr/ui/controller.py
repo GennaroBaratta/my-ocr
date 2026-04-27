@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import functools
+from typing import Any, Protocol
 
 from my_ocr.domain import RunId
 from my_ocr.domain import OcrRuntimeOptions
@@ -15,8 +16,17 @@ class UiActionResult:
     warning: str | None = None
 
 
+class _WorkflowState(Protocol):
+    services: Any
+    layout_profile: str
+    ollama_model: str | None
+    ollama_endpoint: str | None
+
+    def load_run(self, run_id: str) -> None: ...
+
+
 class WorkflowController:
-    def __init__(self, state: object) -> None:
+    def __init__(self, state: _WorkflowState) -> None:
         self._state = state
 
     async def prepare_review(self, input_path: str) -> UiActionResult:
@@ -96,11 +106,11 @@ class WorkflowController:
         return UiActionResult(run_id=str(result.snapshot.run_id), route=f"/results/{run_id}")
 
 
-def _layout_options(state: object) -> OcrRuntimeOptions:
+def _layout_options(state: _WorkflowState) -> OcrRuntimeOptions:
     return OcrRuntimeOptions(layout_profile=state.layout_profile)
 
 
-def _ocr_options(state: object) -> OcrRuntimeOptions:
+def _ocr_options(state: _WorkflowState) -> OcrRuntimeOptions:
     return OcrRuntimeOptions(
         layout_profile=state.layout_profile,
         model=state.ollama_model,

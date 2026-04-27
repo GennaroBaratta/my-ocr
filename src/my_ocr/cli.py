@@ -12,6 +12,7 @@ from my_ocr.extraction.evaluation import (
 )
 from my_ocr.domain import OcrRuntimeOptions, StructuredExtractionOptions
 from my_ocr.bootstrap import (
+    BackendServices,
     DEFAULT_CONFIG_PATH,
     DEFAULT_LAYOUT_DEVICE,
     DEFAULT_RUN_ROOT,
@@ -47,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     rules_parser.set_defaults(func=cmd_extract_rules)
 
     structured_parser = subparsers.add_parser(
-        "extract-glmocr", help="Run direct structured extraction via Ollama"
+        "extract-glmocr", help="Run direct structured extraction via configured inference"
     )
     _add_run_args(structured_parser)
     structured_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH)
@@ -79,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_prepare_review(args: argparse.Namespace) -> Path:
-    services = build_backend_services(args.run_root)
+    services = _backend_services(args)
     result = services.workflow.prepare_review(
         input_path=args.input_path,
         run_id=_optional_run_id(args.run),
@@ -89,13 +90,13 @@ def cmd_prepare_review(args: argparse.Namespace) -> Path:
 
 
 def cmd_run_reviewed_ocr(args: argparse.Namespace) -> Path:
-    services = build_backend_services(args.run_root)
+    services = _backend_services(args)
     result = services.workflow.run_reviewed_ocr(RunId(args.run), options=_ocr_options(args))
     return result.snapshot.run_dir
 
 
 def cmd_ocr(args: argparse.Namespace) -> Path:
-    services = build_backend_services(args.run_root)
+    services = _backend_services(args)
     prepared = services.workflow.prepare_review(
         input_path=args.input_path,
         run_id=_optional_run_id(args.run),
@@ -114,7 +115,7 @@ def cmd_extract_rules(args: argparse.Namespace) -> None:
 
 
 def cmd_extract_glmocr(args: argparse.Namespace) -> None:
-    services = build_backend_services(args.run_root)
+    services = _backend_services(args)
     services.workflow.extract_structured(
         RunId(args.run),
         options=StructuredExtractionOptions(
@@ -137,7 +138,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> Path:
-    services = build_backend_services(args.run_root)
+    services = _backend_services(args)
     result = services.workflow.run_automatic(
         input_path=args.input_path,
         run_id=_optional_run_id(args.run),
@@ -149,6 +150,10 @@ def cmd_run(args: argparse.Namespace) -> Path:
 
 def _optional_run_id(run: str | None) -> RunId | None:
     return RunId(run) if run else None
+
+
+def _backend_services(args: argparse.Namespace) -> BackendServices:
+    return build_backend_services(args.run_root, config_path=args.config)
 
 
 def _layout_options(args: argparse.Namespace) -> OcrRuntimeOptions:

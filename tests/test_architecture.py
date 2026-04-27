@@ -4,10 +4,16 @@ import ast
 from pathlib import Path
 
 from my_ocr.cli import build_parser
+from my_ocr.settings import SUPPORTED_INFERENCE_PROVIDERS, resolve_inference_provider_config
 
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "my_ocr"
 REPO_ROOT = SRC_ROOT.parents[1]
+CONFIG_ROOT = REPO_ROOT / "config"
+README_PATH = REPO_ROOT / "README.md"
+LEGACY_UI_SCREENS_MODULE = "my_ocr.ui." + "screens"
+REMOVED_CONFIG_PATH = "pipeline." + "ocr_api"
+REMOVED_STRUCTURED_MODULE = "ollama" + "_structured"
 USE_CASE_EXPORTS = {
     "DocumentNormalizer",
     "ExtractionUseCase",
@@ -138,6 +144,52 @@ def _defined_class_names(path: Path) -> set[str]:
     return {node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)}
 
 
+def _class_methods(path: Path, class_name: str) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return {
+                child.name: child
+                for child in node.body
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+            }
+    return {}
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        if parent is None:
+            return None
+        return f"{parent}.{node.attr}"
+    return None
+
+
+def _method_call_targets(method: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    targets: set[str] = set()
+    for node in ast.walk(method):
+        if isinstance(node, ast.Call):
+            target = _dotted_name(node.func)
+            if target:
+                targets.add(target)
+    return targets
+
+
+def _protocol_class_names(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    protocol_names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for base in node.bases:
+            base_name = _dotted_name(base)
+            if base_name in {"Protocol", "typing.Protocol"}:
+                protocol_names.add(node.name)
+    return protocol_names
+
+
 def _target_names(target: ast.expr) -> set[str]:
     if isinstance(target, ast.Name):
         return {target.id}
@@ -213,6 +265,15 @@ def _constructor_call_lines(path: Path, name: str) -> list[int]:
     ]
 
 
+def _constructor_calls(path: Path, name: str) -> list[ast.Call]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _call_name(node.func) == name
+    ]
+
+
 def _is_module_or_child(module: str, prefix: str) -> bool:
     return module == prefix or module.startswith(f"{prefix}.")
 
@@ -224,6 +285,10 @@ def _matches_any_prefix(module: str, prefixes: tuple[str, ...]) -> bool:
 def _first_party_imports(path: Path) -> set[str]:
     modules = _imported_modules(path) | _dynamic_import_strings(path)
     return {module for module in modules if _is_module_or_child(module, "my_ocr")}
+
+
+def _keyword_names(call: ast.Call) -> set[str]:
+    return {keyword.arg for keyword in call.keywords if keyword.arg is not None}
 
 
 def _violations(package: str, blocked_prefixes: tuple[str, ...]) -> list[str]:
@@ -286,6 +351,33 @@ def test_cli_subcommands_parse_without_running_workflows() -> None:
     assert parsed_commands == {command: command for command in command_args}
 
 
+def test_config_samples_use_clean_break_inference_surface() -> None:
+    config_paths = sorted(CONFIG_ROOT.glob("*.yml")) + sorted(CONFIG_ROOT.glob("*.yaml"))
+    assert config_paths
+
+    for path in config_paths:
+        source = path.read_text(encoding="utf-8")
+        resolved = resolve_inference_provider_config(path)
+        assert REMOVED_CONFIG_PATH not in source
+        assert resolved.provider in SUPPORTED_INFERENCE_PROVIDERS
+        assert resolved.base_url
+        assert resolved.model
+        assert isinstance(resolved.extra, dict)
+        if resolved.provider == "ollama":
+            assert resolved.num_ctx
+
+
+def test_readme_documents_current_supported_surfaces_only() -> None:
+    readme = README_PATH.read_text(encoding="utf-8")
+
+    assert "pipeline.inference" in readme
+    assert REMOVED_CONFIG_PATH not in readme
+    assert REMOVED_STRUCTURED_MODULE not in readme
+    assert LEGACY_UI_SCREENS_MODULE not in readme
+    assert "does not launch or manage vLLM" in readme
+    assert "No artifact schemas changed" in readme
+
+
 def test_source_tests_and_tools_do_not_import_forbidden_architecture_packages() -> None:
     roots = (REPO_ROOT / "src", REPO_ROOT / "tests", REPO_ROOT / "tools")
     failures: list[str] = []
@@ -345,7 +437,7 @@ def test_ui_feature_modules_import_only_feature_local_or_shared_ui_modules() -> 
                 "my_ocr.workflow",
             )
             for module in sorted(_first_party_imports(path)):
-                if _is_module_or_child(module, "my_ocr.ui.screens"):
+                if _is_module_or_child(module, LEGACY_UI_SCREENS_MODULE):
                     failures.append(
                         f"{path.relative_to(SRC_ROOT)} references legacy screen shim {module}"
                     )
@@ -377,28 +469,15 @@ def test_app_imports_feature_screen_builders_instead_of_screen_modules() -> None
     assert "my_ocr.ui.features.review.build_review_view" in imports
     assert "my_ocr.ui.features.results.build_results_view" in imports
     assert not any(
-        module.startswith("my_ocr.ui.screens.")
+        module.startswith(f"{LEGACY_UI_SCREENS_MODULE}.")
         for module in imports
-        if module != "my_ocr.ui.screens"
+        if module != LEGACY_UI_SCREENS_MODULE
     )
 
 
-def test_legacy_ui_screen_modules_are_compatibility_shims() -> None:
+def test_legacy_ui_screen_modules_are_removed() -> None:
     screen_dir = SRC_ROOT / "ui" / "screens"
-    failures: list[str] = []
-    for path in sorted(screen_dir.glob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if any(isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) for node in ast.walk(tree)):
-            failures.append(f"{path.relative_to(SRC_ROOT)} defines layout/action logic")
-        first_party = _first_party_imports(path)
-        if not first_party or not all(
-            module.startswith("my_ocr.ui.features.") for module in first_party
-        ):
-            failures.append(f"{path.relative_to(SRC_ROOT)} imports non-feature modules: {sorted(first_party)}")
-
-    assert not failures
+    assert not list(screen_dir.glob("*.py"))
 
 
 def test_ocr_and_extraction_do_not_import_ui_or_run_store_details() -> None:
@@ -443,11 +522,38 @@ def test_ocr_and_extraction_may_depend_on_inference_but_not_reverse() -> None:
     )
 
 
+def test_provider_clients_are_isolated_behind_inference_adapters() -> None:
+    bootstrap_imports = _first_party_imports(SRC_ROOT / "bootstrap.py")
+    settings_source = (SRC_ROOT / "settings.py").read_text(encoding="utf-8")
+
+    assert "my_ocr.inference.OllamaClient" in bootstrap_imports
+    assert "my_ocr.inference.OpenAICompatibleClient" in bootstrap_imports
+    assert "SUPPORTED_INFERENCE_PROVIDERS" in settings_source
+    assert "ollama" in settings_source
+    assert "openai_compatible" in settings_source
+    assert not _violations(
+        "inference",
+        ("my_ocr.ocr", "my_ocr.extraction", "my_ocr.ui", "my_ocr.runs"),
+    )
+
+
+def test_default_provider_tests_use_fake_transports_not_live_servers() -> None:
+    failures: list[str] = []
+    for path in sorted((REPO_ROOT / "tests").glob("test_*.py")):
+        for client_name in ("OllamaClient", "OpenAICompatibleClient"):
+            for call in _constructor_calls(path, client_name):
+                if "opener" not in _keyword_names(call):
+                    failures.append(f"{path.relative_to(REPO_ROOT)}:{call.lineno} constructs {client_name}")
+
+    assert not failures
+
+
 def test_ocr_source_selection_stays_in_policy_facade() -> None:
     policy_path = SRC_ROOT / "ocr" / "ocr_policy.py"
     failures: list[str] = []
 
     assert "plan_page_ocr" in _defined_function_names(policy_path)
+    assert "reconstruct_markdown_from_layout" not in _defined_function_names(policy_path)
     for path in _py_files("ocr"):
         if path == policy_path:
             continue
@@ -479,6 +585,51 @@ def test_workflow_imports_only_application_boundary_packages() -> None:
     )
 
 
+def test_document_workflow_public_methods_delegate_to_focused_use_cases() -> None:
+    workflow_path = SRC_ROOT / "workflow.py"
+    methods = _class_methods(workflow_path, "DocumentWorkflow")
+    expected_delegates = {
+        "prepare_review": {"self._review.prepare_review"},
+        "run_reviewed_ocr": {"self._ocr.run_reviewed_ocr"},
+        "save_review_layout": {"self._review.save_review_layout"},
+        "rerun_page_layout": {"self._review.rerun_page_layout"},
+        "rerun_page_ocr": {"self._ocr.rerun_page_ocr"},
+        "extract_rules": {"self._extraction.extract_rules"},
+        "extract_structured": {"self._extraction.extract_structured"},
+        "run_automatic": {
+            "self.prepare_review",
+            "self.run_reviewed_ocr",
+            "self.extract_rules",
+        },
+    }
+
+    assert expected_delegates.keys() <= methods.keys()
+    for method_name, required_targets in expected_delegates.items():
+        assert required_targets <= _method_call_targets(methods[method_name])
+
+
+def test_workflow_and_use_case_protocols_are_centralized_in_ports() -> None:
+    workflow_path = SRC_ROOT / "workflow.py"
+    ports_path = SRC_ROOT / "use_cases" / "ports.py"
+    checked_paths = [workflow_path, *_py_files("use_cases")]
+    misplaced_protocols = {
+        path.relative_to(SRC_ROOT): sorted(_protocol_class_names(path))
+        for path in checked_paths
+        if path != ports_path and _protocol_class_names(path)
+    }
+
+    assert not misplaced_protocols
+    assert {
+        "DocumentNormalizer",
+        "LayoutDetector",
+        "OcrEngine",
+        "RulesExtractor",
+        "RunRepository",
+        "RunWorkspace",
+        "StructuredExtractor",
+    } <= _protocol_class_names(ports_path)
+
+
 def test_use_cases_do_not_import_runtime_or_ui_implementations() -> None:
     assert not _unexpected_imports(
         _py_files("use_cases"),
@@ -495,8 +646,10 @@ def test_use_cases_do_not_import_concrete_filesystem_or_runtime_helpers() -> Non
         "use_cases",
         (
             "my_ocr.ingest",
+            "my_ocr.inference",
             "my_ocr.ocr",
             "my_ocr.runs",
+            "my_ocr.settings",
             "my_ocr.support.filesystem",
             "my_ocr.ui",
         ),
@@ -626,6 +779,15 @@ def test_structured_validation_is_not_part_of_rules_extractor() -> None:
 
     assert "validate_structured_prediction" not in _defined_function_names(rules_path)
     assert "validate_structured_prediction" in _defined_function_names(validation_path)
+
+
+def test_structured_extraction_uses_provider_neutral_inference_boundary() -> None:
+    structured_source = (SRC_ROOT / "extraction" / "structured.py").read_text(encoding="utf-8")
+
+    assert "InferenceRequest" in structured_source
+    assert "StructuredOutputRequest" in structured_source
+    assert "request_structured_response" not in structured_source
+    assert "post_json" not in structured_source
 
 
 def test_source_tests_and_tools_do_not_call_removed_run_transaction_methods() -> None:

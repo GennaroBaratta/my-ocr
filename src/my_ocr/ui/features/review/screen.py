@@ -31,9 +31,20 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     loading_overlay = build_loading_overlay("Running OCR...")
 
-    # ── Mutable content containers ──────────────────────────────────
     content_row = ft.Row(spacing=0, expand=True)
     review_content_width: float | None = None
+
+    def build_content_panes() -> list[ft.Control]:
+        return build_review_panes(
+            state,
+            actions.select_page,
+            actions.select_box,
+            actions.box_changed,
+            actions.box_live_changed,
+            actions.zoom_scale_changed,
+            actions.deselect_box,
+            actions.remove_box,
+        )
 
     def sync_editor_available_width(*, update: bool = False) -> bool:
         if review_content_width is None or len(content_row.controls) < 2:
@@ -72,16 +83,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
     content_row.on_size_change = on_content_row_size_change
 
     def rebuild() -> None:
-        content_row.controls = build_review_panes(
-            state,
-            actions.select_page,
-            actions.select_box,
-            actions.box_changed,
-            actions.box_live_changed,
-            actions.zoom_scale_changed,
-            actions.deselect_box,
-            actions.remove_box,
-        )
+        content_row.controls = build_content_panes()
         sync_editor_available_width()
         page.update()
 
@@ -110,7 +112,6 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
         sync_editor_available_width()
         page.update()
 
-    # ── Toolbar ─────────────────────────────────────────────────────
     page_label = ft.Text(
         review_page_label_text(state),
         size=13,
@@ -283,17 +284,7 @@ def build_review_view(page: ft.Page, state: AppState) -> ft.View:
 
     page.on_keyboard_event = actions.keyboard
 
-    # Initial build
-    content_row.controls = build_review_panes(
-        state,
-        actions.select_page,
-        actions.select_box,
-        actions.box_changed,
-        actions.box_live_changed,
-        actions.zoom_scale_changed,
-        actions.deselect_box,
-        actions.remove_box,
-    )
+    content_row.controls = build_content_panes()
 
     return ft.View(
         route=f"/review/{state.session.run_id}",

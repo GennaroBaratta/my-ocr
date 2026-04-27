@@ -71,10 +71,30 @@ pipeline:
         - footer_image
         - header_image
 
-  ocr_api:
-    api_host: localhost
-    api_port: 11434
-    api_path: /api/generate
+  inference:
+    # Supported providers: ollama, openai_compatible.
+    # OpenAI-compatible/vLLM support is client-only; run that server separately.
+    provider: ollama
+    base_url: http://localhost:11434
     model: glm-ocr-8k:latest
+    # max_tokens maps to Ollama num_predict or OpenAI-compatible max_tokens.
+    # num_ctx is an Ollama context option.
     num_ctx: 8192
-    api_mode: ollama_generate
+    max_tokens:
+    # api_key is normally blank for local Ollama. For OpenAI-compatible providers,
+    # it is sent as an Authorization Bearer token when present.
+    api_key:
+    # extra carries provider-specific request options. OpenAI-compatible providers
+    # merge these into the top-level raw HTTP body and reject deprecated guided_* fields.
+    extra:
+      keep_alive: 15m
+
+    # OpenAI-compatible/vLLM example:
+    # provider: openai_compatible
+    # base_url: http://localhost:8000/v1
+    # model: qwen2-vl
+    # api_key: local-token-if-needed
+    # max_tokens: 1024
+    # num_ctx:
+    # extra:
+    #   top_k: 5

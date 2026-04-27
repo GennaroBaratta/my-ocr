@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from my_ocr.domain import LayoutBlock, PageRef, ReviewPage
-from my_ocr.ocr.ocr_policy import extract_layout_blocks, normalize_bbox
+from my_ocr.ocr.bbox import normalize_bbox
+from my_ocr.ocr.layout_blocks import extract_layout_blocks
 
 
 def get_image_size(page_path: str | Path) -> tuple[int, int]:
@@ -86,7 +87,7 @@ def review_blocks_from_provider_layout(
                 label=str(block.get("label", "unknown")),
                 content=str(block.get("content", "")),
                 confidence=_coerce_confidence(block.get("confidence")),
-                bbox=bbox,
+                bbox=[float(value) for value in bbox],
             )
         )
     return blocks

@@ -30,6 +30,16 @@ def recent_run_summary(record: RecentRunRecordLike) -> RecentRunSummary:
     )
 
 
+def status_for_snapshot(snapshot: RunSnapshot) -> str:
+    if snapshot.manifest.status.extraction != "pending":
+        return "extracted"
+    if snapshot.manifest.status.ocr == "complete":
+        return "ocr_complete"
+    if snapshot.review_layout is not None:
+        return "review_ready"
+    return "pending"
+
+
 def pages_from_snapshot(snapshot: RunSnapshot) -> list[PageData]:
     boxes_by_page = _boxes_from_review(snapshot.review_layout)
     pages: list[PageData] = []

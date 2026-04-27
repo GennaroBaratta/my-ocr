@@ -7,14 +7,15 @@ from typing import Any, cast
 
 import pytest
 
-from my_ocr.runs.invalidation import extraction_outputs_cleared_policy
-from my_ocr.runs.invalidation import ocr_result_updated_policy
-from my_ocr.runs.invalidation import review_layout_updated_policy
+from my_ocr.use_cases.invalidation import extraction_outputs_cleared_policy
+from my_ocr.use_cases.invalidation import ocr_result_updated_policy
+from my_ocr.use_cases.invalidation import review_layout_updated_policy
 from my_ocr.runs.store import FilesystemRunStore
 from my_ocr.domain import (
     ArtifactCopy,
     LayoutDetectionResult,
     OcrRecognitionResult,
+    OcrRuntimeOptions,
     ProviderArtifacts,
 )
 from my_ocr.domain import (
@@ -215,6 +216,42 @@ def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path
     assert "_raw_body" not in json.dumps(result.snapshot.extraction)
 
 
+def test_structured_schema_echo_prefers_rules_canonical_fallback(tmp_path: Path) -> None:
+    store, run_id = _prepared_run(tmp_path)
+    workflow = _workflow(
+        store,
+        ocr_engine=FakeOcrEngine(prefix="Example University"),
+        structured_extractor=SchemaEchoStructuredExtractor(),
+    )
+    workflow.run_reviewed_ocr(RunId(run_id))
+    workflow.extract_rules(RunId(run_id))
+
+    result = workflow.extract_structured(RunId(run_id))
+
+    assert result.snapshot.extraction["canonical"] == {"document_type": "rules"}
+    assert result.snapshot.extraction["structured_meta"]["canonical_source"] == "rules"
+    assert result.snapshot.extraction["structured_meta"]["validation"]["ok"] is False
+
+
+def test_structured_hallucinated_fields_prefer_rules_canonical_fallback(
+    tmp_path: Path,
+) -> None:
+    store, run_id = _prepared_run(tmp_path)
+    workflow = _workflow(
+        store,
+        ocr_engine=FakeOcrEngine(prefix="Report by Ada Lovelace"),
+        structured_extractor=HallucinatedStructuredExtractor(),
+    )
+    workflow.run_reviewed_ocr(RunId(run_id))
+    workflow.extract_rules(RunId(run_id))
+
+    result = workflow.extract_structured(RunId(run_id))
+
+    assert result.snapshot.extraction["canonical"] == {"document_type": "rules"}
+    validation_reasons = result.snapshot.extraction["structured_meta"]["validation"]["reasons"]
+    assert "institution value 'Missing University' not found in OCR text" in validation_reasons
+
+
 def test_implicit_run_ids_do_not_collide(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = FilesystemRunStore(tmp_path / "runs")
     monkeypatch.setattr("my_ocr.runs.store._timestamp_id", lambda: "20260425T120000Z")
@@ -263,6 +300,30 @@ def test_run_automatic_prepares_ocr_and_extracts_rules(tmp_path: Path) -> None:
     assert json.loads((run_dir / "extraction" / "rules.json").read_text()) == {
         "document_type": "rules"
     }
+
+
+def test_ocr_workflow_paths_accept_nullable_runtime_overrides(tmp_path: Path) -> None:
+    nullable_options = OcrRuntimeOptions(model=None, endpoint=None)
+    store, run_id = _prepared_run(tmp_path)
+    ocr_engine = RecordingOcrEngine()
+    workflow = _workflow(store, ocr_engine=ocr_engine)
+
+    workflow.run_reviewed_ocr(RunId(run_id), options=nullable_options)
+    workflow.rerun_page_ocr(RunId(run_id), page_number=1, options=nullable_options)
+
+    automatic_store = FilesystemRunStore(tmp_path / "automatic-runs")
+    automatic_engine = RecordingOcrEngine()
+    _workflow(automatic_store, ocr_engine=automatic_engine).run_automatic(
+        str(_image(tmp_path / "automatic.png")),
+        run_id=RunId("automatic"),
+        layout_options=nullable_options,
+        ocr_options=nullable_options,
+    )
+
+    assert [options.model for options in ocr_engine.options_seen] == [None, None]
+    assert [options.endpoint for options in ocr_engine.options_seen] == [None, None]
+    assert [options.model for options in automatic_engine.options_seen] == [None]
+    assert [options.endpoint for options in automatic_engine.options_seen] == [None]
 
 
 def test_discard_workspace_removes_work_dir_without_publishing(tmp_path: Path) -> None:
@@ -377,6 +438,23 @@ class FakeOcrEngine:
         )
 
 
+class RecordingOcrEngine(FakeOcrEngine):
+    def __init__(self, *, prefix: str = "#") -> None:
+        super().__init__(prefix=prefix)
+        self.options_seen: list[OcrRuntimeOptions] = []
+
+    def recognize(
+        self,
+        pages: list[PageRef],
+        run_dir: Path,
+        review: ReviewLayout | None,
+        options: object,
+    ) -> OcrRecognitionResult:
+        assert isinstance(options, OcrRuntimeOptions)
+        self.options_seen.append(options)
+        return super().recognize(pages, run_dir, review, options)
+
+
 class FakeRulesExtractor:
     def __call__(self, _markdown: str) -> dict[str, Any]:
         return {"document_type": "rules"}
@@ -391,12 +469,60 @@ class FakeStructuredExtractor:
         options: StructuredExtractionOptions,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         assert markdown_text
+        assert options is not None
         return (
             {"document_type": "structured"},
             {
                 "model": options.model,
                 "_raw_body": {"response": '{"document_type":"structured"}'},
             },
+        )
+
+
+class SchemaEchoStructuredExtractor:
+    def extract(
+        self,
+        _pages: list[PageRef],
+        *,
+        markdown_text: str | None,
+        options: StructuredExtractionOptions,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        assert markdown_text
+        assert options is not None
+        return (
+            {
+                "document_type": "report",
+                "title": "Required: document_type, title, authors, institution",
+                "authors": [],
+                "institution": "",
+                "date": "",
+                "language": "en",
+                "summary_line": "Required: return valid JSON only",
+            },
+            {"_raw_body": {"provider": "fake"}},
+        )
+
+
+class HallucinatedStructuredExtractor:
+    def extract(
+        self,
+        _pages: list[PageRef],
+        *,
+        markdown_text: str | None,
+        options: StructuredExtractionOptions,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        assert markdown_text
+        return (
+            {
+                "document_type": "report",
+                "title": "Report",
+                "authors": ["Ada Lovelace"],
+                "institution": "Missing University",
+                "date": "",
+                "language": "en",
+                "summary_line": "Report by Ada Lovelace",
+            },
+            {"_raw_body": {"provider": "fake"}},
         )
 
 
@@ -412,6 +538,7 @@ def _workflow(
     *,
     layout_detector: FakeLayoutDetector | None = None,
     ocr_engine: FakeOcrEngine | None = None,
+    structured_extractor: object | None = None,
 ) -> DocumentWorkflow:
     return DocumentWorkflow(
         cast(Any, store),
@@ -419,7 +546,7 @@ def _workflow(
         cast(Any, layout_detector or FakeLayoutDetector()),
         cast(Any, ocr_engine or FakeOcrEngine()),
         cast(Any, FakeRulesExtractor()),
-        cast(Any, FakeStructuredExtractor()),
+        cast(Any, structured_extractor or FakeStructuredExtractor()),
     )
 
 

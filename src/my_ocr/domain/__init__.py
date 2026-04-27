@@ -21,7 +21,8 @@ from my_ocr.domain.options import OcrRuntimeOptions, StructuredExtractionOptions
 from my_ocr.domain.results import LayoutDetectionResult, OcrRecognitionResult, RunSnapshot
 from my_ocr.domain.results import WorkflowResult
 from my_ocr.domain.review import LayoutBlock, ReviewLayout, ReviewPage
-from my_ocr.domain.run import LayoutDiagnostics, PageRef, RunDiagnostics, RunId, RunInput
+from my_ocr.domain.run import InvalidatedArtifactGroup, LayoutDiagnostics, PageRef
+from my_ocr.domain.run import RunDiagnostics, RunId, RunInput, RunInvalidationPlan
 from my_ocr.domain.run import RunManifest, RunStatus
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "DocumentFields",
     "FIELD_NAMES",
     "JSON_SCHEMA",
+    "InvalidatedArtifactGroup",
     "LayoutBlock",
     "LayoutDetectionFailed",
     "LayoutDetectionResult",
@@ -50,6 +52,7 @@ __all__ = [
     "RunDiagnostics",
     "RunId",
     "RunInput",
+    "RunInvalidationPlan",
     "RunManifest",
     "RunNotFound",
     "RunSnapshot",

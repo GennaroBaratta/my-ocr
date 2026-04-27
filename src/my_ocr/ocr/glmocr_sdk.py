@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,52 @@ def load_glmocr_parser() -> type:
         pipeline_result_cls=result_module.PipelineResult,
         result_formatter_cls=formatter_module.ResultFormatter,
         crop_image_region=image_utils_module.crop_image_region,
+    )
+
+
+def _copy_ocr_api_config(ocr_api: Any, updates: dict[str, Any]) -> Any:
+    if hasattr(ocr_api, "model_copy"):
+        return ocr_api.model_copy(update=updates)
+
+    cloned = copy.copy(ocr_api)
+    for field_name, value in updates.items():
+        setattr(cloned, field_name, value)
+    return cloned
+
+
+def _resolve_sdk_ocr_api_config(config_model: Any, config_path: str | Path) -> Any:
+    pipeline = getattr(config_model, "pipeline", None)
+    ocr_api = getattr(pipeline, "ocr_api", None)
+    if ocr_api is None:
+        raise RuntimeError(
+            "GLM-OCR SDK config is missing pipeline.ocr_api; cannot start SDK OCR client"
+        )
+
+    inference_marker = getattr(pipeline, "inference", None)
+    if inference_marker is None:
+        return ocr_api
+
+    from my_ocr.settings import resolve_inference_provider_config
+
+    inference_config = resolve_inference_provider_config(config_path)
+    if inference_config.provider == "ollama":
+        api_mode = "ollama_generate"
+    elif inference_config.provider == "openai_compatible":
+        api_mode = "openai"
+    else:
+        raise RuntimeError(
+            f"Unsupported inference provider for GLM-OCR SDK OCR: {inference_config.provider}"
+        )
+
+    return _copy_ocr_api_config(
+        ocr_api,
+        {
+            "api_mode": api_mode,
+            "api_url": inference_config.endpoint,
+            "model": inference_config.model,
+            "api_key": inference_config.api_key,
+            "request_timeout": inference_config.timeout_seconds,
+        },
     )
 
 
@@ -186,7 +233,9 @@ def build_lazy_glmocr_parser(
 
         def _ensure_ocr_started(self) -> None:
             if self._ocr_client is None:
-                self._ocr_client = ocr_client_cls(self._config_model.pipeline.ocr_api)
+                self._ocr_client = ocr_client_cls(
+                    _resolve_sdk_ocr_api_config(self._config_model, self._config_path)
+                )
             ocr_client = self._ocr_client
             if ocr_client is None:
                 raise RuntimeError("OCR client failed to initialize")

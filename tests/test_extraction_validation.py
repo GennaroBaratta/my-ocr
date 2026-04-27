@@ -37,3 +37,21 @@ def test_validate_structured_prediction_checks_values_against_source_text() -> N
     assert validation["ok"] is False
     assert "institution value 'Missing University' not found in OCR text" in validation["reasons"]
     assert "date value '2026-04-25' not found in OCR text" in validation["reasons"]
+
+
+def test_validate_structured_prediction_rejects_schema_echo() -> None:
+    validation = validate_structured_prediction(
+        {
+            "document_type": "report",
+            "title": "Required: document_type, title, authors, institution, date, language",
+            "authors": [],
+            "institution": "",
+            "date": "",
+            "language": "en",
+            "summary_line": "Required: return valid JSON only",
+        }
+    )
+
+    assert validation["ok"] is False
+    assert "title appears to echo extraction schema or instructions" in validation["reasons"]
+    assert "summary_line appears to echo extraction schema or instructions" in validation["reasons"]

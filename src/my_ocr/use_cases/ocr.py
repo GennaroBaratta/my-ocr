@@ -11,6 +11,7 @@ from my_ocr.domain import (
     WorkflowResult,
 )
 from .ports import OcrEngine, RunRepository
+from .invalidation import ocr_result_updated_policy
 
 
 class OcrUseCase:
@@ -32,9 +33,12 @@ class OcrUseCase:
             )
         except Exception as exc:
             raise OcrFailed(f"OCR failed: {exc}") from exc
-        snapshot = self._run_store.write_ocr_result_and_invalidate_extraction(
-            run_id, recognition.result, recognition.artifacts
+        plan = ocr_result_updated_policy(
+            snapshot.manifest,
+            diagnostics=recognition.result.diagnostics,
         )
+        self._run_store.write_ocr_result(run_id, recognition.result, recognition.artifacts)
+        snapshot = self._run_store.apply_invalidation_plan(run_id, plan)
         return WorkflowResult(snapshot=snapshot)
 
     def rerun_page_ocr(
@@ -56,9 +60,12 @@ class OcrUseCase:
         if not recognition.result.pages:
             raise MissingPage(f"OCR returned no page {page_number}")
         result = _replace_ocr_page(snapshot, page_number, recognition.result.pages[0])
-        snapshot = self._run_store.write_ocr_result_and_invalidate_extraction(
-            run_id, result, recognition.artifacts
+        plan = ocr_result_updated_policy(
+            snapshot.manifest,
+            diagnostics=result.diagnostics,
         )
+        self._run_store.write_ocr_result(run_id, result, recognition.artifacts)
+        snapshot = self._run_store.apply_invalidation_plan(run_id, plan)
         return WorkflowResult(snapshot=snapshot)
 
 

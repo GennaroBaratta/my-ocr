@@ -21,6 +21,10 @@ def validate_structured_prediction(
     normalized_scalars = [
         collapse_whitespace(str(prediction.get(name, ""))).lower() for name in scalar_field_names
     ]
+    for field_name, field_value in zip(scalar_field_names, normalized_scalars, strict=True):
+        if _looks_like_schema_echo(field_value):
+            reasons.append(f"{field_name} appears to echo extraction schema or instructions")
+
     repeated_placeholder = {value for value in normalized_scalars if value}
     if len(repeated_placeholder) == 1:
         placeholder = next(iter(repeated_placeholder))
@@ -62,3 +66,21 @@ def _text_present_in_source(value: str, normalized_source_text: str) -> bool:
     if not normalized_value:
         return True
     return normalized_value in normalized_source_text
+
+
+def _looks_like_schema_echo(value: str) -> bool:
+    if not value:
+        return False
+    if value.startswith("required:"):
+        return True
+    schema_tokens = {
+        "document_type",
+        "document type",
+        "authors",
+        "institution",
+        "summary_line",
+        "summary line",
+        "json schema",
+    }
+    matched_tokens = sum(1 for token in schema_tokens if token in value)
+    return matched_tokens >= 2

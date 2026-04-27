@@ -3,28 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .bbox import (
-    BOX_PADDING_X as BOX_PADDING_X,
-    BOX_PADDING_Y as BOX_PADDING_Y,
-    _sort_key_for_block,
-    detect_bbox_coord_space,
-    normalize_bbox,
-    pad_bbox,
+from .text_cleanup import (
+    clean_recognized_text,
+    has_meaningful_text,
+    reconstruct_markdown_from_layout,
 )
-from .labels import (
-    FORMULA_LABELS as FORMULA_LABELS,
-    FORMULA_RECOGNITION_PROMPT as FORMULA_RECOGNITION_PROMPT,
-    OCR_LABELS,
-    TABLE_LABELS as TABLE_LABELS,
-    TABLE_RECOGNITION_PROMPT as TABLE_RECOGNITION_PROMPT,
-    TEXT_LABELS,
-    TEXT_RECOGNITION_PROMPT as TEXT_RECOGNITION_PROMPT,
-    resolve_ocr_task,
-    resolve_prompt_for_label,
-)
+from .labels import OCR_LABELS, TEXT_LABELS
 from .layout_blocks import extract_layout_blocks
-from .text_cleanup import clean_recognized_text, has_meaningful_text
-from my_ocr.support.text import normalize_table_html as normalize_table_html
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,61 +106,3 @@ def plan_page_ocr(
         layout_markdown=layout_markdown,
         primary_source=primary_source,
     )
-
-
-def reconstruct_markdown_from_layout(page_json: Any) -> str:
-    ordered_blocks: list[tuple[tuple[float, float, float, float], str]] = []
-    for block in extract_layout_blocks(page_json):
-        if block.get("label") not in OCR_LABELS:
-            continue
-        text = clean_recognized_text(str(block.get("content", "")))
-        if not text:
-            continue
-        ordered_blocks.append((_sort_key_for_block(block.get("bbox_2d")), text))
-
-    # Layout-only recovery is a best-effort salvage path, so bbox ordering is kept simple.
-    ordered_blocks.sort(key=lambda item: item[0])
-    return "\n\n".join(text for _, text in ordered_blocks)
-
-
-def build_ocr_chunks(
-    page_json: Any,
-    *,
-    width: int,
-    height: int,
-    coord_space: str | None = None,
-) -> list[dict[str, Any]]:
-    chunks: list[dict[str, Any]] = []
-    blocks = extract_layout_blocks(page_json)
-    effective_coord_space = coord_space
-    if effective_coord_space in (None, "unknown"):
-        effective_coord_space = detect_bbox_coord_space(blocks, width=width, height=height)
-    for block_offset, block in enumerate(blocks):
-        label = str(block.get("label", ""))
-        bbox = normalize_bbox(
-            block.get("bbox_2d"), width, height, coord_space=effective_coord_space
-        )
-        if label in OCR_LABELS and bbox is not None:
-            source_index = block.get("index")
-            if source_index is None:
-                source_index = block_offset
-            chunks.append(
-                {
-                    "bbox": pad_bbox(bbox, width, height),
-                    "labels": [label],
-                    "task": resolve_ocr_task(label),
-                    "prompt": resolve_prompt_for_label(label),
-                    "source_indices": [safe_int(source_index, block_offset)],
-                    "unpadded_bbox": bbox,
-                }
-            )
-
-    chunks.sort(key=lambda chunk: (chunk["unpadded_bbox"][1], chunk["unpadded_bbox"][0]))
-    return chunks
-
-
-def safe_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default

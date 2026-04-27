@@ -43,6 +43,7 @@ class PageData:
 class UiSessionState:
     recent_runs: list[RecentRunSummary] = field(default_factory=list)
     run_id: str | None = None
+    run_status: str = "pending"
     current_input_path: str = ""
     pages: list[PageData] = field(default_factory=list)
     current_page_index: int = 0

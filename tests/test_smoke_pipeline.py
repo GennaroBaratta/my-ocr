@@ -26,18 +26,19 @@ def test_cli_run_uses_v3_workflow_service(tmp_path: Path, monkeypatch) -> None:
         )
         return SimpleNamespace(snapshot=RunSnapshot(run_dir=run_dir, manifest=manifest))
 
-    monkeypatch.setattr(
-        cli,
-        "build_backend_services",
-        lambda run_root: SimpleNamespace(
-            workflow=SimpleNamespace(run_automatic=fake_run_automatic)
-        ),
-    )
+    def fake_build_backend_services(run_root, *, config_path):
+        captured["run_root"] = run_root
+        captured["config_path"] = config_path
+        return SimpleNamespace(workflow=SimpleNamespace(run_automatic=fake_run_automatic))
+
+    monkeypatch.setattr(cli, "build_backend_services", fake_build_backend_services)
 
     cli.main(["run", "input.pdf", "--run", "demo001", "--run-root", str(tmp_path / "runs")])
 
     assert captured["input_path"] == "input.pdf"
     assert str(captured["run_id"]) == "demo001"
+    assert captured["run_root"] == str(tmp_path / "runs")
+    assert captured["config_path"] == "config/local.yaml"
 
 
 def test_cli_prepare_review_command_is_available() -> None:

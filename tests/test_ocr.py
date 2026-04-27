@@ -17,17 +17,18 @@ from my_ocr.ocr.glmocr import (
 )
 from my_ocr.ocr.glmocr import run_ocr as _run_ocr
 from my_ocr.ocr.fallback import run_crop_fallback_for_page
-from my_ocr.ocr.ocr_policy import (
+from my_ocr.ocr.labels import (
     FORMULA_RECOGNITION_PROMPT,
     TABLE_RECOGNITION_PROMPT,
     TEXT_RECOGNITION_PROMPT,
-    build_ocr_chunks,
-    normalize_table_html,
-    normalize_bbox,
 )
+from my_ocr.ocr.bbox import build_ocr_chunks, normalize_bbox
+from my_ocr.ocr.text_cleanup import normalize_table_html
 from my_ocr.support.text import normalize_table_html as support_normalize_table_html
 from my_ocr.domain import LayoutBlock, PageRef, ReviewLayout, ReviewPage
 from my_ocr.domain import OcrRuntimeOptions
+from my_ocr.inference import InferenceRequest, InferenceResponse
+from my_ocr.settings import InferenceProviderConfig
 
 
 class FakeResult:
@@ -84,6 +85,36 @@ class FakeGlmOcr:
             json_result={"doc": Path(input_path).name},
             artifact_stem=Path(input_path).stem,
         )
+
+
+class FakeRecognizer:
+    def __init__(self, responses: Sequence[str] | None = None) -> None:
+        self.requests: list[InferenceRequest] = []
+        self._responses = list(responses or ["recognized text"])
+
+    def generate(self, request: InferenceRequest) -> InferenceResponse:
+        self.requests.append(request)
+        text = self._responses.pop(0) if self._responses else ""
+        return InferenceResponse(text=text, raw={"fake": True}, model=request.model)
+
+
+class FakePipelineResult:
+    def __init__(
+        self,
+        *,
+        json_result,
+        markdown_result,
+        original_images,
+        image_files=None,
+        raw_json_result=None,
+        layout_vis_images=None,
+    ) -> None:
+        self.json_result = json_result
+        self.markdown_result = markdown_result
+        self.original_images = original_images
+        self.image_files = image_files
+        self.raw_json_result = raw_json_result
+        self.layout_vis_images = layout_vis_images
 
 
 def _patch_parser_cls(monkeypatch: pytest.MonkeyPatch, parser_cls: type) -> None:
@@ -147,6 +178,8 @@ def run_ocr(
     num_ctx: int | None = None,
     review_layout: ReviewLayout | None = None,
     page_numbers=None,
+    inference_client=None,
+    inference_config: InferenceProviderConfig | None = None,
 ):
     result = _run_ocr(
         _page_refs(page_paths, page_numbers=page_numbers),
@@ -160,6 +193,8 @@ def run_ocr(
             endpoint=endpoint,
             num_ctx=num_ctx,
         ),
+        inference_client=inference_client,
+        inference_config=inference_config,
     )
     pages = []
     for page in result.result.pages:
@@ -429,6 +464,405 @@ def test_lazy_parser_wrapper_returns_first_pipeline_result_only() -> None:
         result = parser.parse("/tmp/page-0001.png")
 
     assert result.markdown_result == "# first result"
+
+
+def test_lazy_parser_uses_pipeline_inference_for_sdk_ocr_config(tmp_path) -> None:
+    config_path = tmp_path / "local.yaml"
+    config_path.write_text(
+        "pipeline:\n"
+        "  inference:\n"
+        "    provider: ollama\n"
+        "    model: glm-ocr:test\n"
+        "    base_url: http://ollama.example:1234\n"
+        "    api_key: ollama-test-key\n"
+        "    num_ctx: 4096\n"
+        "    max_tokens: 256\n"
+        "    timeout_seconds: 180\n"
+        "    extra:\n"
+        "      keep_alive: 5m\n",
+        encoding="utf-8",
+    )
+
+    class FakeOcrApiConfig:
+        def __init__(self) -> None:
+            self.api_mode = "legacy"
+            self.api_url = "http://legacy.example"
+            self.model = "legacy-model"
+            self.api_key = "legacy-key"
+            self.request_timeout = 17
+            self.max_tokens = 256
+            self.num_ctx = 4096
+            self.extra = {"keep_alive": "legacy"}
+            self.model_copy_updates: list[dict[str, object]] = []
+
+        def model_copy(self, update: dict[str, object]):
+            self.model_copy_updates.append(update)
+            cloned = FakeOcrApiConfig()
+            cloned.api_mode = self.api_mode
+            cloned.api_url = self.api_url
+            cloned.model = self.model
+            cloned.api_key = self.api_key
+            cloned.request_timeout = self.request_timeout
+            cloned.max_tokens = self.max_tokens
+            cloned.num_ctx = self.num_ctx
+            cloned.extra = self.extra
+            for field_name, value in update.items():
+                setattr(cloned, field_name, value)
+            return cloned
+
+    class FakePageLoader:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def iter_pages_with_unit_indices(self, source: str):
+            _ = source
+            image = import_module("PIL.Image").new("RGB", (10, 10), color="white")
+            yield image, 0
+
+        def build_request_from_image(self, image, task_type: str = "text") -> dict[str, object]:
+            _ = image
+            return {"messages": [{"role": "user", "content": [{"type": "text", "text": task_type}]}]}
+
+    class FakeLayoutDetector:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, images, **kwargs):
+            _ = (images, kwargs)
+            return [[{"index": 0, "label": "text", "bbox_2d": [0, 0, 1000, 1000], "task_type": "text"}]], {}
+
+    class FakeOcrClient:
+        def __init__(self, config: object) -> None:
+            captured_configs.append(config)
+            self.config = config
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, request_data: dict[str, object]):
+            _ = request_data
+            return {"choices": [{"message": {"content": "recognized text"}}]}, 200
+
+    class FakeResultFormatter:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def process(self, grouped_results, cropped_images=None, image_prefix: str = "cropped"):
+            _ = (cropped_images, image_prefix)
+            return grouped_results, "# lazy doc", {}
+
+    ocr_api = FakeOcrApiConfig()
+    captured_configs: list[object] = []
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
+        load_config=lambda *_args, **_kwargs: SimpleNamespace(
+            pipeline=SimpleNamespace(
+                page_loader="page-loader",
+                layout=SimpleNamespace(use_polygon=False),
+                inference=SimpleNamespace(provider="ollama"),
+                ocr_api=ocr_api,
+                result_formatter="formatter",
+            )
+        ),
+        page_loader_cls=FakePageLoader,
+        layout_detector_cls=FakeLayoutDetector,
+        ocr_client_cls=FakeOcrClient,
+        pipeline_result_cls=FakePipelineResult,
+        result_formatter_cls=FakeResultFormatter,
+        crop_image_region=lambda image, bbox_2d, polygon=None: image,
+    )
+
+    with parser_cls(config_path=str(config_path), layout_device="cuda") as parser:
+        parser.parse("/tmp/page-0001.png")
+
+    assert len(captured_configs) == 1
+    sdk_config = captured_configs[0]
+    assert getattr(sdk_config, "api_mode") == "ollama_generate"
+    assert getattr(sdk_config, "api_url") == "http://ollama.example:1234/api/generate"
+    assert getattr(sdk_config, "model") == "glm-ocr:test"
+    assert getattr(sdk_config, "api_key") == "ollama-test-key"
+    assert getattr(sdk_config, "request_timeout") == 180
+    assert ocr_api.model_copy_updates == [
+        {
+            "api_mode": "ollama_generate",
+            "api_url": "http://ollama.example:1234/api/generate",
+            "model": "glm-ocr:test",
+            "api_key": "ollama-test-key",
+            "request_timeout": 180,
+        }
+    ]
+    assert ocr_api.api_mode == "legacy"
+    assert ocr_api.api_url == "http://legacy.example"
+    assert ocr_api.model == "legacy-model"
+    assert ocr_api.api_key == "legacy-key"
+    assert ocr_api.request_timeout == 17
+
+
+def test_lazy_parser_maps_openai_compatible_inference_for_sdk_ocr_config(tmp_path) -> None:
+    config_path = tmp_path / "local.yaml"
+    config_path.write_text(
+        "pipeline:\n"
+        "  inference:\n"
+        "    provider: openai_compatible\n"
+        "    model: qwen2-vl\n"
+        "    base_url: http://vllm.example:8000/v1\n"
+        "    api_key: test-key\n"
+        "    timeout_seconds: 120\n",
+        encoding="utf-8",
+    )
+
+    class FakeOcrApiConfig:
+        def __init__(self) -> None:
+            self.api_mode = "legacy"
+            self.api_url = "http://legacy.example"
+            self.model = "legacy-model"
+            self.api_key = None
+            self.request_timeout = 17
+
+    class FakePageLoader:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def iter_pages_with_unit_indices(self, source: str):
+            _ = source
+            image = import_module("PIL.Image").new("RGB", (10, 10), color="white")
+            yield image, 0
+
+        def build_request_from_image(self, image, task_type: str = "text") -> dict[str, object]:
+            _ = image
+            return {"messages": [{"role": "user", "content": [{"type": "text", "text": task_type}]}]}
+
+    class FakeLayoutDetector:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, images, **kwargs):
+            _ = (images, kwargs)
+            return [[{"index": 0, "label": "text", "bbox_2d": [0, 0, 1000, 1000], "task_type": "text"}]], {}
+
+    captured_configs: list[object] = []
+
+    class FakeOcrClient:
+        def __init__(self, config: object) -> None:
+            captured_configs.append(config)
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, request_data: dict[str, object]):
+            _ = request_data
+            return {"choices": [{"message": {"content": "recognized text"}}]}, 200
+
+    class FakeResultFormatter:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def process(self, grouped_results, cropped_images=None, image_prefix: str = "cropped"):
+            _ = (cropped_images, image_prefix)
+            return grouped_results, "# lazy doc", {}
+
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
+        load_config=lambda *_args, **_kwargs: SimpleNamespace(
+            pipeline=SimpleNamespace(
+                page_loader="page-loader",
+                layout=SimpleNamespace(use_polygon=False),
+                inference=SimpleNamespace(provider="openai_compatible"),
+                ocr_api=FakeOcrApiConfig(),
+                result_formatter="formatter",
+            )
+        ),
+        page_loader_cls=FakePageLoader,
+        layout_detector_cls=FakeLayoutDetector,
+        ocr_client_cls=FakeOcrClient,
+        pipeline_result_cls=FakePipelineResult,
+        result_formatter_cls=FakeResultFormatter,
+        crop_image_region=lambda image, bbox_2d, polygon=None: image,
+    )
+
+    with parser_cls(config_path=str(config_path), layout_device="cuda") as parser:
+        parser.parse("/tmp/page-0001.png")
+
+    assert len(captured_configs) == 1
+    sdk_config = captured_configs[0]
+    assert getattr(sdk_config, "api_mode") == "openai"
+    assert getattr(sdk_config, "api_url") == "http://vllm.example:8000/v1/chat/completions"
+    assert getattr(sdk_config, "model") == "qwen2-vl"
+    assert getattr(sdk_config, "api_key") == "test-key"
+    assert getattr(sdk_config, "request_timeout") == 120
+
+
+def test_lazy_parser_preserves_legacy_ocr_api_without_inference() -> None:
+    class FakePageLoader:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def iter_pages_with_unit_indices(self, source: str):
+            _ = source
+            image = import_module("PIL.Image").new("RGB", (10, 10), color="white")
+            yield image, 0
+
+        def build_request_from_image(self, image, task_type: str = "text") -> dict[str, object]:
+            _ = image
+            return {"messages": [{"role": "user", "content": [{"type": "text", "text": task_type}]}]}
+
+    class FakeLayoutDetector:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, images, **kwargs):
+            _ = (images, kwargs)
+            return [[{"index": 0, "label": "text", "bbox_2d": [0, 0, 1000, 1000], "task_type": "text"}]], {}
+
+    captured_configs: list[object] = []
+
+    class FakeOcrClient:
+        def __init__(self, config: object) -> None:
+            captured_configs.append(config)
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, request_data: dict[str, object]):
+            _ = request_data
+            return {"choices": [{"message": {"content": "recognized text"}}]}, 200
+
+    class FakeResultFormatter:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def process(self, grouped_results, cropped_images=None, image_prefix: str = "cropped"):
+            _ = (cropped_images, image_prefix)
+            return grouped_results, "# lazy doc", {}
+
+    legacy_ocr_api = SimpleNamespace(api_mode="legacy", api_url="http://legacy.example", model="legacy-model")
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
+        load_config=lambda *_args, **_kwargs: SimpleNamespace(
+            pipeline=SimpleNamespace(
+                page_loader="page-loader",
+                layout=SimpleNamespace(use_polygon=False),
+                ocr_api=legacy_ocr_api,
+                result_formatter="formatter",
+            )
+        ),
+        page_loader_cls=FakePageLoader,
+        layout_detector_cls=FakeLayoutDetector,
+        ocr_client_cls=FakeOcrClient,
+        pipeline_result_cls=FakePipelineResult,
+        result_formatter_cls=FakeResultFormatter,
+        crop_image_region=lambda image, bbox_2d, polygon=None: image,
+    )
+
+    with parser_cls(config_path="config/local.yaml", layout_device="cuda") as parser:
+        parser.parse("/tmp/page-0001.png")
+
+    assert len(captured_configs) == 1
+    assert captured_configs[0] is legacy_ocr_api
+
+
+def test_lazy_parser_raises_clear_error_without_sdk_ocr_api() -> None:
+    called: list[str] = []
+
+    class FakePageLoader:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def iter_pages_with_unit_indices(self, source: str):
+            _ = source
+            image = import_module("PIL.Image").new("RGB", (10, 10), color="white")
+            yield image, 0
+
+        def build_request_from_image(self, image, task_type: str = "text") -> dict[str, object]:
+            _ = image
+            return {"messages": [{"role": "user", "content": [{"type": "text", "text": task_type}]}]}
+
+    class FakeLayoutDetector:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def process(self, images, **kwargs):
+            _ = (images, kwargs)
+            return [[{"index": 0, "label": "text", "bbox_2d": [0, 0, 1000, 1000], "task_type": "text"}]], {}
+
+    class FakeOcrClient:
+        def __init__(self, config: object) -> None:
+            called.append("init")
+
+        def start(self) -> None:
+            called.append("start")
+
+        def stop(self) -> None:
+            called.append("stop")
+
+        def process(self, request_data: dict[str, object]):
+            called.append("process")
+            _ = request_data
+            return {"choices": [{"message": {"content": "recognized text"}}]}, 200
+
+    class FakeResultFormatter:
+        def __init__(self, config: object) -> None:
+            self.config = config
+
+        def process(self, grouped_results, cropped_images=None, image_prefix: str = "cropped"):
+            _ = (grouped_results, cropped_images, image_prefix)
+            return grouped_results, "# lazy doc", {}
+
+    parser_cls = ocr_parser.build_lazy_glmocr_parser(
+        load_config=lambda *_args, **_kwargs: SimpleNamespace(
+            pipeline=SimpleNamespace(
+                page_loader="page-loader",
+                layout=SimpleNamespace(use_polygon=False),
+                inference=SimpleNamespace(provider="ollama"),
+                result_formatter="formatter",
+            )
+        ),
+        page_loader_cls=FakePageLoader,
+        layout_detector_cls=FakeLayoutDetector,
+        ocr_client_cls=FakeOcrClient,
+        pipeline_result_cls=FakePipelineResult,
+        result_formatter_cls=FakeResultFormatter,
+        crop_image_region=lambda image, bbox_2d, polygon=None: image,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="GLM-OCR SDK config is missing pipeline.ocr_api; cannot start SDK OCR client",
+    ):
+        with parser_cls(config_path="config/local.yaml", layout_device="cuda") as parser:
+            parser.parse("/tmp/page-0001.png")
+
+    assert called == []
 
 
 def test_lazy_parser_wrapper_layout_only_does_not_start_ocr() -> None:
@@ -813,24 +1247,31 @@ def test_run_ocr_falls_back_to_full_page_when_sdk_and_layout_are_empty(
                 json_result={},
                 saved_model_json={
                     "blocks": [
-                        {"label": "text", "content": "", "bbox_2d": [0, 0, 10, 10], "index": 1}
+                        {"label": "text", "content": "", "bbox_2d": [0, 0, 1000, 1000], "index": 1}
                     ]
                 },
                 artifact_stem=Path(input_path).stem,
             )
 
+    recognizer = FakeRecognizer(["", "Full page text"])
     _patch_parser_cls(monkeypatch, EmptyGlmOcr)
-    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", lambda **_kwargs: ("", []))
-    monkeypatch.setattr(
-        ocr_fallback, "recognize_full_page", lambda *_args, **_kwargs: "Full page text"
-    )
     source = tmp_path / "page-0001.png"
     _write_test_image(source)
 
-    result = run_ocr([str(source)], tmp_path / "run")
+    result = run_ocr([str(source)], tmp_path / "run", inference_client=recognizer)
 
     assert result["markdown"] == "Full page text"
     assert result["json"]["pages"][0]["markdown_source"] == "full_page_fallback"
+    assert [request.prompt for request in recognizer.requests] == [
+        TEXT_RECOGNITION_PROMPT,
+        TEXT_RECOGNITION_PROMPT,
+    ]
+    recorded_paths = [request.images[0].path for request in recognizer.requests]
+    assert all(path is not None for path in recorded_paths)
+    assert [Path(path).name for path in recorded_paths if path is not None] == [
+        "chunk-0001.png",
+        "page-0001.png",
+    ]
     assert result["json"]["pages"][0]["assessment"] == {
         "use_fallback": True,
         "reason": "empty_markdown_and_empty_layout_text",
@@ -970,16 +1411,11 @@ def test_normalize_table_html_uses_plain_rows() -> None:
     assert normalize_table_html is support_normalize_table_html
 
 
-def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path, monkeypatch) -> None:
+def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path) -> None:
     page = tmp_path / "page-0001.png"
     _write_test_image(page)
-
-    monkeypatch.setattr(
-        ocr_fallback,
-        "recognize_text_image",
-        lambda *_args, **_kwargs: (
-            "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
-        ),
+    recognizer = FakeRecognizer(
+        ["<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"]
     )
 
     page_markdown, chunks = run_crop_fallback_for_page(
@@ -987,13 +1423,17 @@ def test_crop_fallback_normalizes_table_chunks_and_page_markdown(tmp_path, monke
         page_json={"blocks": [{"label": "table", "bbox_2d": [0, 0, 10, 10], "index": 1}]},
         coord_space="pixel",
         page_fallback_dir=tmp_path / "fallback",
+        recognizer=recognizer,
         model="m",
-        endpoint="e",
-        num_ctx=1,
     )
 
     assert page_markdown == "A | B\n1 | 2"
     assert chunks[0]["text"] == "A | B\n1 | 2"
+    assert recognizer.requests[0].prompt == TABLE_RECOGNITION_PROMPT
+    assert recognizer.requests[0].model == "m"
+    crop_image_path = recognizer.requests[0].images[0].path
+    assert crop_image_path is not None
+    assert Path(crop_image_path).name == "chunk-0001.png"
     assert (tmp_path / "fallback" / "chunk-0001.txt").read_text(encoding="utf-8") == "A | B\n1 | 2"
 
 
@@ -1079,18 +1519,16 @@ def test_run_ocr_runtime_options_override_config_for_fallback_client(
 
     def fake_crop_fallback(**kwargs):
         captured["model"] = kwargs["model"]
-        captured["endpoint"] = kwargs["endpoint"]
-        captured["num_ctx"] = kwargs["num_ctx"]
+        captured["recognizer"] = kwargs["recognizer"]
         return "manual client text", []
 
     config = tmp_path / "local.yaml"
     config.write_text(
         "pipeline:\n"
-        "  ocr_api:\n"
+        "  inference:\n"
+        "    provider: ollama\n"
         "    model: config-model\n"
-        "    api_host: config.example\n"
-        "    api_port: 1234\n"
-        "    api_path: /api/generate\n"
+        "    base_url: http://config.example:1234\n"
         "    num_ctx: 2048\n",
         encoding="utf-8",
     )
@@ -1109,12 +1547,314 @@ def test_run_ocr_runtime_options_override_config_for_fallback_client(
         review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
     )
 
-    assert captured == {
-        "model": "manual-model",
-        "endpoint": "http://manual.example/api/generate",
-        "num_ctx": 4096,
-    }
+    recognizer = captured["recognizer"]
+    assert captured["model"] == "manual-model"
+    assert getattr(recognizer, "_endpoint") == "http://manual.example/api/generate"
+    assert getattr(recognizer, "_model") == "manual-model"
+    assert getattr(recognizer, "_default_num_ctx") == 4096
     assert result["markdown"] == "manual client text"
+
+
+def test_run_ocr_reuses_injected_client_when_endpoint_is_not_overridden(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    injected = FakeRecognizer()
+
+    def fail_client_rebuild(*_args, **_kwargs):
+        raise AssertionError("injected client should be reused without endpoint override")
+
+    def fake_crop_fallback(**kwargs):
+        captured["recognizer"] = kwargs["recognizer"]
+        return "injected client text", []
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "build_fallback_inference_client",
+        fail_client_rebuild,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        inference_client=injected,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert captured["recognizer"] is injected
+    assert result["markdown"] == "injected client text"
+
+
+@pytest.mark.parametrize("blank_endpoint", ["", "   \t  "])
+def test_run_ocr_reuses_injected_client_when_endpoint_is_blank(
+    tmp_path,
+    monkeypatch,
+    blank_endpoint: str,
+) -> None:
+    captured: dict[str, object] = {}
+    injected = FakeRecognizer()
+
+    def fail_client_rebuild(*_args, **_kwargs):
+        raise AssertionError("blank endpoint should not rebuild the injected client")
+
+    def fake_crop_fallback(**kwargs):
+        captured["recognizer"] = kwargs["recognizer"]
+        return "blank endpoint text", []
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "build_fallback_inference_client",
+        fail_client_rebuild,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        endpoint=blank_endpoint,
+        inference_client=injected,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert captured["recognizer"] is injected
+    assert result["markdown"] == "blank endpoint text"
+
+
+def test_run_ocr_model_only_override_reuses_injected_client_and_request_model(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    injected = FakeRecognizer(["model-only text"])
+
+    def fail_client_rebuild(*_args, **_kwargs):
+        raise AssertionError("model-only override should not rebuild the injected client")
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "build_fallback_inference_client",
+        fail_client_rebuild,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        model="explicit-model",
+        inference_client=injected,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert result["markdown"] == "model-only text"
+    assert [request.model for request in injected.requests] == ["explicit-model"]
+
+
+def test_run_ocr_endpoint_override_rebuilds_client_despite_injected_client(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_recognizers: list[object] = []
+    injected = FakeRecognizer()
+    rebuilt = FakeRecognizer()
+    build_calls: list[tuple[OcrRuntimeOptions, InferenceProviderConfig | None]] = []
+    config = InferenceProviderConfig(
+        provider="ollama",
+        model="configured-model",
+        base_url="http://configured.example",
+        endpoint="http://configured.example/api/generate",
+        num_ctx=2048,
+    )
+
+    def fake_build_fallback_client(options, inference_config=None):
+        build_calls.append((options, inference_config))
+        return rebuilt
+
+    def fake_crop_fallback(**kwargs):
+        captured_recognizers.append(kwargs["recognizer"])
+        return "rebuilt endpoint text", []
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "build_fallback_inference_client",
+        fake_build_fallback_client,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        endpoint="http://manual.example/api/generate",
+        inference_client=injected,
+        inference_config=config,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert len(build_calls) == 1
+    assert build_calls[0][0].endpoint == "http://manual.example/api/generate"
+    assert build_calls[0][1] is config
+    assert captured_recognizers == [rebuilt]
+    assert result["markdown"] == "rebuilt endpoint text"
+
+
+def test_run_ocr_endpoint_only_override_preserves_configured_model(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    built_clients: list[object] = []
+
+    class FakeOpenAICompatibleClient:
+        def __init__(
+            self,
+            *,
+            endpoint: str,
+            model: str,
+            timeout: int,
+            api_key: str | None,
+            default_max_tokens: int | None,
+            default_extra: dict[str, object],
+        ) -> None:
+            self.endpoint = endpoint
+            self.model = model
+            self.timeout = timeout
+            self.api_key = api_key
+            self.default_max_tokens = default_max_tokens
+            self.default_extra = default_extra
+            built_clients.append(self)
+
+        def generate(self, request: InferenceRequest) -> InferenceResponse:
+            return InferenceResponse(text="", raw={}, model=request.model or self.model)
+
+    config = InferenceProviderConfig(
+        provider="openai_compatible",
+        model="qwen2-vl-configured",
+        base_url="http://configured.example/v1",
+        endpoint="http://configured.example/v1/chat/completions",
+        api_key="secret-token",
+        max_tokens=1024,
+        extra={"top_k": 5},
+        timeout_seconds=123,
+    )
+
+    def fake_crop_fallback(**kwargs):
+        captured["recognizer"] = kwargs["recognizer"]
+        captured["request_model"] = kwargs["model"]
+        return "configured model text", []
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "OpenAICompatibleClient",
+        FakeOpenAICompatibleClient,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    source = tmp_path / "page-0001.png"
+    _write_test_image(source)
+
+    result = run_ocr(
+        [str(source)],
+        tmp_path / "run",
+        endpoint="http://manual.example/v1/chat/completions",
+        inference_client=FakeRecognizer(),
+        inference_config=config,
+        review_layout=_review_layout(blocks=[_review_block(content="", bbox=[2, 3, 9, 10])]),
+    )
+
+    assert len(built_clients) == 1
+    rebuilt = built_clients[0]
+    assert captured["recognizer"] is rebuilt
+    assert captured["request_model"] is None
+    assert getattr(rebuilt, "endpoint") == "http://manual.example/v1/chat/completions"
+    assert getattr(rebuilt, "model") == "qwen2-vl-configured"
+    assert getattr(rebuilt, "api_key") == "secret-token"
+    assert getattr(rebuilt, "default_max_tokens") == 1024
+    assert getattr(rebuilt, "default_extra") == {"top_k": 5}
+    assert getattr(rebuilt, "timeout") == 123
+    assert result["markdown"] == "configured model text"
+
+
+def test_run_ocr_endpoint_override_rebuilds_client_once_for_multi_page_run(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_recognizers: list[object] = []
+    injected = FakeRecognizer()
+    rebuilt = FakeRecognizer()
+    build_calls: list[OcrRuntimeOptions] = []
+    config = InferenceProviderConfig(
+        provider="ollama",
+        model="configured-model",
+        base_url="http://configured.example",
+        endpoint="http://configured.example/api/generate",
+        num_ctx=2048,
+    )
+
+    def fake_build_fallback_client(options, inference_config=None):
+        assert inference_config is config
+        build_calls.append(options)
+        return rebuilt
+
+    def fake_crop_fallback(**kwargs):
+        captured_recognizers.append(kwargs["recognizer"])
+        return f"text for {Path(kwargs['page_path']).stem}", []
+
+    monkeypatch.setattr(
+        ocr._runtime_mod,
+        "build_fallback_inference_client",
+        fake_build_fallback_client,
+    )
+    monkeypatch.setattr(ocr_parser, "load_glmocr_parser", lambda: None)
+    monkeypatch.setattr(ocr_fallback, "run_crop_fallback_for_page", fake_crop_fallback)
+    page_one = tmp_path / "page-0001.png"
+    page_two = tmp_path / "page-0002.png"
+    _write_test_image(page_one)
+    _write_test_image(page_two)
+    review_layout = ReviewLayout(
+        pages=[
+            ReviewPage(
+                page_number=1,
+                image_path="pages/page-0001.png",
+                image_width=100,
+                image_height=100,
+                coord_space="pixel",
+                blocks=[_review_block(block_id="p1-b0", content="", bbox=[2, 3, 9, 10])],
+            ),
+            ReviewPage(
+                page_number=2,
+                image_path="pages/page-0002.png",
+                image_width=100,
+                image_height=100,
+                coord_space="pixel",
+                blocks=[_review_block(block_id="p2-b0", content="", bbox=[2, 3, 9, 10])],
+            ),
+        ],
+        status="reviewed",
+    )
+
+    result = run_ocr(
+        [str(page_one), str(page_two)],
+        tmp_path / "run",
+        endpoint="http://manual.example/api/generate",
+        inference_client=injected,
+        inference_config=config,
+        review_layout=review_layout,
+    )
+
+    assert len(build_calls) == 1
+    assert captured_recognizers == [rebuilt, rebuilt]
+    assert result["markdown"] == "text for page-0001\n\ntext for page-0002"
 
 
 def test_run_ocr_uses_nonempty_review_layout_as_canonical_layout(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -7,6 +8,19 @@ from pydantic import ConfigDict, Field, RootModel, field_serializer, field_valid
 
 from my_ocr.domain._base import SCHEMA_VERSION, StrictModel, utc_now_iso
 from my_ocr.domain._base import validate_run_relative_path
+
+InvalidatedArtifactGroup = Literal["ocr", "extraction"]
+
+
+@dataclass(frozen=True, slots=True)
+class RunInvalidationPlan:
+    artifact_groups: tuple[InvalidatedArtifactGroup, ...]
+    status: RunStatus | None = None
+    diagnostics: RunDiagnostics | None = None
+
+    @property
+    def updates_manifest(self) -> bool:
+        return self.status is not None or self.diagnostics is not None
 
 
 class RunId(RootModel[str]):

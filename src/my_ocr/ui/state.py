@@ -4,22 +4,20 @@ from __future__ import annotations
 
 from my_ocr.bootstrap import (
     BackendServices,
-    DEFAULT_OLLAMA_ENDPOINT,
-    DEFAULT_OLLAMA_MODEL,
     DEFAULT_RUN_ROOT,
     build_backend_services,
 )
 
-from .mappers import pages_from_snapshot, recent_run_summary
+from .mappers import pages_from_snapshot, recent_run_summary, status_for_snapshot
 from .session import BoundingBox, PageData, UiSessionState
-from .zoom import ZOOM_MODE_MANUAL, clamp_zoom
+from .zoom import ZOOM_MODE_FIT_WIDTH, ZOOM_MODE_MANUAL, clamp_zoom
 
 
 class AppState:
     def __init__(self, services: BackendServices | None = None) -> None:
         self.session = UiSessionState()
-        self.ollama_endpoint: str = DEFAULT_OLLAMA_ENDPOINT
-        self.ollama_model: str = DEFAULT_OLLAMA_MODEL
+        self.ollama_endpoint: str | None = None
+        self.ollama_model: str | None = None
         self._run_root: str = DEFAULT_RUN_ROOT
         self.services = services or build_backend_services(self._run_root)
         self.layout_profile: str = "auto"
@@ -48,6 +46,7 @@ class AppState:
     def load_run(self, run_id: str) -> None:
         snapshot = self.services.read_model.load_run(run_id)
         self.session.run_id = str(snapshot.run_id)
+        self.session.run_status = status_for_snapshot(snapshot)
         self.session.current_input_path = snapshot.manifest.input.path
         self.session.pages = pages_from_snapshot(snapshot)
         self.session.ocr_markdown = snapshot.ocr_result.markdown if snapshot.ocr_result else ""
@@ -95,6 +94,21 @@ class AppState:
         self.session.zoom_mode = mode if mode is not None else ZOOM_MODE_MANUAL
         self.session.zoom_level = clamp_zoom(level)
         return self.session.zoom_level
+
+    def set_manual_zoom(self, level: float) -> float:
+        return self.set_zoom_level(level, mode=ZOOM_MODE_MANUAL)
+
+    def set_fit_width_zoom(self) -> None:
+        self.session.zoom_mode = ZOOM_MODE_FIT_WIDTH
+
+    def set_zoom_available_width(self, width: float | None) -> None:
+        self.session.zoom_fit_width = max(0.0, float(width or 0))
+
+    def set_active_result_tab(self, index: int) -> None:
+        self.session.active_result_tab = max(0, index)
+
+    def needs_review_before_results(self) -> bool:
+        return self.session.run_status == "review_ready"
 
     def layout_profile_warning(self) -> str | None:
         return self.session.layout_warning

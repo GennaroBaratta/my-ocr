@@ -56,6 +56,10 @@ def create_app(page: ft.Page) -> None:
             run_id = route.split("/results/", 1)[1]
             if state.session.run_id != run_id:
                 state.load_run(run_id)
+            resolved_route = resolved_route_for_loaded_run(route, state)
+            if resolved_route != route:
+                page.go(resolved_route)
+                return
             page.views.append(build_results_view(page, state, file_picker))
 
         page.update()
@@ -73,3 +77,9 @@ def create_app(page: ft.Page) -> None:
     page.on_view_pop = view_pop
     render_route()
 
+
+def resolved_route_for_loaded_run(route: str, state: AppState) -> str:
+    if route.startswith("/results/") and state.needs_review_before_results():
+        run_id = route.split("/results/", 1)[1]
+        return f"/review/{run_id}"
+    return route

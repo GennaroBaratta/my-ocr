@@ -13,6 +13,7 @@ from my_ocr.domain import (
     ProviderArtifacts,
     ReviewLayout,
     RunId,
+    RunInvalidationPlan,
     RunSnapshot,
     StructuredExtractionOptions,
 )
@@ -42,19 +43,22 @@ class RunRepository(Protocol):
 
     def open_run(self, run_id: RunId | str) -> RunSnapshot: ...
 
-    def save_review_layout_and_invalidate_downstream(
+    def save_review_layout(
         self,
         run_id: RunId | str,
         layout: ReviewLayout,
         artifacts: ProviderArtifacts,
-        diagnostics: LayoutDiagnostics | None = None,
     ) -> RunSnapshot: ...
 
-    def write_ocr_result_and_invalidate_extraction(
+    def write_ocr_result(
         self,
         run_id: RunId | str,
         result: OcrRunResult,
         artifacts: ProviderArtifacts,
+    ) -> RunSnapshot: ...
+
+    def apply_invalidation_plan(
+        self, run_id: RunId | str, plan: RunInvalidationPlan
     ) -> RunSnapshot: ...
 
     def write_rules_extraction(

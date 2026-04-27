@@ -7,17 +7,17 @@ from my_ocr.domain import (
     StructuredExtractionOptions,
     WorkflowResult,
 )
-from .use_cases import (
+from .use_cases.extraction import ExtractionUseCase
+from .use_cases.ocr import OcrUseCase
+from .use_cases.ports import (
     DocumentNormalizer,
-    ExtractionUseCase,
     LayoutDetector,
     OcrEngine,
-    OcrUseCase,
-    ReviewUseCase,
     RulesExtractor,
     RunRepository,
     StructuredExtractor,
 )
+from .use_cases.review import ReviewUseCase
 
 
 class DocumentWorkflow:

@@ -1,20 +1,13 @@
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from my_ocr.settings import (
-    DEFAULT_OLLAMA_ENDPOINT,
-    DEFAULT_OLLAMA_KEEP_ALIVE,
-    DEFAULT_OLLAMA_MODEL,
-    DEFAULT_OLLAMA_NUM_CTX,
-)
-from my_ocr.inference.ollama import encode_image_file, post_json
-from my_ocr.ocr.ocr_policy import (
-    TEXT_RECOGNITION_PROMPT,
-    build_ocr_chunks,
-    clean_recognized_text,
-)
+from my_ocr.inference import InferenceClient, InferenceImage, InferenceRequest
+from my_ocr.ocr.bbox import build_ocr_chunks
+from my_ocr.ocr.labels import TEXT_RECOGNITION_PROMPT
+from my_ocr.ocr.text_cleanup import clean_recognized_text
 from my_ocr.support.filesystem import ensure_dir, write_text
 
 
@@ -24,17 +17,16 @@ def run_crop_fallback_for_page(
     page_json: Any,
     coord_space: str | None = None,
     page_fallback_dir: str | Path,
-    model: str = DEFAULT_OLLAMA_MODEL,
-    endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    num_ctx: int = DEFAULT_OLLAMA_NUM_CTX,
+    recognizer: InferenceClient,
+    model: str | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     try:
-        from PIL import Image
+        image_module = import_module("PIL.Image")
     except ImportError as exc:
         raise RuntimeError("Crop-based OCR fallback requires Pillow.") from exc
 
     page_fallback_dir = ensure_dir(page_fallback_dir)
-    with Image.open(page_path) as image:
+    with image_module.open(page_path) as image:
         width, height = image.size
         chunks = build_ocr_chunks(page_json, width=width, height=height, coord_space=coord_space)
 
@@ -48,10 +40,9 @@ def run_crop_fallback_for_page(
             try:
                 recognized_text = recognize_text_image(
                     crop_path,
+                    recognizer=recognizer,
                     prompt=chunk["prompt"],
                     model=model,
-                    endpoint=endpoint,
-                    num_ctx=num_ctx,
                 )
             except RuntimeError as exc:
                 recognized_text = ""
@@ -85,31 +76,24 @@ def run_crop_fallback_for_page(
 def recognize_full_page(
     page_path: str | Path,
     *,
-    model: str = DEFAULT_OLLAMA_MODEL,
-    endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    num_ctx: int = DEFAULT_OLLAMA_NUM_CTX,
+    recognizer: InferenceClient,
+    model: str | None = None,
 ) -> str:
-    return recognize_text_image(page_path, model=model, endpoint=endpoint, num_ctx=num_ctx)
+    return recognize_text_image(page_path, recognizer=recognizer, model=model)
 
 
 def recognize_text_image(
     image_path: str | Path,
     *,
+    recognizer: InferenceClient,
     prompt: str = TEXT_RECOGNITION_PROMPT,
-    model: str = DEFAULT_OLLAMA_MODEL,
-    endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-    num_ctx: int = DEFAULT_OLLAMA_NUM_CTX,
+    model: str | None = None,
 ) -> str:
-    body = post_json(
-        endpoint=endpoint,
-        payload={
-            "model": model,
-            "prompt": prompt,
-            "images": [encode_image_file(image_path)],
-            "stream": False,
-            "keep_alive": DEFAULT_OLLAMA_KEEP_ALIVE,
-            "options": {"num_ctx": num_ctx},
-        },
-        error_prefix="Ollama crop OCR",
+    response = recognizer.generate(
+        InferenceRequest(
+            prompt=prompt,
+            model=model,
+            images=(InferenceImage(path=image_path),),
+        )
     )
-    return clean_recognized_text(str(body.get("response", "")))
+    return clean_recognized_text(response.text)
