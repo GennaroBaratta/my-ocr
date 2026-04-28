@@ -12,11 +12,14 @@ authors = [
   { name = "Gennaro Baratta" }
 ]
 dependencies = [
+  "glmocr>=0.1.5",
   "Pillow>=12.2.0",
   "pydantic>=2.12.0",
+  "pymupdf>=1.27.2.2",
   "PyYAML>=6.0.3",
   "torch>=2.11.0",
   "torchvision>=0.26.0",
+  "transformers>=5.5.4",
 ]
 
 [dependency-groups]
