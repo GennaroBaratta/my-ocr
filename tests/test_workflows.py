@@ -216,7 +216,19 @@ def test_extract_rules_and_structured_write_v3_extraction_outputs(tmp_path: Path
     assert "_raw_body" not in json.dumps(result.snapshot.extraction)
 
 
-def test_structured_schema_echo_prefers_rules_canonical_fallback(tmp_path: Path) -> None:
+def test_extract_structured_runs_rules_first_when_missing(tmp_path: Path) -> None:
+    store, run_id = _prepared_run(tmp_path)
+    workflow = _workflow(store)
+    workflow.run_reviewed_ocr(RunId(run_id))
+
+    result = workflow.extract_structured(RunId(run_id))
+
+    assert result.snapshot.extraction["rules"] == {"document_type": "rules"}
+    assert result.snapshot.extraction["structured"] == {"document_type": "structured"}
+    assert result.snapshot.extraction["canonical"] == {"document_type": "structured"}
+
+
+def test_structured_schema_echo_uses_rules_canonical_output(tmp_path: Path) -> None:
     store, run_id = _prepared_run(tmp_path)
     workflow = _workflow(
         store,
@@ -224,16 +236,16 @@ def test_structured_schema_echo_prefers_rules_canonical_fallback(tmp_path: Path)
         structured_extractor=SchemaEchoStructuredExtractor(),
     )
     workflow.run_reviewed_ocr(RunId(run_id))
-    workflow.extract_rules(RunId(run_id))
 
     result = workflow.extract_structured(RunId(run_id))
 
+    assert result.snapshot.extraction["rules"] == {"document_type": "rules"}
     assert result.snapshot.extraction["canonical"] == {"document_type": "rules"}
     assert result.snapshot.extraction["structured_meta"]["canonical_source"] == "rules"
     assert result.snapshot.extraction["structured_meta"]["validation"]["ok"] is False
 
 
-def test_structured_hallucinated_fields_prefer_rules_canonical_fallback(
+def test_structured_hallucinated_fields_use_rules_canonical_output(
     tmp_path: Path,
 ) -> None:
     store, run_id = _prepared_run(tmp_path)
@@ -243,10 +255,10 @@ def test_structured_hallucinated_fields_prefer_rules_canonical_fallback(
         structured_extractor=HallucinatedStructuredExtractor(),
     )
     workflow.run_reviewed_ocr(RunId(run_id))
-    workflow.extract_rules(RunId(run_id))
 
     result = workflow.extract_structured(RunId(run_id))
 
+    assert result.snapshot.extraction["rules"] == {"document_type": "rules"}
     assert result.snapshot.extraction["canonical"] == {"document_type": "rules"}
     validation_reasons = result.snapshot.extraction["structured_meta"]["validation"]["reasons"]
     assert "institution value 'Missing University' not found in OCR text" in validation_reasons
