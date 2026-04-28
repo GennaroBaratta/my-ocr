@@ -10,7 +10,6 @@ from my_ocr.settings import (
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
     resolve_inference_provider_config,
-    resolve_ocr_api_client,
 )
 
 
@@ -127,44 +126,6 @@ def test_resolve_inference_provider_config_keeps_configured_model_over_caller_de
 
     assert config.model == model
     assert config.endpoint == expected_endpoint
-
-
-def test_resolve_ocr_api_client_uses_ollama_inference_config_for_legacy_callers(
-    tmp_path,
-) -> None:
-    config_path = tmp_path / "local.yaml"
-    config_path.write_text(
-        "pipeline:\n"
-        "  inference:\n"
-        "    provider: ollama\n"
-        "    model: glm-ocr:test\n"
-        "    base_url: http://ollama.example:1234\n"
-        "    num_ctx: 4096\n",
-        encoding="utf-8",
-    )
-
-    model, endpoint, num_ctx = resolve_ocr_api_client(config_path)
-
-    assert model == "glm-ocr:test"
-    assert endpoint == "http://ollama.example:1234/api/generate"
-    assert num_ctx == 4096
-
-
-def test_resolve_ocr_api_client_rejects_openai_compatible_for_legacy_callers(
-    tmp_path,
-) -> None:
-    config_path = tmp_path / "local.yaml"
-    config_path.write_text(
-        "pipeline:\n"
-        "  inference:\n"
-        "    provider: openai_compatible\n"
-        "    model: qwen2-vl\n"
-        "    base_url: http://vllm.example:8000/v1\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(RuntimeError, match="provider-neutral OCR execution"):
-        resolve_ocr_api_client(config_path)
 
 
 def test_resolve_inference_provider_config_raises_on_invalid_yaml(tmp_path) -> None:

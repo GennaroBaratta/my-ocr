@@ -51,25 +51,6 @@ def resolve_inference_provider_config(
     )
 
 
-def resolve_ocr_api_client(
-    config_path: str | Path,
-    *,
-    default_model: str = DEFAULT_OLLAMA_MODEL,
-    default_endpoint: str = DEFAULT_OLLAMA_ENDPOINT,
-) -> tuple[str, str, int]:
-    path = Path(config_path)
-    if not path.exists():
-        return default_model, default_endpoint, DEFAULT_OLLAMA_NUM_CTX
-
-    config = resolve_inference_provider_config(path, default_model=default_model)
-    if config.provider != "ollama":
-        raise RuntimeError(
-            "Current OCR fallback callers require pipeline.inference.provider: ollama; "
-            "provider-neutral OCR execution is available through bootstrap services."
-        )
-    return config.model, config.endpoint, config.num_ctx or DEFAULT_OLLAMA_NUM_CTX
-
-
 def _load_inference_config(path: Path) -> dict[str, Any]:
     try:
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -185,5 +166,4 @@ __all__ = [
     "InferenceProviderConfig",
     "SUPPORTED_INFERENCE_PROVIDERS",
     "resolve_inference_provider_config",
-    "resolve_ocr_api_client",
 ]

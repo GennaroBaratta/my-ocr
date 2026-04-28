@@ -13,7 +13,6 @@ from my_ocr.inference import InferenceClient, OllamaClient, OpenAICompatibleClie
 from my_ocr.ocr.bbox import detect_bbox_coord_space
 from my_ocr.ocr.scratch_paths import ProviderScratchPaths
 from my_ocr.settings import InferenceProviderConfig, resolve_inference_provider_config
-from my_ocr.settings import resolve_ocr_api_client as _resolve_configured_ocr_api_client
 
 
 def emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
@@ -21,17 +20,6 @@ def emit_layout_profile_warning(diagnostics: dict[str, Any]) -> None:
     if not isinstance(warning, str) or not warning.strip():
         return
     print(f"Warning: {warning}", file=sys.stderr)
-
-
-def resolve_ocr_api_client(options: OcrRuntimeOptions) -> tuple[str, str, int]:
-    config_model, config_endpoint, config_num_ctx = _resolve_configured_ocr_api_client(
-        options.config_path
-    )
-    return (
-        options.model or config_model,
-        options.endpoint or config_endpoint,
-        options.num_ctx if options.num_ctx is not None else config_num_ctx,
-    )
 
 
 def build_fallback_inference_client(
